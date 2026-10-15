@@ -24,24 +24,33 @@ class SyncService:
     @staticmethod
     def upsert_items(db: Session, items_data: list[dict]):
         for item_data in items_data:
-            # 1. Buscamos el ID de la categoría local usando el ID de categoría de Loyverse
+            # 1. Búsqueda segura del Category ID
             local_category_id = None
-            if item_data.get("category_id"):
-                category = db.query(Category).filter(Category.loyverse_id == item_data["category_id"]).first()
+            loyverse_cat_id = item_data.get("category_id")
+            if loyverse_cat_id:
+                category = db.query(Category).filter(Category.loyverse_id == loyverse_cat_id).first()
                 if category:
                     local_category_id = category.id
 
-            # 2. Sentencia de inserción del Item
+            # 2. Extracción adaptativa del Nombre
+            item_name = item_data.get("item_name") or item_data.get("name") or "Sin nombre"
+
+            # 3. Extracción adaptativa del Precio
+            price = 0.0
+            if "price" in item_data:
+                price = item_data["price"]
+            elif "variants" in item_data and len(item_data["variants"]) > 0:
+                # El secreto: Loyverse usa 'default_price'
+                price = item_data["variants"][0].get("default_price", 0.0)
+
+            # 4. Sentencia de inserción UPSERT
             stmt = insert(Item).values(
                 loyverse_id=item_data["id"],
-                name=item_data["item_name"],
-                price=item_data["price"], # Ajusta estos campos según la respuesta exacta de Loyverse
+                name=item_name,
+                price=price,
                 category_id=local_category_id
             )
             
-            # 3. Estrategia UPSERT para Items
-            # ¡IMPORTANTE!: Solo actualizamos datos maestros. 
-            # NO incluimos description, image_url, is_sold_out ni is_featured para que no se borren en cada sincronización.
             stmt = stmt.on_conflict_do_update(
                 index_elements=['loyverse_id'],
                 set_=dict(
