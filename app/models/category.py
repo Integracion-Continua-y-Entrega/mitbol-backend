@@ -1,8 +1,8 @@
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import relationship
-from app.db.database import Base
+from app.models.legacy_base import LegacyBase
 
-class Category(Base):
+class Category(LegacyBase):
     __tablename__ = "categories"
 
     id = Column(Integer, primary_key=True, index=True)

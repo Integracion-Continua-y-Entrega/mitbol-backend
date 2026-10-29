@@ -1,0 +1,501 @@
+{
+  "verification_date": "2026-10-29",
+  "authorized_revision": "20261029_0001",
+  "prototype": {
+    "database": "mitbol_db",
+    "unchanged": true,
+    "tables": {
+      "categories": {
+        "rows_before": 2,
+        "rows_after": 2,
+        "content_identical": true,
+        "schema_identical": true
+      },
+      "items": {
+        "rows_before": 2,
+        "rows_after": 2,
+        "content_identical": true,
+        "schema_identical": true
+      }
+    }
+  },
+  "development": {
+    "database": "mitbol_dev",
+    "revision": "20261029_0001",
+    "verification_read_only": "on",
+    "tables": {
+      "alembic_version": {
+        "rows": 1,
+        "columns": [
+          {
+            "name": "version_num",
+            "type": "VARCHAR(32)",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          }
+        ],
+        "primary_key": {
+          "constrained_columns": [
+            "version_num"
+          ],
+          "name": "alembic_version_pkc",
+          "comment": null,
+          "dialect_options": {
+            "postgresql_include": []
+          }
+        },
+        "foreign_keys": [],
+        "unique_constraints": []
+      },
+      "Products": {
+        "rows": 0,
+        "columns": [
+          {
+            "name": "product_id",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": "nextval('\"public\".\"Products_product_id_seq\"'::regclass)",
+            "autoincrement": true,
+            "comment": null
+          },
+          {
+            "name": "loyverse_id",
+            "type": "VARCHAR(100)",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "name",
+            "type": "VARCHAR(150)",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "description",
+            "type": "TEXT",
+            "nullable": true,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "is_available",
+            "type": "BOOLEAN",
+            "nullable": false,
+            "default": "true",
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "is_active",
+            "type": "BOOLEAN",
+            "nullable": false,
+            "default": "true",
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "is_featured",
+            "type": "BOOLEAN",
+            "nullable": false,
+            "default": "false",
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "is_new",
+            "type": "BOOLEAN",
+            "nullable": false,
+            "default": "true",
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "synced_at",
+            "type": "TIMESTAMP",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          }
+        ],
+        "primary_key": {
+          "constrained_columns": [
+            "product_id"
+          ],
+          "name": "pk_Products",
+          "comment": null,
+          "dialect_options": {
+            "postgresql_include": []
+          }
+        },
+        "foreign_keys": [],
+        "unique_constraints": [
+          {
+            "column_names": [
+              "loyverse_id"
+            ],
+            "name": "uq_Products_loyverse_id",
+            "comment": null,
+            "dialect_options": {
+              "postgresql_include": [],
+              "postgresql_nulls_not_distinct": false
+            }
+          }
+        ]
+      },
+      "ProductVariants": {
+        "rows": 0,
+        "columns": [
+          {
+            "name": "product_variant_id",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": "nextval('\"public\".\"ProductVariants_product_variant_id_seq\"'::regclass)",
+            "autoincrement": true,
+            "comment": null
+          },
+          {
+            "name": "loyverse_id",
+            "type": "VARCHAR(100)",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "name",
+            "type": "VARCHAR(150)",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "price",
+            "type": "NUMERIC",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "is_available",
+            "type": "BOOLEAN",
+            "nullable": false,
+            "default": "true",
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "synced_at",
+            "type": "TIMESTAMP",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "product_id",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          }
+        ],
+        "primary_key": {
+          "constrained_columns": [
+            "product_variant_id"
+          ],
+          "name": "pk_ProductVariants",
+          "comment": null,
+          "dialect_options": {
+            "postgresql_include": []
+          }
+        },
+        "foreign_keys": [
+          {
+            "name": "fk_ProductVariants_product_id",
+            "constrained_columns": [
+              "product_id"
+            ],
+            "referred_schema": "public",
+            "referred_table": "Products",
+            "referred_columns": [
+              "product_id"
+            ],
+            "options": {},
+            "comment": null
+          }
+        ],
+        "unique_constraints": [
+          {
+            "column_names": [
+              "loyverse_id"
+            ],
+            "name": "uq_ProductVariants_loyverse_id",
+            "comment": null,
+            "dialect_options": {
+              "postgresql_include": [],
+              "postgresql_nulls_not_distinct": false
+            }
+          }
+        ]
+      },
+      "ProductModifiers": {
+        "rows": 0,
+        "columns": [
+          {
+            "name": "product_modifier_id",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": "nextval('\"public\".\"ProductModifiers_product_modifier_id_seq\"'::regclass)",
+            "autoincrement": true,
+            "comment": null
+          },
+          {
+            "name": "loyverse_id",
+            "type": "VARCHAR(100)",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "name",
+            "type": "VARCHAR(150)",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "display_order",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "synced_at",
+            "type": "TIMESTAMP",
+            "nullable": true,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          }
+        ],
+        "primary_key": {
+          "constrained_columns": [
+            "product_modifier_id"
+          ],
+          "name": "pk_ProductModifiers",
+          "comment": null,
+          "dialect_options": {
+            "postgresql_include": []
+          }
+        },
+        "foreign_keys": [],
+        "unique_constraints": [
+          {
+            "column_names": [
+              "loyverse_id"
+            ],
+            "name": "uq_ProductModifiers_loyverse_id",
+            "comment": null,
+            "dialect_options": {
+              "postgresql_include": [],
+              "postgresql_nulls_not_distinct": false
+            }
+          }
+        ]
+      },
+      "ProductComplements": {
+        "rows": 0,
+        "columns": [
+          {
+            "name": "product_complement_id",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": "nextval('\"public\".\"ProductComplements_product_complement_id_seq\"'::regclass)",
+            "autoincrement": true,
+            "comment": null
+          },
+          {
+            "name": "product_modifier_id",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "loyverse_id",
+            "type": "VARCHAR(100)",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "name",
+            "type": "VARCHAR(150)",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "price",
+            "type": "NUMERIC",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "is_active",
+            "type": "BOOLEAN",
+            "nullable": false,
+            "default": "true",
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "synced_at",
+            "type": "TIMESTAMP",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "display_order",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          }
+        ],
+        "primary_key": {
+          "constrained_columns": [
+            "product_complement_id"
+          ],
+          "name": "pk_ProductComplements",
+          "comment": null,
+          "dialect_options": {
+            "postgresql_include": []
+          }
+        },
+        "foreign_keys": [
+          {
+            "name": "fk_ProductComplements_product_modifier_id",
+            "constrained_columns": [
+              "product_modifier_id"
+            ],
+            "referred_schema": "public",
+            "referred_table": "ProductModifiers",
+            "referred_columns": [
+              "product_modifier_id"
+            ],
+            "options": {},
+            "comment": null
+          }
+        ],
+        "unique_constraints": [
+          {
+            "column_names": [
+              "loyverse_id"
+            ],
+            "name": "uq_ProductComplements_loyverse_id",
+            "comment": null,
+            "dialect_options": {
+              "postgresql_include": [],
+              "postgresql_nulls_not_distinct": false
+            }
+          }
+        ]
+      },
+      "ProductModifierAssignments": {
+        "rows": 0,
+        "columns": [
+          {
+            "name": "product_variant_id",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          },
+          {
+            "name": "product_modifier_id",
+            "type": "INTEGER",
+            "nullable": false,
+            "default": null,
+            "autoincrement": false,
+            "comment": null
+          }
+        ],
+        "primary_key": {
+          "constrained_columns": [
+            "product_variant_id",
+            "product_modifier_id"
+          ],
+          "name": "pk_ProductModifierAssignments",
+          "comment": null,
+          "dialect_options": {
+            "postgresql_include": []
+          }
+        },
+        "foreign_keys": [
+          {
+            "name": "fk_ProductModifierAssignments_product_modifier_id",
+            "constrained_columns": [
+              "product_modifier_id"
+            ],
+            "referred_schema": "public",
+            "referred_table": "ProductModifiers",
+            "referred_columns": [
+              "product_modifier_id"
+            ],
+            "options": {},
+            "comment": null
+          },
+          {
+            "name": "fk_ProductModifierAssignments_product_variant_id",
+            "constrained_columns": [
+              "product_variant_id"
+            ],
+            "referred_schema": "public",
+            "referred_table": "ProductVariants",
+            "referred_columns": [
+              "product_variant_id"
+            ],
+            "options": {},
+            "comment": null
+          }
+        ],
+        "unique_constraints": []
+      }
+    }
+  },
+  "checks": {
+    "pytest": {
+      "passed": 26,
+      "failed": 0,
+      "postgresql_read_only_cases": 6
+    },
+    "alembic_current": "20261029_0001 (head)",
+    "alembic_check": "No new upgrade operations detected.",
+    "loyverse_sync_started": false
+  }
+}

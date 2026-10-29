@@ -1,8 +1,8 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
-from app.db.database import Base
+from app.models.legacy_base import LegacyBase
 
-class Item(Base):
+class Item(LegacyBase):
     __tablename__ = "items"
 
     id = Column(Integer, primary_key=True, index=True)

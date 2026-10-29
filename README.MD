@@ -52,7 +52,38 @@ Sigue estos pasos para correr el proyecto en tu entorno local de Windows:
 
 - Abre el nuevo archivo `.env` y reemplaza los valores de ejemplo con tus credenciales reales.
 
-5. **Levanta el servidor de desarrollo:**
+5. **Revisa las migraciones antes de aplicarlas:**
+
+   Los modelos vigentes corresponden a las cinco tablas del catálogo de HU-008.
+   Alembic administra el esquema; iniciar FastAPI ya no crea tablas.
+   En el entorno de desarrollo verificado se creó `mitbol_dev` y se aplicó la
+   revisión `20261029_0001` con autorización. La conexión local apunta a esa base;
+   `mitbol_db` conserva íntegramente las tablas y datos del prototipo.
+
+   Consulta la [guía del esquema, pruebas y comandos](docs/database/hu008_preparation.md)
+   y el [SQL de la migración inicial](docs/database/hu008_initial.sql).
+
+   Para ver el SQL sin ejecutarlo:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m alembic upgrade head --sql
+   ```
+
+   Para comprobar la revisión y la correspondencia con los modelos:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m alembic current
+   .\.venv\Scripts\python.exe -m alembic check
+   ```
+
+   Las pruebas de PostgreSQL son optativas y sólo consultan `mitbol_dev`:
+
+   ```powershell
+   $env:MITBOL_POSTGRES_TESTS = '1'
+   .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
+   ```
+
+6. **Levanta el servidor de desarrollo:**
 
 ```bash
    uvicorn app.main:app --reload

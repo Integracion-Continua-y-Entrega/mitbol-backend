@@ -1,9 +1,13 @@
+"""Regresión del prototipo aislado; no valida la nueva sincronización HU-008."""
+
 import pytest
 import respx
 from httpx import Response
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.models import Base, Item
+from app.models.item import Item
+from app.models.category import Category
+from app.models.legacy_base import LegacyBase as Base
 from app.services.sync_service import SyncService
 
 # Configuración de base de datos en memoria para pruebas rápidas

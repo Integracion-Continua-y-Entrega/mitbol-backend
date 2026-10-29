@@ -1,10 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.db.database import engine
-from app.models import Base, Category, Item
-from app.api.sync import router as sync_router
-
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="API Menú Digital - mitbol",
@@ -20,8 +15,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registramos el endpoint
-app.include_router(sync_router)
+# Alembic administra el esquema; iniciar FastAPI no crea ni modifica tablas.
+# El router del prototipo se habilitará cuando utilice el catálogo de HU-008.
 
 @app.get("/")
 def read_root():
