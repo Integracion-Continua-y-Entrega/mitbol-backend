@@ -160,9 +160,21 @@ async def test_fastapi_import_does_not_create_tables_or_connect(monkeypatch):
     monkeypatch.setattr(MetaData, "create_all", unexpected_database_access)
     monkeypatch.setattr(Engine, "connect", unexpected_database_access)
     main = importlib.reload(importlib.import_module("app.main"))
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=main.app), base_url="http://test",
-    ) as client:
-        assert (await client.get("/")).status_code == 200
-        assert (await client.get("/api/menu")).status_code == 200
-        assert (await client.post("/api/v1/sync/loyverse")).status_code == 404
+    from app.db.database import get_db
+
+    def isolated_menu_db():
+        # El menú ahora consulta datos; esta prueba de importación no abre conexiones.
+        yield SimpleNamespace(scalars=lambda statement: SimpleNamespace(all=lambda: []))
+
+    main.app.dependency_overrides[get_db] = isolated_menu_db
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=main.app), base_url="http://test",
+        ) as client:
+            assert (await client.get("/")).status_code == 200
+            menu = await client.get("/api/menu")
+            assert menu.status_code == 200
+            assert menu.json() == {"currency": "MXN", "products": []}
+            assert (await client.post("/api/v1/sync/loyverse")).status_code == 404
+    finally:
+        main.app.dependency_overrides.pop(get_db, None)
