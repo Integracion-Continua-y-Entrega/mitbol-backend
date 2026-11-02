@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.menu import router as menu_router
-from app.schemas.menu import MenuResponse
+from app.schemas.menu import MenuProductDetailResponse, MenuResponse
 
 app = FastAPI(
     title="API Menú Digital - mitbol",
@@ -35,9 +35,10 @@ _default_openapi = app.openapi
 def openapi_with_menu_examples():
     schema = _default_openapi()
     # FastAPI elimina null al generar OpenAPI; los ejemplos deben conservar el contrato.
-    schema["components"]["schemas"]["MenuResponse"]["examples"] = (
-        MenuResponse.model_json_schema(mode="serialization")["examples"]
-    )
+    for model in (MenuResponse, MenuProductDetailResponse):
+        schema["components"]["schemas"][model.__name__]["examples"] = (
+            model.model_json_schema(mode="serialization")["examples"]
+        )
     return schema
 
 

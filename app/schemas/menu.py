@@ -103,3 +103,86 @@ class MenuResponse(BaseModel):
 
 class MenuErrorResponse(BaseModel):
     detail: str = Field(description="Mensaje público del error, sin detalles de infraestructura.")
+
+
+class MenuComplement(BaseModel):
+    product_complement_id: int = Field(description="ID interno estable del complemento.")
+    name: str = Field(description="Nombre de la opción registrado en PostgreSQL.")
+    price: MenuAmount = Field(
+        description="Importe adicional exacto como cadena decimal; no es un total del pedido."
+    )
+    display_order: int = Field(description="Orden almacenado; se desempata por ID interno.")
+    is_active: bool = Field(
+        description="Activación comercial almacenada. Las opciones inactivas permanecen visibles."
+    )
+    can_order: bool = Field(
+        description="Requiere complemento activo y can_order=true en la variante que lo contiene."
+    )
+
+
+class MenuModifier(BaseModel):
+    product_modifier_id: int = Field(description="ID interno estable del grupo de modificadores.")
+    name: str = Field(description="Nombre del grupo registrado en PostgreSQL.")
+    display_order: int = Field(description="Orden almacenado; se desempata por ID interno.")
+    complements: list[MenuComplement] = Field(
+        description="Opciones ordenadas por display_order e ID, incluidas las inactivas. "
+        "[] si el grupo no tiene opciones."
+    )
+
+
+class MenuVariantDetail(MenuVariant):
+    modifiers: list[MenuModifier] = Field(
+        description="Sólo los grupos asignados a esta variante, ordenados por display_order e ID. "
+        "[] si no hay asignaciones. No se presuponen reglas de selección."
+    )
+
+
+class MenuProductDetail(MenuProduct):
+    variants: list[MenuVariantDetail] = Field(
+        description="Variantes ordenadas por ID, incluidas las no disponibles, con sus propios grupos."
+    )
+
+
+class MenuProductDetailResponse(BaseModel):
+    currency: Literal["MXN"] = Field(
+        default="MXN", description="Moneda acordada para MITBOL; no se realizan conversiones."
+    )
+    product: MenuProductDetail = Field(description="Detalle de un producto comercialmente activo.")
+
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{
+            "currency": "MXN",
+            "product": {
+                "product_id": 42,
+                "name": "Hamburguesa clásica",
+                "description": None,
+                "image_url": None,
+                "is_active": True,
+                "is_available": True,
+                "can_order": True,
+                "price_min": "89.00",
+                "price_max": "89.00",
+                "has_price_range": False,
+                "variants": [{
+                    "product_variant_id": 101,
+                    "name": "Sencilla",
+                    "price": "89.00",
+                    "is_available": True,
+                    "can_order": True,
+                    "modifiers": [{
+                        "product_modifier_id": 7,
+                        "name": "Extras",
+                        "display_order": 1,
+                        "complements": [
+                            {"product_complement_id": 20, "name": "Sin cebolla", "price": "0.00",
+                             "display_order": 1, "is_active": True, "can_order": True},
+                            {"product_complement_id": 21, "name": "Queso", "price": "15.00",
+                             "display_order": 2, "is_active": True, "can_order": True},
+                            {"product_complement_id": 22, "name": "Tocino", "price": "20.00",
+                             "display_order": 3, "is_active": False, "can_order": False},
+                        ],
+                    }],
+                }],
+            },
+        }],
+    })

@@ -17,8 +17,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import get_db
-from app.models import Base, Product, ProductVariant
-from app.schemas.menu import MenuResponse, MenuVariant
+from app.models import (
+    Base, Product, ProductComplement, ProductModifier, ProductModifierAssignment, ProductVariant,
+)
+from app.schemas.menu import MenuComplement, MenuProductDetailResponse, MenuResponse, MenuVariant
 
 
 @pytest.fixture(params=["sqlite", "postgresql"])
@@ -405,3 +407,367 @@ def test_menu_reads_catalog_written_by_hu008(api_app, sync_db, commercial_snapsh
     burger = next(product for product in products if product["name"] == "Hamburguesa")
     assert (burger["price_min"], burger["price_max"]) == ("89.00", "129.00")
     assert next(variant for variant in burger["variants"] if variant["name"] == "Doble")["price"] == "129.00"
+
+
+@pytest.fixture
+def detail_catalog(menu_db, add_product):
+    """Grafo con grupos compartidos, exclusivos, ajenos y vacíos en PostgreSQL aislado."""
+    assert menu_db.connection.engine.url.database.startswith("mitbol_test_hu008_")
+    product = add_product(prices=("89.00", "129.00"), flags=(True, False),
+                          name="Hamburguesa de prueba", description="Descripción local")
+    other = add_product(name="Otro producto")
+    timestamp = datetime(2026, 11, 2, tzinfo=timezone.utc)
+
+    def group(identifier, order, options):
+        modifier = ProductModifier(loyverse_id=identifier, name=identifier, display_order=order)
+        modifier.complements = [
+            ProductComplement(loyverse_id=name, name=name, price=Decimal(price),
+                              display_order=position, is_active=active, synced_at=timestamp)
+            for name, price, position, active in options
+        ]
+        return modifier
+
+    shared = group("Compartido", 2, [
+        ("Gratis", "0.00", 1, True),
+        ("Adicional", "15.50", 2, True),
+        ("Inactivo", "20.00", 2, False),
+    ])
+    exclusive = group("Exclusivo", 2, [("Salsa", "3.00", 1, True)])
+    foreign = group("Ajeno", 0, [("Ajeno opción", "8.00", 1, True)])
+    empty = group("Vacío", 1, [])
+    with menu_db.sessions() as session, session.begin():
+        session.add_all([shared, exclusive, foreign, empty])
+        session.flush()
+        session.add_all([
+            ProductModifierAssignment(product_variant_id=variant.product_variant_id, modifier=modifier)
+            for variant, modifier in (
+                (product.variants[0], exclusive), (product.variants[0], shared),
+                (product.variants[1], shared), (product.variants[1], empty),
+                (other.variants[0], shared), (other.variants[0], foreign),
+            )
+        ])
+    return SimpleNamespace(product=product, other=other, shared=shared, exclusive=exclusive,
+                           foreign=foreign, empty=empty)
+
+
+@pytest.mark.parametrize("menu_db", ["postgresql"], indirect=True)
+@pytest.mark.parametrize("prices", [("45.00",), ("89.00", "129.00"), ("0.00", "10.00")])
+def test_detail_is_public_and_extends_hu001(menu_client, add_product, prices):
+    product = add_product(prices=prices, description="Descripción conservada")
+    response = menu_client.get(f"/api/menu/{product.product_id}")
+    assert response.status_code == 200
+    assert "authorization" not in response.request.headers and "cookie" not in response.request.headers
+    assert set(response.json()) == {"currency", "product"}
+    assert response.json()["currency"] == "MXN"
+    detail = response.json()["product"]
+    listed = menu_client.get("/api/menu").json()["products"][0]
+    common = {**detail, "variants": [
+        {key: value for key, value in variant.items() if key != "modifiers"}
+        for variant in detail["variants"]
+    ]}
+    assert common == listed
+    assert detail["description"] == "Descripción conservada" and detail["image_url"] is None
+    assert [variant["price"] for variant in detail["variants"]] == list(prices)
+    assert all(variant["modifiers"] == [] for variant in detail["variants"])
+    assert set(detail) == set(listed)
+    assert all(set(variant) == set(listed["variants"][0]) | {"modifiers"}
+               for variant in detail["variants"])
+
+
+@pytest.mark.parametrize("menu_db", ["postgresql"], indirect=True)
+def test_detail_keeps_assignments_and_shared_group_context(menu_client, detail_catalog):
+    catalog = detail_catalog
+    response = menu_client.get(f"/api/menu/{catalog.product.product_id}")
+    assert response.status_code == 200
+    first, second = response.json()["product"]["variants"]
+    assert [first["product_variant_id"], second["product_variant_id"]] == [
+        variant.product_variant_id for variant in catalog.product.variants
+    ]
+    assert [group["product_modifier_id"] for group in first["modifiers"]] == [
+        catalog.shared.product_modifier_id, catalog.exclusive.product_modifier_id,
+    ]
+    assert [group["product_modifier_id"] for group in second["modifiers"]] == [
+        catalog.empty.product_modifier_id, catalog.shared.product_modifier_id,
+    ]
+    assert second["modifiers"][0]["complements"] == []
+    available_options = first["modifiers"][0]["complements"]
+    unavailable_options = second["modifiers"][1]["complements"]
+    assert [option["product_complement_id"] for option in available_options] == [
+        option.product_complement_id for option in catalog.shared.complements
+    ]
+    assert [option["price"] for option in available_options] == ["0.00", "15.50", "20.00"]
+    assert [option["is_active"] for option in available_options] == [True, True, False]
+    assert [option["can_order"] for option in available_options] == [True, True, False]
+    assert all(not option["can_order"] for option in unavailable_options)
+    assert [{key: value for key, value in option.items() if key != "can_order"}
+            for option in available_options] == [
+        {key: value for key, value in option.items() if key != "can_order"}
+        for option in unavailable_options
+    ]
+    other = menu_client.get(f"/api/menu/{catalog.other.product_id}").json()["product"]
+    assert {group["product_modifier_id"] for group in other["variants"][0]["modifiers"]} == {
+        catalog.foreign.product_modifier_id, catalog.shared.product_modifier_id,
+    }
+    assert all(option["can_order"] is option["is_active"]
+               for group in other["variants"][0]["modifiers"] for option in group["complements"])
+    for marker in ("loyverse_id", "synced_at", "modifier_assignments", "Ajeno"):
+        assert marker not in response.text
+
+
+@pytest.mark.parametrize("menu_db", ["postgresql"], indirect=True)
+@pytest.mark.parametrize("available,flags,minimum,maximum", [
+    (True, (True, True), "35.00", "49.00"),
+    (False, (True, True), "35.00", "49.00"),
+    (True, (False, True), "49.00", "49.00"),
+    (True, (False, False), "35.00", "49.00"),
+    (False, (False, True), "49.00", "49.00"),
+])
+def test_detail_availability_matches_hu001(
+    menu_client, menu_db, add_product, available, flags, minimum, maximum,
+):
+    product = add_product(prices=("35.00", "49.00"), available=available, flags=flags)
+    modifier = ProductModifier(loyverse_id="availability-group", name="Extras", display_order=1)
+    modifier.complements = [ProductComplement(
+        loyverse_id="availability-option", name="Opción", price=Decimal("5.00"),
+        display_order=1, synced_at=product.synced_at,
+    )]
+    with menu_db.sessions() as session, session.begin():
+        session.add_all([ProductModifierAssignment(
+            product_variant_id=variant.product_variant_id, modifier=modifier,
+        ) for variant in product.variants])
+    response = menu_client.get(f"/api/menu/{product.product_id}")
+    assert response.status_code == 200
+    detail = response.json()["product"]
+    assert detail["is_active"] is True and detail["is_available"] is available
+    assert detail["can_order"] is (available and any(flags))
+    assert (detail["price_min"], detail["price_max"]) == (minimum, maximum)
+    assert detail["has_price_range"] is (minimum != maximum)
+    for variant, flag in zip(detail["variants"], flags, strict=True):
+        assert variant["is_available"] is flag
+        assert variant["can_order"] is (available and flag)
+        assert variant["modifiers"][0]["complements"][0]["can_order"] is (available and flag)
+
+
+@pytest.mark.parametrize("menu_db", ["postgresql"], indirect=True)
+def test_detail_without_variants(menu_client, add_product):
+    product = add_product(prices=())
+    response = menu_client.get(f"/api/menu/{product.product_id}")
+    assert response.status_code == 200
+    detail = response.json()["product"]
+    assert detail["variants"] == []
+    assert detail["description"] is None and detail["image_url"] is None
+    assert detail["is_available"] is True and detail["can_order"] is False
+    assert detail["price_min"] is None and detail["price_max"] is None
+    assert detail["has_price_range"] is False
+
+
+@pytest.mark.parametrize("menu_db", ["postgresql"], indirect=True)
+def test_detail_missing_and_inactive_share_404(menu_client, menu_db, add_product):
+    product = add_product(active=False)
+    for identifier in (product.product_id, product.product_id + 100000):
+        with capture_sql(menu_db.connection) as statements:
+            response = menu_client.get(f"/api/menu/{identifier}")
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Producto no encontrado."}
+        selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
+        assert len(selects) == 1
+
+
+@pytest.mark.parametrize("identifier", ["abc", "0", "-1", "1.5"])
+def test_detail_invalid_identifier_never_queries_database(api_app, identifier):
+    class UnexpectedSession:
+        def scalars(self, statement):
+            pytest.fail("Un ID inválido llegó a consultar el catálogo")
+
+    api_app.dependency_overrides[get_db] = lambda: UnexpectedSession()
+    with TestClient(api_app) as client:
+        response = client.get(f"/api/menu/{identifier}")
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["path", "product_id"]
+
+
+@pytest.mark.parametrize("menu_db", ["postgresql"], indirect=True)
+def test_detail_postgresql_preserves_variant_and_complement_precision(menu_client, menu_db, add_product):
+    exact = "90.1234567890123456789"
+    extra = "0.1234567890123456789"
+    product = add_product(prices=(exact, "129.00"))
+    modifier = ProductModifier(loyverse_id="precision-group", name="Extras", display_order=1)
+    modifier.complements = [ProductComplement(
+        loyverse_id="precision-option", name="Preciso", price=Decimal(extra),
+        display_order=1, synced_at=product.synced_at,
+    )]
+    with menu_db.sessions() as session, session.begin():
+        session.add(ProductModifierAssignment(
+            product_variant_id=product.variants[0].product_variant_id, modifier=modifier,
+        ))
+    response = menu_client.get(f"/api/menu/{product.product_id}")
+    assert response.status_code == 200
+    detail = response.json()["product"]
+    assert detail["price_min"] == detail["variants"][0]["price"] == exact
+    assert detail["price_max"] == "129.00"
+    assert detail["variants"][0]["modifiers"][0]["complements"][0]["price"] == extra
+
+
+@pytest.mark.parametrize("invalid", [
+    None, Decimal("-1"), Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity"), 1.1, "15.00",
+])
+def test_detail_invalid_complement_prices_are_rejected(invalid):
+    with pytest.raises(ValidationError):
+        MenuComplement(product_complement_id=1, name="Opción", price=invalid,
+                       display_order=1, is_active=True, can_order=True)
+
+
+@pytest.mark.parametrize("menu_db", ["postgresql"], indirect=True)
+@pytest.mark.parametrize("variant_count", [1, 25])
+def test_detail_loads_full_tree_without_n_plus_one(menu_client, menu_db, add_product, variant_count):
+    product = add_product(prices=("45.00",) * variant_count)
+    with menu_db.sessions() as session, session.begin():
+        for index, variant in enumerate(product.variants):
+            modifier = ProductModifier(loyverse_id=f"batch-group-{index}", name=f"Grupo {index}",
+                                       display_order=index)
+            modifier.complements = [ProductComplement(
+                loyverse_id=f"batch-option-{index}", name=f"Opción {index}", price=Decimal("0.00"),
+                display_order=1, synced_at=product.synced_at,
+            )]
+            session.add(ProductModifierAssignment(
+                product_variant_id=variant.product_variant_id, modifier=modifier,
+            ))
+    with capture_sql(menu_db.connection) as statements:
+        response = menu_client.get(f"/api/menu/{product.product_id}")
+    assert response.status_code == 200
+    variants = response.json()["product"]["variants"]
+    assert len(variants) == variant_count
+    assert all(len(variant["modifiers"]) == 1 for variant in variants)
+    assert all(len(variant["modifiers"][0]["complements"]) == 1 for variant in variants)
+    # Los SAVEPOINT de la fixture aíslan las pruebas; no son consultas de catálogo.
+    selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
+    assert len(selects) == 4
+    assert '"Products"' in selects[0] and '"ProductVariants"' in selects[1]
+    assert '"ProductModifierAssignments"' in selects[2] and 'JOIN "ProductModifiers"' in selects[2]
+    assert '"ProductComplements"' in selects[3]
+    assert not any(sql.lstrip().upper().startswith(
+        ("INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "TRUNCATE"),
+    ) for sql in statements)
+
+
+@pytest.mark.parametrize("menu_db", ["postgresql"], indirect=True)
+def test_detail_repeated_reads_preserve_all_catalog_rows(menu_client, menu_db, detail_catalog):
+    def snapshot():
+        return {
+            name: [dict(row) for row in menu_db.connection.execute(
+                select(table).order_by(*table.primary_key.columns),
+            ).mappings()]
+            for name, table in Base.metadata.tables.items()
+        }
+
+    before = snapshot()
+    first = menu_client.get(f"/api/menu/{detail_catalog.product.product_id}")
+    second = menu_client.get(f"/api/menu/{detail_catalog.product.product_id}")
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    assert snapshot() == before
+
+
+@pytest.mark.parametrize("error_type,expected_status", [
+    (OperationalError, 503), (InterfaceError, 503), (TimeoutError, 503),
+    (ProgrammingError, 500), (RuntimeError, 500),
+])
+def test_detail_database_errors_are_sanitized(api_app, caplog, error_type, expected_status):
+    sensitive = "PRIVATE_PASSWORD internal-host SQL_INTERNO sensitive_table"
+    error = (error_type(sensitive) if error_type in (TimeoutError, RuntimeError)
+             else error_type("SELECT SQL_INTERNO", {}, RuntimeError(sensitive)))
+
+    class FailingSession:
+        def scalars(self, statement):
+            raise error
+
+    api_app.dependency_overrides[get_db] = lambda: FailingSession()
+    with TestClient(api_app) as client:
+        response = client.get("/api/menu/1")
+    assert response.status_code == expected_status
+    message = ("El detalle del producto no está disponible temporalmente." if expected_status == 503
+               else "No fue posible consultar el detalle del producto.")
+    assert response.json() == {"detail": message}
+    assert caplog.records
+    for marker in sensitive.split():
+        assert marker not in response.text + caplog.text
+
+
+@pytest.mark.parametrize("menu_db", ["postgresql"], indirect=True)
+def test_detail_complement_query_error_is_sanitized(menu_client, menu_db, detail_catalog, caplog):
+    def invalid_select(connection, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and '"ProductComplements"' in statement:
+            return "SELECT * FROM hu003_missing_relation", ()
+        return statement, parameters
+
+    event.listen(menu_db.connection, "before_cursor_execute", invalid_select, retval=True)
+    try:
+        response = menu_client.get(f"/api/menu/{detail_catalog.product.product_id}")
+    finally:
+        event.remove(menu_db.connection, "before_cursor_execute", invalid_select)
+    assert response.status_code == 500
+    assert response.json() == {"detail": "No fue posible consultar el detalle del producto."}
+    assert "hu003_missing_relation" not in response.text + caplog.text
+
+
+def test_detail_openapi_and_swagger_describe_contract(api_app):
+    with TestClient(api_app) as client:
+        assert client.get("/docs").status_code == 200
+        response = client.get("/openapi.json")
+    assert response.status_code == 200
+    schema = response.json()
+    operation = schema["paths"]["/api/menu/{product_id}"]["get"]
+    assert not operation.get("security")
+    assert set(operation["responses"]) == {"200", "404", "422", "500", "503"}
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/MenuProductDetailResponse"
+    )
+    parameter = next(param for param in operation["parameters"] if param["name"] == "product_id")
+    assert parameter["in"] == "path" and parameter["required"] is True
+    assert parameter["schema"]["type"] == "integer" and parameter["schema"]["minimum"] == 1
+    models = schema["components"]["schemas"]
+    assert models["MenuProductDetailResponse"]["properties"]["currency"]["const"] == "MXN"
+    for name in ("MenuVariantDetail", "MenuComplement"):
+        assert models[name]["properties"]["price"]["type"] == "string"
+    assert {part["type"] for part in models["MenuProductDetail"]["properties"]["price_min"]["anyOf"]} == {
+        "string", "null",
+    }
+    assert "is_active" not in models["MenuVariantDetail"]["properties"]
+    assert "is_available" not in models["MenuComplement"]["properties"]
+    assert not {"is_active", "is_available"} & models["MenuModifier"]["properties"].keys()
+    for name in ("MenuProductDetail", "MenuVariantDetail", "MenuModifier", "MenuComplement"):
+        assert not {"loyverse_id", "synced_at", "min_quantity", "max_quantity", "required"} & (
+            models[name]["properties"].keys()
+        )
+    for example in models["MenuProductDetailResponse"]["examples"]:
+        MenuProductDetailResponse.model_validate_json(json.dumps(example))
+        assert example["product"]["description"] is None
+        assert example["product"]["image_url"] is None
+
+
+def test_detail_reads_catalog_written_by_hu008(api_app, sync_db, commercial_snapshot):
+    changed = deepcopy(commercial_snapshot)
+    changed.items[0]["variants"][1]["stores"][0]["price"] = 129
+    sync_db.service.persist_snapshot(changed)
+
+    def isolated_db():
+        with sync_db.sessions() as session:
+            yield session
+
+    api_app.dependency_overrides[get_db] = isolated_db
+    with TestClient(api_app) as client:
+        listing = client.get("/api/menu").json()
+        details = [client.get(f'/api/menu/{product["product_id"]}') for product in listing["products"]]
+    assert all(response.status_code == 200 for response in details)
+    products = {response.json()["product"]["name"]: response.json()["product"] for response in details}
+    burger = products["Hamburguesa"]
+    assert [variant["price"] for variant in burger["variants"]] == ["89.00", "129.00"]
+    for variant in burger["variants"]:
+        assert [group["name"] for group in variant["modifiers"]] == ["Extras"]
+        assert [option["name"] for option in variant["modifiers"][0]["complements"]] == [
+            "Queso", "Tocino", "Sin cebolla",
+        ]
+    for variant in products["Limonada"]["variants"]:
+        assert [group["name"] for group in variant["modifiers"]] == ["Hierbas"]
+        assert [option["name"] for option in variant["modifiers"][0]["complements"]] == ["Chía", "Menta"]
+    assert products["Papas"]["variants"][0]["modifiers"] == []

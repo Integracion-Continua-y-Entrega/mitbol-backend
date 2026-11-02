@@ -1,12 +1,13 @@
 """Endpoint público de consulta del menú digital."""
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.menu import MenuErrorResponse, MenuResponse
+from app.schemas.menu import MenuErrorResponse, MenuProductDetailResponse, MenuResponse
 from app.services import menu_service
 
 logger = logging.getLogger(__name__)
@@ -61,4 +62,77 @@ def get_menu(db: Session = Depends(get_db)) -> MenuResponse:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No fue posible consultar el menú.",
+        ) from None
+
+
+@router.get(
+    "/menu/{product_id}",
+    response_model=MenuProductDetailResponse,
+    summary="Consultar los detalles de un producto",
+    description=(
+        "Consulta pública por ID interno, basada en PostgreSQL y sin llamadas a Loyverse. "
+        "Un producto inexistente o comercialmente inactivo devuelve 404. "
+        "Los agotados permanecen visibles: can_order requiere producto activo y disponible "
+        "con alguna variante disponible. Cada variante requiere además su propia disponibilidad. "
+        "Sólo se incluyen los grupos realmente asignados a cada variante. "
+        "Los complementos inactivos se muestran con is_active=false y can_order=false. "
+        "Un complemento sólo tiene can_order=true si está activo y su variante puede pedirse. "
+        "No existe disponibilidad independiente de complementos ni estado de activación de grupos. "
+        "Las variantes se ordenan por ID; los grupos y opciones, por display_order e ID. "
+        "Los importes son cadenas decimales exactas, con al menos dos decimales. "
+        "El price de un complemento es un importe adicional y no se suma al rango del producto. "
+        "El rango usa variantes disponibles; si ninguna está disponible, es una referencia de todas. "
+        "Sin variantes, los precios son null y can_order=false. Las colecciones vacías son []. "
+        "image_url es siempre null y description conserva la descripción local. "
+        "No se presuponen cantidades mínimas, máximas ni obligatoriedad de selección. "
+        "Los ejemplos ilustran el contrato; los datos devueltos proceden de la base."
+    ),
+    responses={
+        404: {
+            "model": MenuErrorResponse,
+            "description": "Producto inexistente o comercialmente inactivo.",
+            "content": {"application/json": {"example": {
+                "detail": "Producto no encontrado.",
+            }}},
+        },
+        500: {
+            "model": MenuErrorResponse,
+            "description": "Error interno de consulta o integridad del catálogo.",
+            "content": {"application/json": {"example": {
+                "detail": "No fue posible consultar el detalle del producto.",
+            }}},
+        },
+        503: {
+            "model": MenuErrorResponse,
+            "description": "Conexión a PostgreSQL no disponible o tiempo de espera agotado.",
+            "content": {"application/json": {"example": {
+                "detail": "El detalle del producto no está disponible temporalmente.",
+            }}},
+        },
+    },
+)
+def get_product_detail(
+    product_id: Annotated[int, Path(ge=1, description="ID interno del producto, entero mayor que cero.")],
+    db: Session = Depends(get_db),
+) -> MenuProductDetailResponse:
+    try:
+        return menu_service.get_product_detail(db, product_id)
+    except menu_service.MenuProductNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado.",
+        ) from None
+    except menu_service.MenuUnavailableError as error:
+        logger.warning(
+            "Detalle del producto temporalmente no disponible (%s).", type(error.__cause__).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="El detalle del producto no está disponible temporalmente.",
+        ) from None
+    except Exception as error:
+        cause = error.__cause__ if isinstance(error, menu_service.MenuReadError) else error
+        logger.error("Falló la consulta del detalle del producto (%s).", type(cause).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No fue posible consultar el detalle del producto.",
         ) from None
