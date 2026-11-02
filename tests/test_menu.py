@@ -139,6 +139,8 @@ def test_menu_is_public_and_preserves_contract(menu_client, add_product):
                 "price": "45.00",
                 "is_available": True,
                 "can_order": True,
+                "image_url": None,
+                "tags": [],
             }],
         }],
     }
@@ -253,7 +255,7 @@ def test_menu_loads_variants_without_n_plus_one(menu_client, menu_db, add_produc
     assert response.status_code == 200
     assert len(response.json()["products"]) == product_count
     selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
-    assert len(selects) == 2
+    assert len(selects) == 4
     assert '"Products"' in selects[0] and '"ProductVariants"' in selects[1]
     assert not any(sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE", "CREATE", "ALTER"))
                    for sql in statements)
@@ -462,7 +464,7 @@ def test_detail_is_public_and_extends_hu001(menu_client, add_product, prices):
     detail = response.json()["product"]
     listed = menu_client.get("/api/menu").json()["products"][0]
     common = {**detail, "variants": [
-        {key: value for key, value in variant.items() if key != "modifiers"}
+        {key: value for key, value in variant.items() if key not in {"modifiers", "images"}}
         for variant in detail["variants"]
     ]}
     assert common == listed
@@ -470,7 +472,7 @@ def test_detail_is_public_and_extends_hu001(menu_client, add_product, prices):
     assert [variant["price"] for variant in detail["variants"]] == list(prices)
     assert all(variant["modifiers"] == [] for variant in detail["variants"])
     assert set(detail) == set(listed)
-    assert all(set(variant) == set(listed["variants"][0]) | {"modifiers"}
+    assert all(set(variant) == set(listed["variants"][0]) | {"modifiers", "images"}
                for variant in detail["variants"])
 
 
@@ -641,7 +643,7 @@ def test_detail_loads_full_tree_without_n_plus_one(menu_client, menu_db, add_pro
     assert all(len(variant["modifiers"][0]["complements"]) == 1 for variant in variants)
     # Los SAVEPOINT de la fixture aíslan las pruebas; no son consultas de catálogo.
     selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
-    assert len(selects) == 4
+    assert len(selects) == 6
     assert '"Products"' in selects[0] and '"ProductVariants"' in selects[1]
     assert '"ProductModifierAssignments"' in selects[2] and 'JOIN "ProductModifiers"' in selects[2]
     assert '"ProductComplements"' in selects[3]

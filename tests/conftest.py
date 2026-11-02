@@ -1,6 +1,7 @@
-"""Fixtures de HU-008: PostgreSQL aislado y rollback, sin escrituras en mitbol_dev."""
+"""PostgreSQL aislado con migraciones completas; mitbol_dev sólo se lee."""
 
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ from alembic import command
 from alembic.config import Config
 from dotenv import dotenv_values
 import pytest
-from sqlalchemy import create_engine, select, func
+from sqlalchemy import MetaData, Table, create_engine, inspect, select, func
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
@@ -57,29 +58,55 @@ def commercial_snapshot():
     )
 
 
-def _development_counts(url):
+def _development_state(url):
+    """Captura esquema, filas y secuencias sin asumir que HU-005 esté aplicada."""
     engine = create_engine(url, connect_args={
-        "connect_timeout": 5, "options": "-c default_transaction_read_only=on",
+        "connect_timeout": 5,
+        "options": "-c default_transaction_read_only=on -c statement_timeout=15000",
     })
     try:
         with engine.connect() as connection:
             connection.exec_driver_sql("SET TRANSACTION READ ONLY")
             assert connection.scalar(select(func.current_database())) == "mitbol_dev"
-            return {name: connection.scalar(select(func.count()).select_from(table))
-                    for name, table in Base.metadata.tables.items()}
+            assert connection.exec_driver_sql("SHOW transaction_read_only").scalar_one() == "on"
+            inspector = inspect(connection)
+            tables = {}
+            for name in sorted(inspector.get_table_names(schema="public")):
+                table = Table(name, MetaData(), schema="public", autoload_with=connection)
+                rows = [dict(row) for row in connection.execute(
+                    select(table).order_by(*table.primary_key.columns)
+                ).mappings()]
+                tables[name] = {
+                    "columns": [(column.name, column.type.compile(dialect=connection.dialect),
+                                 column.nullable, str(column.server_default.arg)
+                                 if column.server_default is not None else None)
+                                for column in table.columns],
+                    "pk": inspector.get_pk_constraint(name, schema="public"),
+                    "fk": inspector.get_foreign_keys(name, schema="public"),
+                    "unique": inspector.get_unique_constraints(name, schema="public"),
+                    "count": len(rows),
+                    "rows_sha256": sha256(json.dumps(
+                        rows, sort_keys=True, default=str, ensure_ascii=False,
+                    ).encode("utf-8")).hexdigest(),
+                }
+            sequences = connection.exec_driver_sql(
+                "SELECT sequencename, last_value FROM pg_sequences "
+                "WHERE schemaname = 'public' ORDER BY sequencename"
+            ).all()
+            return {"tables": tables, "sequences": [tuple(row) for row in sequences]}
     finally:
         engine.dispose()
 
 
 @pytest.fixture(scope="session")
-def sync_test_database():
+def sync_test_database(record_testsuite_property):
     if os.getenv("MITBOL_SYNC_POSTGRES_TESTS") != "1":
         pytest.skip("Activar MITBOL_SYNC_POSTGRES_TESTS=1 para PostgreSQL aislado")
     root = Path(__file__).resolve().parents[1]
     source_url = make_url(dotenv_values(root / ".env")["DATABASE_URL"])
     assert source_url.get_backend_name() == "postgresql"
     assert source_url.database == "mitbol_dev"
-    before = _development_counts(source_url)
+    before = _development_state(source_url)
     name = "mitbol_test_hu008_" + uuid4().hex[:12]
     maintenance = create_engine(source_url.set(database="postgres"), isolation_level="AUTOCOMMIT")
     try:
@@ -92,7 +119,7 @@ def sync_test_database():
     test_url = source_url.set(database=name)
     config = Config(str(root / "alembic.ini"))
     config.attributes["database_url"] = test_url.render_as_string(hide_password=False)
-    command.upgrade(config, "20261029_0001")
+    command.upgrade(config, "head")
     engine = create_engine(test_url, connect_args={
         "connect_timeout": 5, "options": "-c statement_timeout=15000",
     })
@@ -103,19 +130,13 @@ def sync_test_database():
             remaining = {table_name: connection.scalar(select(func.count()).select_from(table))
                          for table_name, table in Base.metadata.tables.items()}
         engine.dispose()
-        after = _development_counts(source_url)
-        report = {
-            "test_database": name, "revision": "20261029_0001",
-            "remaining_test_rows": remaining,
-            "development_counts_before": before, "development_counts_after": after,
-            "development_unchanged": before == after,
-            "database_dropped": False,
-        }
-        output = root / "docs/loyverse/hu008_block2_test_database.json"
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        after = _development_state(source_url)
+        # La evidencia puede incluirse en JUnit sin sobrescribir informes históricos.
+        record_testsuite_property("isolated_postgresql_database", name)
+        record_testsuite_property("development_unchanged", str(before == after))
+        record_testsuite_property("remaining_test_rows", json.dumps(remaining))
         assert all(value == 0 for value in remaining.values())
-        assert before == after, "mitbol_dev cambió durante las pruebas"
+        assert before == after, "El esquema, las filas o las secuencias de mitbol_dev cambiaron"
 
 
 @pytest.fixture

@@ -10,3 +10,6 @@ env/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Fotografías locales y operaciones pendientes de HU-005
+storage/

@@ -48,19 +48,31 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def migrate_connection(connection) -> None:
+    if connection.dialect.name != "postgresql":
+        raise CommandError("Las migraciones de MITBOL requieren PostgreSQL.")
+    validate_initial_database(connection)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        compare_server_default=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
 def run_migrations_online() -> None:
+    # Permite aplicar una revisión sobre la misma conexión y transacción ya
+    # verificadas por el ejecutor, sin abrir otra conexión con distinta configuración.
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        migrate_connection(connection)
+        return
     engine = create_engine(get_database_url(), poolclass=pool.NullPool)
     try:
         with engine.begin() as connection:
-            validate_initial_database(connection)
-            context.configure(
-                connection=connection,
-                target_metadata=target_metadata,
-                compare_type=True,
-                compare_server_default=True,
-            )
-            with context.begin_transaction():
-                context.run_migrations()
+            migrate_connection(connection)
     finally:
         engine.dispose()
 

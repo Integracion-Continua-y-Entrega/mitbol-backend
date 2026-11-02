@@ -41,13 +41,13 @@ def postgres_connection():
         engine.dispose()
 
 
-def test_postgresql_database_tables_and_revision(postgres_connection):
+def test_development_is_at_authorized_hu005_revision(postgres_connection):
     inspector = inspect(postgres_connection)
     assert set(inspector.get_table_names(schema="public")) == {
         *Base.metadata.tables, "alembic_version",
     }
     assert MigrationContext.configure(postgres_connection).get_current_heads() == (
-        "20261029_0001",
+        "20261102_0002",
     )
 
 
@@ -101,3 +101,14 @@ def test_postgresql_table_matches_orm(postgres_connection, table_name):
          tuple(element.column.name for element in constraint.elements), constraint.ondelete)
         for constraint in expected.foreign_key_constraints
     }
+
+
+def test_installed_hu005_foreign_keys_use_no_action(postgres_connection):
+    actions = postgres_connection.exec_driver_sql(
+        "SELECT conname, confdeltype, confupdtype FROM pg_constraint "
+        "WHERE connamespace = 'public'::regnamespace AND contype = 'f' "
+        "AND conrelid IN ('public.\"ProductImages\"'::regclass, "
+        "'public.\"ProductTags\"'::regclass)"
+    ).all()
+    assert len(actions) == 3
+    assert all(delete_action == update_action == "a" for _, delete_action, update_action in actions)

@@ -26,6 +26,21 @@ MenuAmount = Annotated[
 ]
 
 
+class MenuTag(BaseModel):
+    tag_id: int
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MenuImage(BaseModel):
+    product_image_id: int
+    image_url: str
+    display_order: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MenuVariant(BaseModel):
     product_variant_id: int = Field(description="ID interno estable de la variante.")
     name: str = Field(description="Nombre de la presentación registrado en PostgreSQL.")
@@ -36,6 +51,8 @@ class MenuVariant(BaseModel):
     can_order: bool = Field(
         description="Requiere variante disponible y producto padre activo y disponible."
     )
+    image_url: str | None = Field(default=None, description="Primera fotografía local de esta variante; null si no existe.")
+    tags: list[MenuTag] = Field(default_factory=list, description="Etiquetas locales de esta variante, ordenadas por ID.")
 
 
 class MenuProduct(BaseModel):
@@ -43,7 +60,7 @@ class MenuProduct(BaseModel):
     name: str = Field(description="Nombre del producto registrado en PostgreSQL.")
     description: str | None = Field(description="Descripción local; null cuando no existe.")
     image_url: str | None = Field(
-        default=None, description="Reservado para fotografías; actualmente siempre null."
+        default=None, description="Fotografía local representativa; null si ninguna variante tiene imágenes."
     )
     is_active: bool = Field(description="Activación comercial. El menú sólo incluye productos activos.")
     is_available: bool = Field(description="Disponibilidad local almacenada del producto.")
@@ -131,6 +148,7 @@ class MenuModifier(BaseModel):
 
 
 class MenuVariantDetail(MenuVariant):
+    images: list[MenuImage] = Field(default_factory=list, description="Galería local ordenada por display_order e ID; [] si no hay fotografías.")
     modifiers: list[MenuModifier] = Field(
         description="Sólo los grupos asignados a esta variante, ordenados por display_order e ID. "
         "[] si no hay asignaciones. No se presuponen reglas de selección."
@@ -186,3 +204,13 @@ class MenuProductDetailResponse(BaseModel):
             },
         }],
     })
+
+
+# Los ejemplos explícitos también muestran los campos aditivos de HU-005.
+for example in MenuResponse.model_config["json_schema_extra"]["examples"]:
+    for product in example["products"]:
+        for variant in product["variants"]:
+            variant.update(image_url=None, tags=[])
+for example in MenuProductDetailResponse.model_config["json_schema_extra"]["examples"]:
+    for variant in example["product"]["variants"]:
+        variant.update(image_url=None, tags=[], images=[])

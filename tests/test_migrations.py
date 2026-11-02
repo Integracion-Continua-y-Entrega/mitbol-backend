@@ -27,6 +27,9 @@ CATALOG_TABLES = {
     "Products", "ProductVariants", "ProductModifiers",
     "ProductComplements", "ProductModifierAssignments",
 }
+ENRICHMENT_TABLES = {"ProductImages", "Tags", "ProductTags"}
+INITIAL_REVISION = "20261029_0001"
+ENRICHMENT_REVISION = "20261102_0002"
 
 
 def alembic_config(output=None):
@@ -36,11 +39,11 @@ def alembic_config(output=None):
     return config
 
 
-def test_only_catalog_models_are_in_current_metadata():
+def test_only_approved_models_are_in_current_metadata():
     # Registrar el prototipo explícitamente evita depender del orden de pytest.
     importlib.import_module("app.models.item")
     importlib.import_module("app.models.category")
-    assert set(Base.metadata.tables) == CATALOG_TABLES
+    assert set(Base.metadata.tables) == CATALOG_TABLES | ENRICHMENT_TABLES
     assert {"items", "categories"}.isdisjoint(Base.metadata.tables)
     assert {"items", "categories"} == set(LegacyBase.metadata.tables)
 
@@ -67,9 +70,13 @@ def table_signature(table):
     }
 
 
-def test_migration_matches_models(monkeypatch):
+@pytest.mark.parametrize("revision_id,expected_tables", [
+    (INITIAL_REVISION, CATALOG_TABLES),
+    (ENRICHMENT_REVISION, ENRICHMENT_TABLES),
+])
+def test_migration_matches_models(monkeypatch, revision_id, expected_tables):
     """Compara tipos, nulabilidad, defaults y claves de la revisión y el ORM."""
-    revision = ScriptDirectory.from_config(alembic_config()).get_revision("head")
+    revision = ScriptDirectory.from_config(alembic_config()).get_revision(revision_id)
     context = MigrationContext.configure(
         dialect_name="postgresql", opts={"as_sql": True, "output_buffer": StringIO()},
     )
@@ -83,9 +90,9 @@ def test_migration_matches_models(monkeypatch):
 
     monkeypatch.setattr(revision.module, "op", SimpleNamespace(create_table=record_table))
     revision.module.upgrade()
-    assert set(created_tables) == CATALOG_TABLES
-    for name, table in Base.metadata.tables.items():
-        assert table_signature(created_tables[name]) == table_signature(table), name
+    assert set(created_tables) == expected_tables
+    for name in expected_tables:
+        assert table_signature(created_tables[name]) == table_signature(Base.metadata.tables[name]), name
 
 
 def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch):
@@ -96,8 +103,8 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
     output = StringIO()
     command.upgrade(alembic_config(output), "head", sql=True)
     sql = output.getvalue()
-    assert sql.count("CREATE TABLE") == 6  # Cinco comerciales y alembic_version.
-    for name in CATALOG_TABLES:
+    assert sql.count("CREATE TABLE") == 9  # Ocho de negocio y alembic_version.
+    for name in CATALOG_TABLES | ENRICHMENT_TABLES:
         assert f'CREATE TABLE "{name}"' in sql
     assert "CREATE TABLE alembic_version" in sql
     assert "TIMESTAMP WITH TIME ZONE" in sql
@@ -106,6 +113,57 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
     assert "categories" not in sql.lower()
     assert "CREATE DATABASE" not in sql
     assert "20261029_0001" in sql
+    assert ENRICHMENT_REVISION in sql
+
+
+def test_hu005_is_the_only_new_revision():
+    scripts = ScriptDirectory.from_config(alembic_config())
+    assert scripts.get_heads() == [ENRICHMENT_REVISION]
+    assert scripts.get_revision(ENRICHMENT_REVISION).down_revision == INITIAL_REVISION
+
+
+def test_hu005_incremental_sql_creates_only_three_tables_without_connecting(monkeypatch):
+    def unexpected_connection(*args, **kwargs):
+        pytest.fail("El SQL de revisión intentó abrir una conexión")
+
+    monkeypatch.setattr(Engine, "connect", unexpected_connection)
+    output = StringIO()
+    command.upgrade(alembic_config(output), f"{INITIAL_REVISION}:{ENRICHMENT_REVISION}", sql=True)
+    sql = output.getvalue()
+    assert sql.count("CREATE TABLE") == 3
+    for name in ENRICHMENT_TABLES:
+        assert f'CREATE TABLE "{name}"' in sql
+    for name in CATALOG_TABLES:
+        assert f'CREATE TABLE "{name}"' not in sql
+        assert f'ALTER TABLE "{name}"' not in sql
+    assert "product_image_id SERIAL NOT NULL" in sql
+    assert "tag_id SERIAL NOT NULL" in sql
+    assert sql.count("DEFAULT now() NOT NULL") == 2
+    assert 'PRIMARY KEY (product_variant_id, tag_id)' in sql
+    assert 'UNIQUE (name)' in sql
+    assert sql.count("FOREIGN KEY") == 3
+    assert "ON DELETE" not in sql  # NO ACTION implícito, como HU-008.
+    assert "ON UPDATE" not in sql
+    for operation in ("ALTER TABLE", "DROP ", "TRUNCATE ", "INSERT INTO", "DELETE FROM"):
+        assert operation not in sql
+    assert sql.count("UPDATE alembic_version") == 1
+    review_sql = (PROJECT_ROOT / "docs/database/hu005_pending.sql").read_text(encoding="utf-8")
+    normalize_sql = lambda value: "\n".join(line.rstrip() for line in value.splitlines()).strip()
+    assert normalize_sql(review_sql[review_sql.index("BEGIN;"):]) == normalize_sql(sql)
+
+
+def test_hu005_downgrade_sql_removes_only_enrichment_tables():
+    output = StringIO()
+    command.downgrade(
+        alembic_config(output), f"{ENRICHMENT_REVISION}:{INITIAL_REVISION}", sql=True,
+    )
+    sql = output.getvalue()
+    assert sql.count("DROP TABLE") == 3
+    assert sql.index('DROP TABLE "ProductTags"') < sql.index('DROP TABLE "Tags"')
+    assert 'DROP TABLE "ProductImages"' in sql
+    for name in CATALOG_TABLES:
+        assert f'DROP TABLE "{name}"' not in sql
+    assert "CASCADE" not in sql
 
 
 def test_downgrade_offline_removes_children_before_parents():
@@ -150,6 +208,19 @@ def test_initial_validation_allows_existing_alembic_revision():
         connection.execute(version.insert().values(version_num="20261029_0001"))
         validate_initial_database(connection)
     engine.dispose()
+
+
+def test_supplied_connection_must_also_be_postgresql():
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        with engine.connect() as connection:
+            config = alembic_config()
+            config.attributes["connection"] = connection
+            with pytest.raises(CommandError, match="requieren PostgreSQL"):
+                command.current(config)
+            assert inspect(connection).get_table_names() == []
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.asyncio

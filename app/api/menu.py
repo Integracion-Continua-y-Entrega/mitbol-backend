@@ -26,7 +26,9 @@ router = APIRouter(prefix="/api", tags=["Menú"])
         "Los importes son cadenas decimales exactas, con al menos dos decimales. "
         "El rango usa variantes disponibles; si ninguna está disponible, sus precios son de referencia. "
         "Sin variantes, los precios son null y can_order es false. "
-        "image_url es siempre null. Un catálogo vacío devuelve 200 con products: []. "
+        "image_url representa la primera fotografía local por display_order, variante e ID; null si no hay. "
+        "Cada variante incluye image_url y tags; el detalle añade su galería images. "
+        "Un catálogo vacío devuelve 200 con products: []. "
         "Los ejemplos ilustran el contrato; los datos devueltos proceden de la base."
     ),
     responses={
@@ -83,7 +85,8 @@ def get_menu(db: Session = Depends(get_db)) -> MenuResponse:
         "El price de un complemento es un importe adicional y no se suma al rango del producto. "
         "El rango usa variantes disponibles; si ninguna está disponible, es una referencia de todas. "
         "Sin variantes, los precios son null y can_order=false. Las colecciones vacías son []. "
-        "image_url es siempre null y description conserva la descripción local. "
+        "image_url devuelve una fotografía representativa o null; cada variante incluye tags y su galería images. "
+        "description conserva la descripción local. "
         "No se presuponen cantidades mínimas, máximas ni obligatoriedad de selección. "
         "Los ejemplos ilustran el contrato; los datos devueltos proceden de la base."
     ),
