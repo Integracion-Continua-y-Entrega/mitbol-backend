@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.item import Item
 from app.models.category import Category
 from app.models.legacy_base import LegacyBase as Base
-from app.services.sync_service import SyncService
+from app.services.legacy_sync_service import LegacySyncService as SyncService
 
 # Configuración de base de datos en memoria para pruebas rápidas
 engine = create_engine("sqlite:///:memory:")

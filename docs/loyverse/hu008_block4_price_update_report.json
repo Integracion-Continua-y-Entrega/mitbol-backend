@@ -1,0 +1,578 @@
+{
+  "status": "verified",
+  "database": "mitbol_dev",
+  "real_sync_commits": 1,
+  "part": "price_update_only",
+  "target_loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+  "before_rows": {
+    "Products": [
+      {
+        "product_id": 1,
+        "loyverse_id": "a3eeb052-e38b-4b8e-a132-48e7af894689",
+        "name": "Papas fritas",
+        "description": null,
+        "is_available": true,
+        "is_active": true,
+        "is_featured": false,
+        "is_new": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00"
+      },
+      {
+        "product_id": 2,
+        "loyverse_id": "dc391044-d7bb-4657-998a-7d13d4287fb2",
+        "name": "Limonada natural",
+        "description": null,
+        "is_available": true,
+        "is_active": true,
+        "is_featured": false,
+        "is_new": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00"
+      },
+      {
+        "product_id": 3,
+        "loyverse_id": "b0f2bbc1-3feb-4651-b778-e503cbd43d3f",
+        "name": "Hamburguesa clásica",
+        "description": null,
+        "is_available": true,
+        "is_active": true,
+        "is_featured": false,
+        "is_new": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00"
+      }
+    ],
+    "ProductVariants": [
+      {
+        "product_variant_id": 1,
+        "loyverse_id": "e18a3b39-eda7-4852-9ece-6f02a6f5cef5",
+        "name": "Papas fritas",
+        "price": "45.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "product_id": 1
+      },
+      {
+        "product_variant_id": 2,
+        "loyverse_id": "128b68f8-4044-482f-b095-a6023e33f24f",
+        "name": "355 ml",
+        "price": "35.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "product_id": 2
+      },
+      {
+        "product_variant_id": 3,
+        "loyverse_id": "ea50f13f-9246-4892-8c29-b9da20e741a1",
+        "name": "500 ml",
+        "price": "49.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "product_id": 2
+      },
+      {
+        "product_variant_id": 4,
+        "loyverse_id": "f3d99230-acc8-4d58-b83f-08abb478b046",
+        "name": "Sencilla",
+        "price": "89.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "product_id": 3
+      },
+      {
+        "product_variant_id": 5,
+        "loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+        "name": "Doble",
+        "price": "119.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "product_id": 3
+      }
+    ],
+    "ProductModifiers": [
+      {
+        "product_modifier_id": 1,
+        "loyverse_id": "8f84c154-127f-4b30-9219-7de307a18636",
+        "name": "Extras bebida",
+        "display_order": 2,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00"
+      },
+      {
+        "product_modifier_id": 2,
+        "loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Extras hamburguesa",
+        "display_order": 1,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00"
+      }
+    ],
+    "ProductComplements": [
+      {
+        "product_complement_id": 1,
+        "product_modifier_id": 1,
+        "loyverse_id": "44f93f48-d3c9-425d-8aa4-381f40ba12ec",
+        "name": "Chía",
+        "price": "5.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "display_order": 1
+      },
+      {
+        "product_complement_id": 2,
+        "product_modifier_id": 1,
+        "loyverse_id": "ea950531-f90f-4d27-83db-31c697153a43",
+        "name": "Hierbabuena",
+        "price": "5.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "display_order": 2
+      },
+      {
+        "product_complement_id": 3,
+        "product_modifier_id": 2,
+        "loyverse_id": "299df615-6db6-489d-a526-4e6d8bf667a3",
+        "name": "Queso extra",
+        "price": "15.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "display_order": 1
+      },
+      {
+        "product_complement_id": 4,
+        "product_modifier_id": 2,
+        "loyverse_id": "254a728c-07f4-4498-b976-1d18d9e9fe16",
+        "name": "Tocino",
+        "price": "20.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "display_order": 2
+      },
+      {
+        "product_complement_id": 5,
+        "product_modifier_id": 2,
+        "loyverse_id": "5c8553d8-1fec-44b2-bfdf-64257d3bf38c",
+        "name": "Sin cebolla",
+        "price": "0.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T00:18:24.592391-06:00",
+        "display_order": 3
+      }
+    ],
+    "ProductModifierAssignments": [
+      {
+        "product_variant_id": 2,
+        "product_modifier_id": 1
+      },
+      {
+        "product_variant_id": 3,
+        "product_modifier_id": 1
+      },
+      {
+        "product_variant_id": 4,
+        "product_modifier_id": 2
+      },
+      {
+        "product_variant_id": 5,
+        "product_modifier_id": 2
+      }
+    ]
+  },
+  "before_counts": {
+    "Products": 3,
+    "ProductVariants": 5,
+    "ProductModifiers": 2,
+    "ProductComplements": 5,
+    "ProductModifierAssignments": 4
+  },
+  "http_requests": 5,
+  "pages_received": {
+    "/stores": 1,
+    "/items": 3,
+    "/modifiers": 1
+  },
+  "store": {
+    "id": "9e30730f-a5b4-4485-8cc4-bc499cc6e239",
+    "name": "I.C.E",
+    "selection": "configured_id"
+  },
+  "downloaded_at_utc": "2026-11-02T14:31:17.250312+00:00",
+  "plan": {
+    "store_id": "9e30730f-a5b4-4485-8cc4-bc499cc6e239",
+    "synced_at": "2026-11-02T14:31:17.250312+00:00",
+    "products": [
+      {
+        "loyverse_id": "a3eeb052-e38b-4b8e-a132-48e7af894689",
+        "name": "Papas fritas"
+      },
+      {
+        "loyverse_id": "dc391044-d7bb-4657-998a-7d13d4287fb2",
+        "name": "Limonada natural"
+      },
+      {
+        "loyverse_id": "b0f2bbc1-3feb-4651-b778-e503cbd43d3f",
+        "name": "Hamburguesa clásica"
+      }
+    ],
+    "variants": [
+      {
+        "loyverse_id": "e18a3b39-eda7-4852-9ece-6f02a6f5cef5",
+        "product_loyverse_id": "a3eeb052-e38b-4b8e-a132-48e7af894689",
+        "name": "Papas fritas",
+        "price": "45.00",
+        "is_available": true
+      },
+      {
+        "loyverse_id": "128b68f8-4044-482f-b095-a6023e33f24f",
+        "product_loyverse_id": "dc391044-d7bb-4657-998a-7d13d4287fb2",
+        "name": "355 ml",
+        "price": "35.00",
+        "is_available": true
+      },
+      {
+        "loyverse_id": "ea50f13f-9246-4892-8c29-b9da20e741a1",
+        "product_loyverse_id": "dc391044-d7bb-4657-998a-7d13d4287fb2",
+        "name": "500 ml",
+        "price": "49.00",
+        "is_available": true
+      },
+      {
+        "loyverse_id": "f3d99230-acc8-4d58-b83f-08abb478b046",
+        "product_loyverse_id": "b0f2bbc1-3feb-4651-b778-e503cbd43d3f",
+        "name": "Sencilla",
+        "price": "89.00",
+        "is_available": true
+      },
+      {
+        "loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+        "product_loyverse_id": "b0f2bbc1-3feb-4651-b778-e503cbd43d3f",
+        "name": "Doble",
+        "price": "129.00",
+        "is_available": true
+      }
+    ],
+    "modifiers": [
+      {
+        "loyverse_id": "8f84c154-127f-4b30-9219-7de307a18636",
+        "name": "Extras bebida",
+        "display_order": 2
+      },
+      {
+        "loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Extras hamburguesa",
+        "display_order": 1
+      }
+    ],
+    "complements": [
+      {
+        "loyverse_id": "44f93f48-d3c9-425d-8aa4-381f40ba12ec",
+        "modifier_loyverse_id": "8f84c154-127f-4b30-9219-7de307a18636",
+        "name": "Chía",
+        "price": "5.00",
+        "display_order": 1
+      },
+      {
+        "loyverse_id": "ea950531-f90f-4d27-83db-31c697153a43",
+        "modifier_loyverse_id": "8f84c154-127f-4b30-9219-7de307a18636",
+        "name": "Hierbabuena",
+        "price": "5.00",
+        "display_order": 2
+      },
+      {
+        "loyverse_id": "299df615-6db6-489d-a526-4e6d8bf667a3",
+        "modifier_loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Queso extra",
+        "price": "15.00",
+        "display_order": 1
+      },
+      {
+        "loyverse_id": "254a728c-07f4-4498-b976-1d18d9e9fe16",
+        "modifier_loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Tocino",
+        "price": "20.00",
+        "display_order": 2
+      },
+      {
+        "loyverse_id": "5c8553d8-1fec-44b2-bfdf-64257d3bf38c",
+        "modifier_loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Sin cebolla",
+        "price": "0.00",
+        "display_order": 3
+      }
+    ],
+    "assignments": [
+      [
+        "128b68f8-4044-482f-b095-a6023e33f24f",
+        "8f84c154-127f-4b30-9219-7de307a18636"
+      ],
+      [
+        "ea50f13f-9246-4892-8c29-b9da20e741a1",
+        "8f84c154-127f-4b30-9219-7de307a18636"
+      ],
+      [
+        "f3d99230-acc8-4d58-b83f-08abb478b046",
+        "325d3f7e-a1fd-4001-af8d-02f3c9822a21"
+      ],
+      [
+        "246aad80-4540-4c1a-8877-2e31bc03d668",
+        "325d3f7e-a1fd-4001-af8d-02f3c9822a21"
+      ]
+    ],
+    "deleted_products": [
+      "159eb16e-c383-439d-a839-3cec3612a31e",
+      "93d066a2-d9d0-47b5-ab5c-382f3f2105e0"
+    ],
+    "deleted_variants": [],
+    "deleted_modifiers": [],
+    "deleted_complements": []
+  },
+  "unexpected_remote_changes": [],
+  "expected_new_rows": 0,
+  "expected_removed_rows": 0,
+  "expected_price_change": {
+    "product_variant_id": 5,
+    "old_price": "119.00",
+    "new_price": "129.00",
+    "other_prices_changed": 0
+  },
+  "service_result": {
+    "products_processed": 3,
+    "variants_processed": 5,
+    "modifiers_processed": 2,
+    "complements_processed": 5,
+    "assignments_inserted": 0,
+    "assignments_removed": 0,
+    "retired": {
+      "products": 0,
+      "variants": 0,
+      "modifiers": 0,
+      "complements": 0
+    }
+  },
+  "verified_before_commit": {
+    "counts_unchanged": true,
+    "internal_and_external_ids_unchanged": true,
+    "target_internal_id": 5,
+    "target_product_id": 3,
+    "old_price": "119.00",
+    "new_price": "129.00",
+    "other_prices_unchanged": true,
+    "relationships_unchanged": true,
+    "local_fields_unchanged": true,
+    "business_fields_changed": [
+      "ProductVariants[5].price"
+    ],
+    "metadata_updated": "synced_at"
+  },
+  "committed_at_utc": "2026-11-02T14:32:22.542095+00:00",
+  "verified_after_commit": {
+    "counts_unchanged": true,
+    "internal_and_external_ids_unchanged": true,
+    "target_internal_id": 5,
+    "target_product_id": 3,
+    "old_price": "119.00",
+    "new_price": "129.00",
+    "other_prices_unchanged": true,
+    "relationships_unchanged": true,
+    "local_fields_unchanged": true,
+    "business_fields_changed": [
+      "ProductVariants[5].price"
+    ],
+    "metadata_updated": "synced_at"
+  },
+  "after_rows": {
+    "Products": [
+      {
+        "product_id": 1,
+        "loyverse_id": "a3eeb052-e38b-4b8e-a132-48e7af894689",
+        "name": "Papas fritas",
+        "description": null,
+        "is_available": true,
+        "is_active": true,
+        "is_featured": false,
+        "is_new": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00"
+      },
+      {
+        "product_id": 2,
+        "loyverse_id": "dc391044-d7bb-4657-998a-7d13d4287fb2",
+        "name": "Limonada natural",
+        "description": null,
+        "is_available": true,
+        "is_active": true,
+        "is_featured": false,
+        "is_new": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00"
+      },
+      {
+        "product_id": 3,
+        "loyverse_id": "b0f2bbc1-3feb-4651-b778-e503cbd43d3f",
+        "name": "Hamburguesa clásica",
+        "description": null,
+        "is_available": true,
+        "is_active": true,
+        "is_featured": false,
+        "is_new": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00"
+      }
+    ],
+    "ProductVariants": [
+      {
+        "product_variant_id": 1,
+        "loyverse_id": "e18a3b39-eda7-4852-9ece-6f02a6f5cef5",
+        "name": "Papas fritas",
+        "price": "45.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "product_id": 1
+      },
+      {
+        "product_variant_id": 2,
+        "loyverse_id": "128b68f8-4044-482f-b095-a6023e33f24f",
+        "name": "355 ml",
+        "price": "35.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "product_id": 2
+      },
+      {
+        "product_variant_id": 3,
+        "loyverse_id": "ea50f13f-9246-4892-8c29-b9da20e741a1",
+        "name": "500 ml",
+        "price": "49.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "product_id": 2
+      },
+      {
+        "product_variant_id": 4,
+        "loyverse_id": "f3d99230-acc8-4d58-b83f-08abb478b046",
+        "name": "Sencilla",
+        "price": "89.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "product_id": 3
+      },
+      {
+        "product_variant_id": 5,
+        "loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+        "name": "Doble",
+        "price": "129.00",
+        "is_available": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "product_id": 3
+      }
+    ],
+    "ProductModifiers": [
+      {
+        "product_modifier_id": 1,
+        "loyverse_id": "8f84c154-127f-4b30-9219-7de307a18636",
+        "name": "Extras bebida",
+        "display_order": 2,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00"
+      },
+      {
+        "product_modifier_id": 2,
+        "loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Extras hamburguesa",
+        "display_order": 1,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00"
+      }
+    ],
+    "ProductComplements": [
+      {
+        "product_complement_id": 1,
+        "product_modifier_id": 1,
+        "loyverse_id": "44f93f48-d3c9-425d-8aa4-381f40ba12ec",
+        "name": "Chía",
+        "price": "5.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "display_order": 1
+      },
+      {
+        "product_complement_id": 2,
+        "product_modifier_id": 1,
+        "loyverse_id": "ea950531-f90f-4d27-83db-31c697153a43",
+        "name": "Hierbabuena",
+        "price": "5.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "display_order": 2
+      },
+      {
+        "product_complement_id": 3,
+        "product_modifier_id": 2,
+        "loyverse_id": "299df615-6db6-489d-a526-4e6d8bf667a3",
+        "name": "Queso extra",
+        "price": "15.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "display_order": 1
+      },
+      {
+        "product_complement_id": 4,
+        "product_modifier_id": 2,
+        "loyverse_id": "254a728c-07f4-4498-b976-1d18d9e9fe16",
+        "name": "Tocino",
+        "price": "20.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "display_order": 2
+      },
+      {
+        "product_complement_id": 5,
+        "product_modifier_id": 2,
+        "loyverse_id": "5c8553d8-1fec-44b2-bfdf-64257d3bf38c",
+        "name": "Sin cebolla",
+        "price": "0.00",
+        "is_active": true,
+        "synced_at": "2026-11-02T08:31:17.250312-06:00",
+        "display_order": 3
+      }
+    ],
+    "ProductModifierAssignments": [
+      {
+        "product_variant_id": 2,
+        "product_modifier_id": 1
+      },
+      {
+        "product_variant_id": 3,
+        "product_modifier_id": 1
+      },
+      {
+        "product_variant_id": 4,
+        "product_modifier_id": 2
+      },
+      {
+        "product_variant_id": 5,
+        "product_modifier_id": 2
+      }
+    ]
+  },
+  "after_counts": {
+    "Products": 3,
+    "ProductVariants": 5,
+    "ProductModifiers": 2,
+    "ProductComplements": 5,
+    "ProductModifierAssignments": 4
+  },
+  "automated_verification": {
+    "before_real_sync": {
+      "passed": 125,
+      "seconds": 19.16,
+      "command": "MITBOL_POSTGRES_TESTS=1 MITBOL_SYNC_POSTGRES_TESTS=1 python -m pytest -q -p no:cacheprovider"
+    },
+    "after_real_sync": {
+      "passed": 7,
+      "seconds": 1.99,
+      "command": "MITBOL_POSTGRES_TESTS=1 MITBOL_SYNC_POSTGRES_TESTS=1 python -m pytest tests/test_catalog_sync_postgresql.py::test_only_double_price_changes_from_119_to_129 tests/test_postgresql_schema.py -q -p no:cacheprovider"
+    },
+    "sql_sources": [
+      "hu008_block3_verify.sql",
+      "hu008_block4_price_update_verify.sql"
+    ],
+    "sql_results": "hu008_block4_price_update_sql_results.json"
+  },
+  "currency_context": {
+    "provided_by_user": "MXN",
+    "currency_column_added": false
+  },
+  "scope_completed": "HU-008 Bloque 4, segunda parte: actualizaci?n controlada de Doble; sin ejecuci?n peri?dica"
+}

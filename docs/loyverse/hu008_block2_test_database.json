@@ -1,0 +1,27 @@
+{
+  "test_database": "mitbol_test_hu008_a8912592abf7",
+  "revision": "20261029_0001",
+  "remaining_test_rows": {
+    "Products": 0,
+    "ProductVariants": 0,
+    "ProductModifiers": 0,
+    "ProductComplements": 0,
+    "ProductModifierAssignments": 0
+  },
+  "development_counts_before": {
+    "Products": 3,
+    "ProductVariants": 5,
+    "ProductModifiers": 2,
+    "ProductComplements": 5,
+    "ProductModifierAssignments": 4
+  },
+  "development_counts_after": {
+    "Products": 3,
+    "ProductVariants": 5,
+    "ProductModifiers": 2,
+    "ProductComplements": 5,
+    "ProductModifierAssignments": 4
+  },
+  "development_unchanged": true,
+  "database_dropped": false
+}
