@@ -1,0 +1,193 @@
+{
+  "scope": "HU-007 Bloque 2: preparación técnica, sin aplicación en mitbol_dev",
+  "tests": {
+    "tests": "446",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "62.277",
+    "command": ".venv\\Scripts\\python.exe -B -m pytest -p no:cacheprovider -q -ra --junitxml=<TEMP>/mitbol_hu007_tests.xml",
+    "environment": {
+      "MITBOL_SYNC_POSTGRES_TESTS": "1",
+      "MITBOL_POSTGRES_TESTS": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    }
+  },
+  "warnings": [
+    "Starlette: httpx TestClient deprecated",
+    "AnyIO: BlockingPortal alias deprecated"
+  ],
+  "isolated_databases": {
+    "incremental_migration_test_database": "mitbol_test_hu008_3ba152b63e75",
+    "empty_postgresql_database": "mitbol_test_hu008_de803dfce6bc",
+    "isolated_postgresql_database": "mitbol_test_hu008_f586a53b81ad"
+  },
+  "remaining_test_rows": {
+    "Products": 0,
+    "ProductVariants": 0,
+    "ProductModifiers": 0,
+    "ProductComplements": 0,
+    "ProductModifierAssignments": 0,
+    "ProductImages": 0,
+    "Tags": 0,
+    "ProductTags": 0
+  },
+  "development": {
+    "database": "mitbol_dev",
+    "read_only": true,
+    "revision": "20261102_0002",
+    "commercial_column_present": false,
+    "schema_rows_and_sequences_unchanged": true,
+    "state_sha256_before": "601470055e0260a2735d5e8946b80f37a929c6fbb7998882294db61885a32118",
+    "state_sha256_after": "601470055e0260a2735d5e8946b80f37a929c6fbb7998882294db61885a32118",
+    "tables": {
+      "ProductComplements": {
+        "count": 5,
+        "rows_sha256": "01ef8754be1326646dcf263c3e8b40206fec2a399ebf01008f0ea541d76f33fd",
+        "unchanged": true
+      },
+      "ProductImages": {
+        "count": 1,
+        "rows_sha256": "afb46a5dfaf7e79a9be265c7a943a33f359a7b21d46e3dce8fa4c29db3e666e5",
+        "unchanged": true
+      },
+      "ProductModifierAssignments": {
+        "count": 4,
+        "rows_sha256": "240af733231600c8e4919fd62b47a2381040d789295f811da21613868fbf6e70",
+        "unchanged": true
+      },
+      "ProductModifiers": {
+        "count": 2,
+        "rows_sha256": "85cb930e17188b9c87d26b307964667e17b3b2dbc2e191a72457872e36434822",
+        "unchanged": true
+      },
+      "ProductTags": {
+        "count": 1,
+        "rows_sha256": "5293a84873ef0a264d151e0a21e62acf331e8f70371f29cb717a3b8548463ea2",
+        "unchanged": true
+      },
+      "ProductVariants": {
+        "count": 5,
+        "rows_sha256": "72ca8a7fa83fe814f6947c1ce104072bdc93d5df29b77d5531f140361904f161",
+        "unchanged": true
+      },
+      "Products": {
+        "count": 3,
+        "rows_sha256": "b9ab7eae32c3595145bce16d54b5ef92dbeff69646bed99bf3ca9f34517b92d1",
+        "unchanged": true
+      },
+      "Tags": {
+        "count": 1,
+        "rows_sha256": "e9749082b4f365eb27b9702d97b2914a23d8ee776f365345dd92948e1f067b58",
+        "unchanged": true
+      },
+      "alembic_version": {
+        "count": 1,
+        "rows_sha256": "4fbb81320be4a7b72241e74215f38957b79cd43deb68e535466c2c5461d2fea7",
+        "unchanged": true
+      }
+    }
+  },
+  "pending_revision": "20261102_0003",
+  "pending_sql": "docs/database/hu007_pending.sql",
+  "development_migration_applied": false,
+  "real_loyverse_sync_executed": false,
+  "files": [
+    {
+      "status": "M",
+      "path": "app/api/admin_catalog.py"
+    },
+    {
+      "status": "M",
+      "path": "app/api/menu.py"
+    },
+    {
+      "status": "M",
+      "path": "app/models/product_variant.py"
+    },
+    {
+      "status": "M",
+      "path": "app/schemas/menu.py"
+    },
+    {
+      "status": "M",
+      "path": "app/services/catalog_transform.py"
+    },
+    {
+      "status": "M",
+      "path": "app/services/menu_service.py"
+    },
+    {
+      "status": "M",
+      "path": "app/services/sync_service.py"
+    },
+    {
+      "status": "M",
+      "path": "docs/loyverse/hu008_block3_run.py"
+    },
+    {
+      "status": "M",
+      "path": "tests/conftest.py"
+    },
+    {
+      "status": "M",
+      "path": "tests/test_catalog_models.py"
+    },
+    {
+      "status": "M",
+      "path": "tests/test_catalog_sync_postgresql.py"
+    },
+    {
+      "status": "M",
+      "path": "tests/test_menu.py"
+    },
+    {
+      "status": "M",
+      "path": "tests/test_migrations.py"
+    },
+    {
+      "status": "M",
+      "path": "tests/test_postgresql_schema.py"
+    },
+    {
+      "status": "M",
+      "path": "tests/test_product_enrichment_postgresql.py"
+    },
+    {
+      "status": "M",
+      "path": "tests/test_sync.py"
+    },
+    {
+      "status": "??",
+      "path": "app/schemas/availability.py"
+    },
+    {
+      "status": "??",
+      "path": "app/services/availability_rules.py"
+    },
+    {
+      "status": "??",
+      "path": "app/services/product_availability_service.py"
+    },
+    {
+      "status": "??",
+      "path": "docs/database/hu007_pending.sql"
+    },
+    {
+      "status": "??",
+      "path": "docs/database/hu007_verification.json"
+    },
+    {
+      "status": "??",
+      "path": "migrations/versions/20261102_0003_hu007_availability.py"
+    },
+    {
+      "status": "??",
+      "path": "tests/test_availability_api.py"
+    },
+    {
+      "status": "??",
+      "path": "tests/test_availability_migration.py"
+    }
+  ]
+}

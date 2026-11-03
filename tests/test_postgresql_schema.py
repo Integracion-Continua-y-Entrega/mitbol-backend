@@ -41,13 +41,13 @@ def postgres_connection():
         engine.dispose()
 
 
-def test_development_is_at_authorized_hu005_revision(postgres_connection):
+def test_development_is_at_authorized_hu007_revision(postgres_connection):
     inspector = inspect(postgres_connection)
     assert set(inspector.get_table_names(schema="public")) == {
         *Base.metadata.tables, "alembic_version",
     }
     assert MigrationContext.configure(postgres_connection).get_current_heads() == (
-        "20261102_0002",
+        "20261102_0003",
     )
 
 
@@ -56,13 +56,15 @@ def test_postgresql_table_matches_orm(postgres_connection, table_name):
     """Compara las columnas y restricciones reales con el modelo SQLAlchemy."""
     inspector = inspect(postgres_connection)
     expected = Base.metadata.tables[table_name]
+    # HU-007 ya está instalada mediante la autorización expresa de esta etapa.
+    expected_columns = list(expected.columns)
     actual = {
         column["name"]: column
         for column in inspector.get_columns(table_name, schema="public")
     }
-    assert set(actual) == set(expected.columns.keys())
+    assert set(actual) == {column.name for column in expected_columns}
 
-    for column in expected.columns:
+    for column in expected_columns:
         reflected = actual[column.name]
         assert reflected["type"].compile(dialect=postgres_connection.dialect) == (
             column.type.compile(dialect=postgres_connection.dialect)

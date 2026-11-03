@@ -1,12 +1,11 @@
-"""Integridad del catálogo en una base SQLite efímera, sin tocar PostgreSQL."""
+"""Integridad del catálogo en PostgreSQL aislado."""
 
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, event, insert, select
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 from app.models import (
     Base, Product, ProductComplement, ProductModifier,
@@ -15,15 +14,8 @@ from app.models import (
 
 
 @pytest.fixture
-def catalog_session():
-    engine = create_engine("sqlite:///:memory:")
-
-    @event.listens_for(engine, "connect")
-    def enable_foreign_keys(connection, _):
-        connection.execute("PRAGMA foreign_keys=ON")
-
-    Base.metadata.create_all(engine)
-    with Session(engine) as session:
+def catalog_session(sync_db):
+    with sync_db.sessions() as session:
         product = Product(
             loyverse_id="item-1", name="Mitbol", description="Descripción local",
             is_available=False, is_featured=True,
@@ -44,7 +36,6 @@ def catalog_session():
         session.add_all([product, variant, modifier, complement, assignment])
         session.commit()
         yield session
-    engine.dispose()
 
 
 def test_catalog_relationships_and_decimal_prices(catalog_session):
@@ -62,6 +53,7 @@ def test_catalog_relationships_and_decimal_prices(catalog_session):
     assert product.is_active is True
     assert product.is_new is True
     assert variant.is_available is True
+    assert variant.is_commercially_available is False
     assert modifier.synced_at is None
     assert modifier.complements[0].is_active is True
 
@@ -78,19 +70,27 @@ def test_catalog_relationships_and_decimal_prices(catalog_session):
     ],
 )
 def test_duplicate_loyverse_id_is_rejected(catalog_session, model, loyverse_id, extra):
+    extra = dict(extra)
+    if "product_id" in extra:
+        extra["product_id"] = catalog_session.scalar(select(Product.product_id))
+    if "product_modifier_id" in extra:
+        extra["product_modifier_id"] = catalog_session.scalar(select(ProductModifier.product_modifier_id))
     values = {
         "loyverse_id": loyverse_id, "name": "Duplicado",
         "synced_at": datetime(2026, 10, 29, tzinfo=timezone.utc), **extra,
     }
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError) as error:
         catalog_session.execute(insert(model).values(**values))
+    assert error.value.orig.pgcode == "23505"
     catalog_session.rollback()
 
 
 def test_duplicate_modifier_assignment_is_rejected(catalog_session):
+    assignment = catalog_session.scalars(select(ProductModifierAssignment)).one()
     with pytest.raises(IntegrityError):
         catalog_session.execute(insert(ProductModifierAssignment).values(
-            product_variant_id=1, product_modifier_id=1,
+            product_variant_id=assignment.product_variant_id,
+            product_modifier_id=assignment.product_modifier_id,
         ))
     catalog_session.rollback()
 
@@ -109,11 +109,17 @@ def test_variant_requires_existing_product(catalog_session):
     (ProductComplement, {"product_modifier_id": 1, "display_order": 2}),
 ])
 def test_null_price_is_rejected(catalog_session, model, extra):
-    with pytest.raises(IntegrityError):
+    extra = dict(extra)
+    if "product_id" in extra:
+        extra["product_id"] = catalog_session.scalar(select(Product.product_id))
+    if "product_modifier_id" in extra:
+        extra["product_modifier_id"] = catalog_session.scalar(select(ProductModifier.product_modifier_id))
+    with pytest.raises(IntegrityError) as error:
         catalog_session.execute(insert(model).values(
             loyverse_id="no-price", name="Sin precio", price=None,
             synced_at=datetime(2026, 10, 29, tzinfo=timezone.utc), **extra,
         ))
+    assert error.value.orig.pgcode == "23502"
     catalog_session.rollback()
 
 

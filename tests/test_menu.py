@@ -1,4 +1,4 @@
-"""Contrato de HU-001 con SQLite efímero y PostgreSQL aislado, sin escribir en mitbol_dev."""
+"""Contrato público con PostgreSQL aislado, sin escribir en mitbol_dev."""
 
 from contextlib import contextmanager
 from copy import deepcopy
@@ -11,10 +11,9 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import event, select
 from sqlalchemy.exc import InterfaceError, OperationalError, ProgrammingError, TimeoutError
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.db.database import get_db
 from app.models import (
@@ -23,31 +22,20 @@ from app.models import (
 from app.schemas.menu import MenuComplement, MenuProductDetailResponse, MenuResponse, MenuVariant
 
 
-@pytest.fixture(params=["sqlite", "postgresql"])
+@pytest.fixture(params=["postgresql"])
 def menu_db(request):
-    if request.param == "sqlite":
-        engine = create_engine(
-            "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False},
+    engine = request.getfixturevalue("sync_test_database")
+    assert engine.url.database.startswith("mitbol_test_hu008_")
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        sessions = sessionmaker(
+            bind=connection, autoflush=False, expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
         )
-        Base.metadata.create_all(engine)
-    else:
-        # Esta fixture existente crea mitbol_test_hu008_<id>, nunca usa mitbol_dev para escribir.
-        engine = request.getfixturevalue("sync_test_database")
-        assert engine.url.database.startswith("mitbol_test_hu008_")
-    try:
-        with engine.connect() as connection:
-            transaction = connection.begin()
-            sessions = sessionmaker(
-                bind=connection, autoflush=False, expire_on_commit=False,
-                join_transaction_mode="create_savepoint",
-            )
-            try:
-                yield SimpleNamespace(connection=connection, sessions=sessions)
-            finally:
-                transaction.rollback()
-    finally:
-        if request.param == "sqlite":
-            engine.dispose()
+        try:
+            yield SimpleNamespace(connection=connection, sessions=sessions)
+        finally:
+            transaction.rollback()
 
 
 @pytest.fixture
@@ -65,6 +53,7 @@ def add_product(menu_db):
                 loyverse_id="hu001-variant-" + uuid4().hex,
                 name=f"Presentación {index + 1}", price=Decimal(price),
                 is_available=flags[index] if flags is not None else True,
+                is_commercially_available=True,
                 synced_at=timestamp,
             )
             for index, price in enumerate(prices)
@@ -169,7 +158,7 @@ def test_single_and_multiple_variant_prices(menu_client, add_product, prices, mi
     (False, (True, True), "35.00", "49.00"),
     (True, (False, True), "49.00", "49.00"),
     (True, (False, False), "35.00", "49.00"),
-    (False, (False, True), "49.00", "49.00"),
+    (False, (False, True), "35.00", "49.00"),
 ])
 def test_stored_availability_and_effective_can_order(
     menu_client, add_product, available, flags, minimum, maximum,
@@ -522,7 +511,7 @@ def test_detail_keeps_assignments_and_shared_group_context(menu_client, detail_c
     (False, (True, True), "35.00", "49.00"),
     (True, (False, True), "49.00", "49.00"),
     (True, (False, False), "35.00", "49.00"),
-    (False, (False, True), "49.00", "49.00"),
+    (False, (False, True), "35.00", "49.00"),
 ])
 def test_detail_availability_matches_hu001(
     menu_client, menu_db, add_product, available, flags, minimum, maximum,

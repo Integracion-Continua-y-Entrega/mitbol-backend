@@ -187,7 +187,8 @@ def test_product_tombstone_preserves_rows_prices_and_local_availability(sync_db,
     variants = by_external_id(sync_db, ProductVariant)
     assert product["is_active"] is False and product["is_available"] is True
     for identifier in ("single", "double"):
-        assert variants[identifier]["is_available"] is False
+        assert variants[identifier]["is_available"] is True
+        assert variants[identifier]["is_commercially_available"] is False
         assert variants[identifier]["price"] == old_variants[identifier]["price"]
         assert variants[identifier]["product_variant_id"] == old_variants[identifier]["product_variant_id"]
     assert len(rows(sync_db, Product)) == 3
@@ -206,8 +207,10 @@ def test_variant_tombstones_do_not_need_prices(sync_db, commercial_snapshot, all
         variants[position] = {"variant_id": variants[position]["variant_id"], "item_id": "burger", "deleted_at": DELETED_AT}
     sync_db.service.persist_snapshot(changed)
     actual = by_external_id(sync_db, ProductVariant)
-    assert actual["single"]["is_available"] is False
-    assert actual["double"]["is_available"] is (not all_variants)
+    assert actual["single"]["is_available"] is True
+    assert actual["double"]["is_available"] is True
+    assert actual["single"]["is_commercially_available"] is False
+    assert actual["double"]["is_commercially_available"] is (not all_variants)
     assert len(actual) == 5
 
 
@@ -318,14 +321,86 @@ def test_updates_preserve_product_and_variant_local_availability(sync_db, commer
     assert by_external_id(sync_db, Product)["burger"]["is_available"] is False
     assert by_external_id(sync_db, ProductVariant)["single"]["is_available"] is False
     assert by_external_id(sync_db, ProductVariant)["double"]["is_available"] is True
+    assert by_external_id(sync_db, ProductVariant)["single"]["is_commercially_available"] is True
+    assert by_external_id(sync_db, ProductVariant)["double"]["is_commercially_available"] is False
 
 
 def test_new_variant_uses_actual_initial_store_availability(sync_db, commercial_snapshot):
     changed = deepcopy(commercial_snapshot)
     changed.items[0]["variants"][0]["stores"][0]["available_for_sale"] = False
     sync_db.service.persist_snapshot(changed)
-    assert by_external_id(sync_db, ProductVariant)["single"]["is_available"] is False
+    assert by_external_id(sync_db, ProductVariant)["single"]["is_available"] is True
     assert by_external_id(sync_db, ProductVariant)["double"]["is_available"] is True
+    assert by_external_id(sync_db, ProductVariant)["single"]["is_commercially_available"] is False
+    assert by_external_id(sync_db, ProductVariant)["double"]["is_commercially_available"] is True
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_commercial_changes_in_both_directions_never_change_local_preference(sync_db, commercial_snapshot, local):
+    sync_db.service.persist_snapshot(commercial_snapshot)
+    sync_db.connection.execute(update(ProductVariant).where(ProductVariant.loyverse_id == "single").values(is_available=local))
+    before = by_external_id(sync_db, ProductVariant)["single"]
+    for commercial in (False, True, False, True):
+        snapshot = deepcopy(commercial_snapshot)
+        snapshot.items[0]["variants"][0]["stores"][0]["available_for_sale"] = commercial
+        sync_db.service.persist_snapshot(snapshot)
+        actual = by_external_id(sync_db, ProductVariant)["single"]
+        assert actual["is_available"] is local
+        assert actual["is_commercially_available"] is commercial
+        assert {key: value for key, value in actual.items() if key != "is_commercially_available"} == {
+            key: value for key, value in before.items() if key != "is_commercially_available"
+        }
+
+
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("retire_product", [False, True])
+def test_retirement_and_reappearance_keep_local_preference_and_enrichment(sync_db, commercial_snapshot, local, retire_product):
+    from app.models import ProductImage, ProductTag, Tag
+    sync_db.service.persist_snapshot(commercial_snapshot)
+    before = by_external_id(sync_db, ProductVariant)["single"]
+    sync_db.connection.execute(update(ProductVariant).where(ProductVariant.loyverse_id == "single").values(is_available=local))
+    sync_db.connection.execute(update(Product).where(Product.loyverse_id == "burger").values(description="Local"))
+    with sync_db.sessions() as db:
+        db.add(ProductImage(product_variant_id=before["product_variant_id"], image_url="/media/keep.webp", display_order=0))
+        db.add(ProductTag(product_variant_id=before["product_variant_id"], tag=Tag(name="picante")))
+        db.commit()
+    enrichment_before = {model.__tablename__: rows(sync_db, model) for model in (ProductImage, ProductTag, Tag)}
+    snapshot = deepcopy(commercial_snapshot)
+    if retire_product:
+        snapshot.items[0].clear()
+        snapshot.items[0].update(id="burger", deleted_at=DELETED_AT)
+    else:
+        snapshot.items[0]["variants"][0].clear()
+        snapshot.items[0]["variants"][0].update(variant_id="single", item_id="burger", deleted_at=DELETED_AT)
+    sync_db.service.persist_snapshot(snapshot)
+    retired = by_external_id(sync_db, ProductVariant)["single"]
+    assert retired["is_available"] is local and retired["is_commercially_available"] is False
+    sync_db.service.persist_snapshot(commercial_snapshot)
+    restored = by_external_id(sync_db, ProductVariant)["single"]
+    assert restored["is_available"] is local and restored["is_commercially_available"] is True
+    assert restored["product_variant_id"] == before["product_variant_id"]
+    assert restored["price"] == before["price"]
+    assert by_external_id(sync_db, Product)["burger"]["description"] == "Local"
+    assert {model.__tablename__: rows(sync_db, model) for model in (ProductImage, ProductTag, Tag)} == enrichment_before
+
+
+@pytest.mark.parametrize("mode", ["missing", "null", "string", "missing-store"])
+def test_insufficient_commercial_data_is_rejected_without_inventing_availability(sync_db, commercial_snapshot, mode):
+    sync_db.service.persist_snapshot(commercial_snapshot)
+    before = all_rows(sync_db)
+    snapshot = deepcopy(commercial_snapshot)
+    store = snapshot.items[0]["variants"][0]["stores"][0]
+    if mode == "missing":
+        del store["available_for_sale"]
+    elif mode == "null":
+        store["available_for_sale"] = None
+    elif mode == "string":
+        store["available_for_sale"] = "true"
+    else:
+        store["store_id"] = "another-store"
+    with pytest.raises(CatalogValidationError):
+        sync_db.service.persist_snapshot(snapshot)
+    assert all_rows(sync_db) == before
 
 
 def test_another_transaction_cannot_sync_while_lock_is_held(sync_db, commercial_snapshot):

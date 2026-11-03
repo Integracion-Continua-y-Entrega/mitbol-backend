@@ -6,6 +6,7 @@ from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError, Ti
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Product, ProductImage, ProductModifier, ProductModifierAssignment, ProductTag, ProductVariant, Tag
+from app.services.availability_rules import product_can_order, variant_can_order
 from app.schemas.menu import (
     MenuComplement,
     MenuModifier,
@@ -51,21 +52,20 @@ def _load_enrichment(db: Session, products: list[Product]) -> tuple[dict, dict]:
 
 
 def _build_product(product: Product, images: dict, tags: dict) -> MenuProduct:
-    parent_available = product.is_active and product.is_available
     variants = [
         MenuVariant(
             product_variant_id=variant.product_variant_id,
             name=variant.name,
             price=variant.price,
             is_available=variant.is_available,
-            can_order=parent_available and variant.is_available,
+            can_order=variant_can_order(product, variant),
             image_url=(images[variant.product_variant_id][0].image_url
                        if images.get(variant.product_variant_id) else None),
             tags=tags.get(variant.product_variant_id, []),
         )
         for variant in sorted(product.variants, key=lambda value: value.product_variant_id)
     ]
-    available_variants = [variant for variant in variants if variant.is_available]
+    available_variants = [variant for variant in variants if variant.can_order]
     # Si todas están agotadas, los importes se conservan únicamente como referencia.
     prices = [variant.price for variant in (available_variants or variants)]
     price_min = min(prices, default=None)
@@ -83,7 +83,7 @@ def _build_product(product: Product, images: dict, tags: dict) -> MenuProduct:
         image_url=representative.image_url if representative else None,
         is_active=product.is_active,
         is_available=product.is_available,
-        can_order=parent_available and bool(available_variants),
+        can_order=product_can_order(product),
         price_min=price_min,
         price_max=price_max,
         has_price_range=price_min != price_max,

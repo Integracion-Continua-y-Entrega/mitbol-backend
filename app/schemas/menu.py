@@ -46,10 +46,10 @@ class MenuVariant(BaseModel):
     name: str = Field(description="Nombre de la presentación registrado en PostgreSQL.")
     price: MenuAmount = Field(description="Importe exacto como cadena decimal, sin símbolo monetario.")
     is_available: bool = Field(
-        description="Estado almacenado. No distingue agotamiento local de baja comercial."
+        description="Disponibilidad local almacenada; can_order incluye además la habilitación comercial."
     )
     can_order: bool = Field(
-        description="Requiere variante disponible y producto padre activo y disponible."
+        description="Requiere variante disponible local y comercialmente, y producto padre activo y disponible."
     )
     image_url: str | None = Field(default=None, description="Primera fotografía local de esta variante; null si no existe.")
     tags: list[MenuTag] = Field(default_factory=list, description="Etiquetas locales de esta variante, ordenadas por ID.")
@@ -65,10 +65,10 @@ class MenuProduct(BaseModel):
     is_active: bool = Field(description="Activación comercial. El menú sólo incluye productos activos.")
     is_available: bool = Field(description="Disponibilidad local almacenada del producto.")
     can_order: bool = Field(
-        description="Producto activo y disponible con al menos una variante disponible."
+        description="Producto activo y disponible con al menos una variante disponible local y comercialmente."
     )
     price_min: MenuAmount | None = Field(
-        description="Menor precio de variantes disponibles; si no hay, referencia de todas. "
+        description="Menor precio de variantes con can_order=true; si no hay, referencia de todas. "
         "Null si no existen variantes."
     )
     price_max: MenuAmount | None = Field(

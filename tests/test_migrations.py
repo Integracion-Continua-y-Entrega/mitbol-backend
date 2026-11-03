@@ -30,6 +30,7 @@ CATALOG_TABLES = {
 ENRICHMENT_TABLES = {"ProductImages", "Tags", "ProductTags"}
 INITIAL_REVISION = "20261029_0001"
 ENRICHMENT_REVISION = "20261102_0002"
+AVAILABILITY_REVISION = "20261102_0003"
 
 
 def alembic_config(output=None):
@@ -92,7 +93,10 @@ def test_migration_matches_models(monkeypatch, revision_id, expected_tables):
     revision.module.upgrade()
     assert set(created_tables) == expected_tables
     for name in expected_tables:
-        assert table_signature(created_tables[name]) == table_signature(Base.metadata.tables[name]), name
+        expected = table_signature(Base.metadata.tables[name])
+        if name == "ProductVariants":
+            expected["columns"].pop("is_commercially_available")
+        assert table_signature(created_tables[name]) == expected, name
 
 
 def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch):
@@ -116,9 +120,10 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
     assert ENRICHMENT_REVISION in sql
 
 
-def test_hu005_is_the_only_new_revision():
+def test_hu007_extends_hu005_without_changing_its_ancestry():
     scripts = ScriptDirectory.from_config(alembic_config())
-    assert scripts.get_heads() == [ENRICHMENT_REVISION]
+    assert scripts.get_heads() == [AVAILABILITY_REVISION]
+    assert scripts.get_revision(AVAILABILITY_REVISION).down_revision == ENRICHMENT_REVISION
     assert scripts.get_revision(ENRICHMENT_REVISION).down_revision == INITIAL_REVISION
 
 
@@ -177,37 +182,28 @@ def test_downgrade_offline_removes_children_before_parents():
     assert "CASCADE" not in sql
 
 
-def test_initial_validation_accepts_empty_database_without_creating_tables():
-    engine = create_engine("sqlite:///:memory:")
-    with engine.connect() as connection:
-        validate_initial_database(connection)
-        assert inspect(connection).get_table_names() == []
-    engine.dispose()
+def test_initial_validation_accepts_empty_database_without_creating_tables(empty_postgresql_connection):
+    validate_initial_database(empty_postgresql_connection)
+    assert inspect(empty_postgresql_connection).get_table_names() == []
 
 
-def test_initial_validation_rejects_prototype_without_modifying_it():
-    engine = create_engine("sqlite:///:memory:")
+def test_initial_validation_rejects_prototype_without_modifying_it(empty_postgresql_connection):
     metadata = MetaData()
     Table("items", metadata, Column("id", Integer, primary_key=True))
     Table("categories", metadata, Column("id", Integer, primary_key=True))
-    metadata.create_all(engine)
-    with engine.connect() as connection:
-        with pytest.raises(CommandError, match="base nueva y vacía"):
-            validate_initial_database(connection)
-        assert set(inspect(connection).get_table_names()) == {"items", "categories"}
-    engine.dispose()
+    metadata.create_all(empty_postgresql_connection)
+    with pytest.raises(CommandError, match="base nueva y vacía"):
+        validate_initial_database(empty_postgresql_connection)
+    assert set(inspect(empty_postgresql_connection).get_table_names()) == {"items", "categories"}
 
 
-def test_initial_validation_allows_existing_alembic_revision():
-    engine = create_engine("sqlite:///:memory:")
+def test_initial_validation_allows_existing_alembic_revision(empty_postgresql_connection):
     metadata = MetaData()
     version = Table("alembic_version", metadata, Column("version_num", String(32), primary_key=True))
     Table("Products", metadata, Column("product_id", Integer, primary_key=True))
-    metadata.create_all(engine)
-    with engine.begin() as connection:
-        connection.execute(version.insert().values(version_num="20261029_0001"))
-        validate_initial_database(connection)
-    engine.dispose()
+    metadata.create_all(empty_postgresql_connection)
+    empty_postgresql_connection.execute(version.insert().values(version_num="20261029_0001"))
+    validate_initial_database(empty_postgresql_connection)
 
 
 def test_supplied_connection_must_also_be_postgresql():

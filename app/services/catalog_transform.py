@@ -23,7 +23,7 @@ class VariantData:
     product_loyverse_id: str
     name: str
     price: Decimal
-    is_available: bool
+    is_commercially_available: bool
 
 
 @dataclass(frozen=True)

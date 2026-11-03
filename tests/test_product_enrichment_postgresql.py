@@ -10,12 +10,13 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 import pytest
-from sqlalchemy import create_engine, delete, func, inspect, insert, select
+from sqlalchemy import MetaData, create_engine, delete, func, inspect, insert, select
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Product, ProductImage, ProductTag, ProductVariant, Tag
 from app.services.sync_service import SyncService
+from app.services.catalog_transform import transform_catalog
 
 INITIAL_REVISION = "20261029_0001"
 ENRICHMENT_REVISION = "20261102_0002"
@@ -44,7 +45,7 @@ def enrichment_catalog(sync_db, commercial_snapshot):
 
 def test_migrated_postgresql_matches_all_models(sync_db):
     connection = sync_db.connection
-    assert MigrationContext.configure(connection).get_current_heads() == (ENRICHMENT_REVISION,)
+    assert MigrationContext.configure(connection).get_current_heads() == ("20261102_0003",)
     inspector = inspect(connection)
     assert set(inspector.get_table_names()) == {*Base.metadata.tables, "alembic_version"}
     context = MigrationContext.configure(connection, opts={
@@ -245,6 +246,8 @@ def initial_catalog_database(sync_test_database, record_testsuite_property):
 def _commercial_state(engine):
     with engine.connect() as connection:
         inspector = inspect(connection)
+        metadata = MetaData()
+        metadata.reflect(connection, only=sorted(CATALOG_TABLES))
         return {
             name: {
                 "columns": [(col["name"], col["type"].compile(dialect=connection.dialect),
@@ -253,8 +256,8 @@ def _commercial_state(engine):
                 "pk": inspector.get_pk_constraint(name),
                 "fk": inspector.get_foreign_keys(name),
                 "unique": inspector.get_unique_constraints(name),
-                "rows": connection.execute(select(Base.metadata.tables[name]).order_by(
-                    *Base.metadata.tables[name].primary_key.columns,
+                "rows": connection.execute(select(metadata.tables[name]).order_by(
+                    *metadata.tables[name].primary_key.columns,
                 )).all(),
             } for name in sorted(CATALOG_TABLES)
         }
@@ -264,11 +267,41 @@ def test_incremental_upgrade_preserves_existing_commercial_schema_and_data(
     initial_catalog_database, commercial_snapshot, monkeypatch,
 ):
     database = initial_catalog_database
-    service = SyncService(
-        sessionmaker(bind=database.engine),
-        expected_database=database.engine.url.database, store_id="test-store",
-    )
-    service.persist_snapshot(commercial_snapshot)
+    # Reproduce datos HU-008 con sus tablas históricas reflejadas. El servicio
+    # actual requiere HU-007 y no debe ejecutarse contra un esquema anterior.
+    plan = transform_catalog(commercial_snapshot)
+    with database.engine.begin() as connection:
+        metadata = MetaData()
+        metadata.reflect(connection)
+        products, modifiers, variants = {}, {}, {}
+        for product in plan.products:
+            table = metadata.tables["Products"]
+            products[product.loyverse_id] = connection.scalar(insert(table).values(
+                loyverse_id=product.loyverse_id, name=product.name, synced_at=plan.synced_at,
+            ).returning(table.c.product_id))
+        for modifier in plan.modifiers:
+            table = metadata.tables["ProductModifiers"]
+            modifiers[modifier.loyverse_id] = connection.scalar(insert(table).values(
+                loyverse_id=modifier.loyverse_id, name=modifier.name,
+                display_order=modifier.display_order, synced_at=plan.synced_at,
+            ).returning(table.c.product_modifier_id))
+        for variant in plan.variants:
+            table = metadata.tables["ProductVariants"]
+            variants[variant.loyverse_id] = connection.scalar(insert(table).values(
+                loyverse_id=variant.loyverse_id, name=variant.name, price=variant.price,
+                product_id=products[variant.product_loyverse_id], synced_at=plan.synced_at,
+                is_available=variant.is_commercially_available,
+            ).returning(table.c.product_variant_id))
+        for complement in plan.complements:
+            connection.execute(insert(metadata.tables["ProductComplements"]).values(
+                loyverse_id=complement.loyverse_id, name=complement.name, price=complement.price,
+                product_modifier_id=modifiers[complement.modifier_loyverse_id],
+                display_order=complement.display_order, synced_at=plan.synced_at,
+            ))
+        for variant_id, modifier_id in plan.assignments:
+            connection.execute(insert(metadata.tables["ProductModifierAssignments"]).values(
+                product_variant_id=variants[variant_id], product_modifier_id=modifiers[modifier_id],
+            ))
     before = _commercial_state(database.engine)
     assert [len(before[name]["rows"]) for name in (
         "Products", "ProductVariants", "ProductModifiers", "ProductComplements",

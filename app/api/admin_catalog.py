@@ -12,14 +12,18 @@ from app.schemas.enrichment import (
     ImageResponse, TagCreate, TagListResponse, TagResponse,
 )
 from app.schemas.menu import MenuErrorResponse
+from app.schemas.availability import (
+    AvailabilityUpdate, ProductAvailabilityResponse, VariantAvailabilityResponse,
+)
 from app.services import product_enrichment_service as service
+from app.services import product_availability_service as availability
 from app.services.enrichment_errors import StorageError
 from app.services.image_storage import MAX_IMAGE_BYTES
 
 Identifier = Annotated[int, Path(ge=1, le=2_147_483_647, description="ID interno positivo.")]
 Database = Annotated[Session, Depends(get_db)]
 router = APIRouter(
-    prefix="/api/admin", tags=["Administración local HU-005"],
+    prefix="/api/admin", tags=["Administración local"],
     dependencies=[Depends(require_local_admin)],
     responses={code: {"model": MenuErrorResponse, "description": detail} for code, detail in {
         401: "Credencial administrativa ausente o inválida.",
@@ -32,6 +36,26 @@ router = APIRouter(
         503: "Base de datos o almacenamiento temporalmente no disponible.",
     }.items()},
 )
+
+
+@router.get("/products/{product_id}/availability", response_model=ProductAvailabilityResponse, summary="Consultar disponibilidad del producto")
+def get_product_availability(product_id: Identifier, db: Database):
+    return availability.get_product_availability(db, product_id)
+
+
+@router.patch("/products/{product_id}/availability", response_model=ProductAvailabilityResponse, summary="Actualizar disponibilidad local del producto", description="Modifica únicamente is_available; conserva el estado de sus variantes. Un producto comercialmente inactivo nunca puede pedirse. " + ADMIN_SECURITY_DESCRIPTION)
+def update_product_availability(product_id: Identifier, payload: AvailabilityUpdate, db: Database):
+    return availability.update_product_availability(db, product_id, payload.is_available)
+
+
+@router.get("/variants/{variant_id}/availability", response_model=VariantAvailabilityResponse, summary="Consultar disponibilidad de la variante")
+def get_variant_availability(variant_id: Identifier, db: Database):
+    return availability.get_variant_availability(db, variant_id)
+
+
+@router.patch("/variants/{variant_id}/availability", response_model=VariantAvailabilityResponse, summary="Actualizar disponibilidad local de la variante", description="Modifica únicamente is_available. Loyverse administra is_commercially_available; el producto padre también debe estar activo y disponible. " + ADMIN_SECURITY_DESCRIPTION)
+def update_variant_availability(variant_id: Identifier, payload: AvailabilityUpdate, db: Database):
+    return availability.update_variant_availability(db, variant_id, payload.is_available)
 
 
 @router.get("/products/{product_id}/description", response_model=DescriptionResponse, summary="Consultar descripción local")

@@ -108,14 +108,15 @@ class SyncService:
                 "display_order": modifier.display_order, "synced_at": plan.synced_at,
             }, ("name", "display_order", "synced_at"))
         for variant in plan.variants:
-            # Una variante nueva toma la disponibilidad comercial observada.
-            # En las existentes, is_available puede haber sido administrado
-            # localmente: sólo una baja explícita lo deshabilita en _retire().
+            # Nuevas: preferencia local disponible y estado comercial verificado.
+            # Existentes: Loyverse nunca modifica la preferencia local.
             variants[variant.loyverse_id] = self._upsert(session, ProductVariant, {
                 "loyverse_id": variant.loyverse_id, "name": variant.name, "price": variant.price,
                 "product_id": products[variant.product_loyverse_id],
-                "is_available": variant.is_available, "synced_at": plan.synced_at,
-            }, ("name", "price", "synced_at"), parent="product_id")
+                "is_available": True,
+                "is_commercially_available": variant.is_commercially_available,
+                "synced_at": plan.synced_at,
+            }, ("name", "price", "is_commercially_available", "synced_at"), parent="product_id")
         for complement in plan.complements:
             self._upsert(session, ProductComplement, {
                 "loyverse_id": complement.loyverse_id, "name": complement.name,
@@ -183,11 +184,11 @@ class SyncService:
                 )).rowcount
                 retired["variants"] += session.execute(update(ProductVariant).where(
                     ProductVariant.product_id == product_id,
-                ).values(is_available=False, synced_at=plan.synced_at)).rowcount
+                ).values(is_commercially_available=False, synced_at=plan.synced_at)).rowcount
         for external_id, parent_id in plan.deleted_variants:
             variant_id = self._retire_child(
                 session, ProductVariant, Product, "product_variant_id", "product_id", external_id, parent_id,
-                {"is_available": False, "synced_at": plan.synced_at},
+                {"is_commercially_available": False, "synced_at": plan.synced_at},
             )
             if variant_id is not None:
                 retired["variants"] += 1

@@ -115,7 +115,9 @@ def verify_rows(connection, plan):
         actual = variants[variant.loyverse_id]
         require(actual["product_id"] == products[variant.product_loyverse_id]["product_id"],
                 "Una variante tiene un producto incorrecto.")
-        require(actual["is_available"] == variant.is_available, "Disponibilidad inicial de variante incorrecta.")
+        require(actual["is_available"] is True, "Preferencia local inicial de variante incorrecta.")
+        require(actual["is_commercially_available"] == variant.is_commercially_available,
+                "Disponibilidad comercial inicial de variante incorrecta.")
     for complement in plan.complements:
         actual = complements[complement.loyverse_id]
         require(actual["product_modifier_id"] == modifiers[complement.modifier_loyverse_id]["product_modifier_id"],

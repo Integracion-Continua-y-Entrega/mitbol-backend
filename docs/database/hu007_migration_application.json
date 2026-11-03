@@ -1,0 +1,417 @@
+{
+  "stage": "HU-007 authorized migration application",
+  "migration_applied": true,
+  "preflight_passed": true,
+  "process_check": {
+    "api_process_count": 0,
+    "sync_process_count": 0,
+    "other_python_process_ids": [
+      4136,
+      12256
+    ],
+    "command_lines_readable": true
+  },
+  "connection": {
+    "host": "localhost",
+    "port": 5432,
+    "configured_database": "mitbol_dev",
+    "actual_database": "mitbol_dev",
+    "app_and_alembic_match": true,
+    "read_only_preflight": true,
+    "schema": "public"
+  },
+  "revision_before": "20261102_0002",
+  "repository_head": "20261102_0003",
+  "new_column_present_before": false,
+  "migration_sha256": "94c879558003e243543a837b67069a8b966479313dae0d696b5b4a7f017f4915",
+  "approved_sql_matches": true,
+  "previous_migrations_unchanged": true,
+  "variants_before": [
+    {
+      "product_variant_id": 1,
+      "product_id": 1,
+      "loyverse_id": "e18a3b39-eda7-4852-9ece-6f02a6f5cef5",
+      "name": "Papas fritas",
+      "price": "45.00",
+      "is_available": true
+    },
+    {
+      "product_variant_id": 2,
+      "product_id": 2,
+      "loyverse_id": "128b68f8-4044-482f-b095-a6023e33f24f",
+      "name": "355 ml",
+      "price": "35.00",
+      "is_available": true
+    },
+    {
+      "product_variant_id": 3,
+      "product_id": 2,
+      "loyverse_id": "ea50f13f-9246-4892-8c29-b9da20e741a1",
+      "name": "500 ml",
+      "price": "49.00",
+      "is_available": true
+    },
+    {
+      "product_variant_id": 4,
+      "product_id": 3,
+      "loyverse_id": "f3d99230-acc8-4d58-b83f-08abb478b046",
+      "name": "Sencilla",
+      "price": "89.00",
+      "is_available": true
+    },
+    {
+      "product_variant_id": 5,
+      "product_id": 3,
+      "loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+      "name": "Doble",
+      "price": "129.00",
+      "is_available": true
+    }
+  ],
+  "table_counts_before": {
+    "ProductComplements": 5,
+    "ProductImages": 1,
+    "ProductModifierAssignments": 4,
+    "ProductModifiers": 2,
+    "ProductTags": 1,
+    "ProductVariants": 5,
+    "Products": 3,
+    "Tags": 1,
+    "alembic_version": 1
+  },
+  "sequences_before": [
+    {
+      "schemaname": "public",
+      "sequencename": "ProductComplements_product_complement_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 15
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "ProductImages_product_image_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 1
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "ProductModifiers_product_modifier_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 6
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "ProductVariants_product_variant_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 15
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "Products_product_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 9
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "Tags_tag_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 1
+    }
+  ],
+  "foreign_keys_before": {
+    "ProductComplements": [
+      {
+        "name": "fk_ProductComplements_product_modifier_id",
+        "constrained_columns": [
+          "product_modifier_id"
+        ],
+        "referred_schema": "public",
+        "referred_table": "ProductModifiers",
+        "referred_columns": [
+          "product_modifier_id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "ProductImages": [
+      {
+        "name": "fk_ProductImages_product_variant_id",
+        "constrained_columns": [
+          "product_variant_id"
+        ],
+        "referred_schema": "public",
+        "referred_table": "ProductVariants",
+        "referred_columns": [
+          "product_variant_id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "ProductModifierAssignments": [
+      {
+        "name": "fk_ProductModifierAssignments_product_modifier_id",
+        "constrained_columns": [
+          "product_modifier_id"
+        ],
+        "referred_schema": "public",
+        "referred_table": "ProductModifiers",
+        "referred_columns": [
+          "product_modifier_id"
+        ],
+        "options": {},
+        "comment": null
+      },
+      {
+        "name": "fk_ProductModifierAssignments_product_variant_id",
+        "constrained_columns": [
+          "product_variant_id"
+        ],
+        "referred_schema": "public",
+        "referred_table": "ProductVariants",
+        "referred_columns": [
+          "product_variant_id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "ProductModifiers": [],
+    "ProductTags": [
+      {
+        "name": "fk_ProductTags_product_variant_id",
+        "constrained_columns": [
+          "product_variant_id"
+        ],
+        "referred_schema": "public",
+        "referred_table": "ProductVariants",
+        "referred_columns": [
+          "product_variant_id"
+        ],
+        "options": {},
+        "comment": null
+      },
+      {
+        "name": "fk_ProductTags_tag_id",
+        "constrained_columns": [
+          "tag_id"
+        ],
+        "referred_schema": "public",
+        "referred_table": "Tags",
+        "referred_columns": [
+          "tag_id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "ProductVariants": [
+      {
+        "name": "fk_ProductVariants_product_id",
+        "constrained_columns": [
+          "product_id"
+        ],
+        "referred_schema": "public",
+        "referred_table": "Products",
+        "referred_columns": [
+          "product_id"
+        ],
+        "options": {},
+        "comment": null
+      }
+    ],
+    "Products": [],
+    "Tags": [],
+    "alembic_version": []
+  },
+  "other_database_connections_before": [],
+  "development_snapshot_sha256_before": "f1c11eec45240aaccfc3df89dcf30933d6f98691ea050b13fc3e53341ea46177",
+  "snapshot_before_path": "C:\\Users\\ferch\\AppData\\Local\\Temp\\mitbol_hu007_authorized_application_before.json",
+  "real_loyverse_sync_executed": false,
+  "applied_command": ".\\.venv\\Scripts\\python.exe -B -m alembic upgrade 20261102_0003",
+  "revision_after": "20261102_0003",
+  "alembic_check": "No new upgrade operations detected",
+  "new_column": {
+    "name": "is_commercially_available",
+    "type": "BOOLEAN",
+    "nullable": false,
+    "default": "false"
+  },
+  "variants_after": [
+    {
+      "product_variant_id": 1,
+      "product_id": 1,
+      "loyverse_id": "e18a3b39-eda7-4852-9ece-6f02a6f5cef5",
+      "name": "Papas fritas",
+      "price": "45.00",
+      "is_available": true,
+      "is_commercially_available": false
+    },
+    {
+      "product_variant_id": 2,
+      "product_id": 2,
+      "loyverse_id": "128b68f8-4044-482f-b095-a6023e33f24f",
+      "name": "355 ml",
+      "price": "35.00",
+      "is_available": true,
+      "is_commercially_available": false
+    },
+    {
+      "product_variant_id": 3,
+      "product_id": 2,
+      "loyverse_id": "ea50f13f-9246-4892-8c29-b9da20e741a1",
+      "name": "500 ml",
+      "price": "49.00",
+      "is_available": true,
+      "is_commercially_available": false
+    },
+    {
+      "product_variant_id": 4,
+      "product_id": 3,
+      "loyverse_id": "f3d99230-acc8-4d58-b83f-08abb478b046",
+      "name": "Sencilla",
+      "price": "89.00",
+      "is_available": true,
+      "is_commercially_available": false
+    },
+    {
+      "product_variant_id": 5,
+      "product_id": 3,
+      "loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+      "name": "Doble",
+      "price": "129.00",
+      "is_available": true,
+      "is_commercially_available": false
+    }
+  ],
+  "only_authorized_changes": true,
+  "sequences_unchanged": true,
+  "existing_ids_prices_names_local_availability_relations_and_enrichment_unchanged": true,
+  "table_counts_after": {
+    "ProductComplements": 5,
+    "ProductImages": 1,
+    "ProductModifierAssignments": 4,
+    "ProductModifiers": 2,
+    "ProductTags": 1,
+    "ProductVariants": 5,
+    "Products": 3,
+    "Tags": 1,
+    "alembic_version": 1
+  },
+  "development_snapshot_sha256_after": "46da78f169e446bfe865cc63d8019cd27228b321d1df25729f141033497f08a9",
+  "normalized_snapshot_sha256_after": "f1c11eec45240aaccfc3df89dcf30933d6f98691ea050b13fc3e53341ea46177",
+  "snapshot_after_path": "C:\\Users\\ferch\\AppData\\Local\\Temp\\mitbol_hu007_authorized_application_after.json",
+  "public_menu_readonly_verification": [
+    {
+      "product_id": 1,
+      "visible": true,
+      "can_order": false,
+      "price_min": "45.00",
+      "price_max": "45.00",
+      "has_price_range": false,
+      "variant_count": 1
+    },
+    {
+      "product_id": 2,
+      "visible": true,
+      "can_order": false,
+      "price_min": "35.00",
+      "price_max": "49.00",
+      "has_price_range": true,
+      "variant_count": 2
+    },
+    {
+      "product_id": 3,
+      "visible": true,
+      "can_order": false,
+      "price_min": "89.00",
+      "price_max": "129.00",
+      "has_price_range": true,
+      "variant_count": 2
+    }
+  ],
+  "details_and_complements_cannot_order": true,
+  "administrative_read_models_cannot_order": true,
+  "real_development_patch_executed": false,
+  "administration_permanently_enabled": false,
+  "post_migration_checks_executed": true,
+  "tests": {
+    "passed": 446,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "warnings": 2,
+    "warning_descriptions": [
+      "Starlette: deprecated httpx TestClient",
+      "AnyIO: deprecated BlockingPortal alias"
+    ],
+    "seconds": "48.829",
+    "write_target": "isolated PostgreSQL databases only",
+    "isolated_databases": {
+      "incremental_migration_test_database": "mitbol_test_hu008_6b80f0d46f7c",
+      "empty_postgresql_database": "mitbol_test_hu008_ee77c1f6ae0b",
+      "isolated_postgresql_database": "mitbol_test_hu008_58bd21e75360"
+    },
+    "remaining_test_rows": {
+      "Products": 0,
+      "ProductVariants": 0,
+      "ProductModifiers": 0,
+      "ProductComplements": 0,
+      "ProductModifierAssignments": 0,
+      "ProductImages": 0,
+      "Tags": 0,
+      "ProductTags": 0
+    },
+    "command": ".\\.venv\\Scripts\\python.exe -B -m pytest -p no:cacheprovider -q -ra --junitxml=<TEMP>/mitbol_hu007_post_migration_tests.xml",
+    "environment": {
+      "MITBOL_SYNC_POSTGRES_TESTS": "1",
+      "MITBOL_POSTGRES_TESTS": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    }
+  },
+  "development_unchanged_during_post_migration_tests": true,
+  "installed_schema_test_updated": "tests/test_postgresql_schema.py: authorized revision 20261102_0003; all ORM columns included",
+  "verification_complete": true
+}

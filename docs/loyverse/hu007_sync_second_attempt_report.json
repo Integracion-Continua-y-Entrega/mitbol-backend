@@ -1,0 +1,665 @@
+{
+  "stage": "HU-007 authorized second and final real synchronization attempt",
+  "attempt_number": 2,
+  "previous_real_attempts": 1,
+  "total_real_attempts": 2,
+  "previous_attempt_report": "docs/loyverse/hu007_sync_report.json",
+  "maximum_write_executions_this_authorization": 1,
+  "timestamp_comparison": "timezone-aware datetime instants, never raw strings",
+  "preflight_passed": true,
+  "write_executions": 1,
+  "real_sync_committed": true,
+  "admin_enabled": false,
+  "database": "mitbol_dev",
+  "revision_before": "20261102_0003",
+  "store": {
+    "id": "9e30730f-a5b4-4485-8cc4-bc499cc6e239",
+    "name": "I.C.E",
+    "selection": "configured_id"
+  },
+  "token_access_verified": true,
+  "remote_http_requests": 3,
+  "remote_pages": {
+    "/stores": 1,
+    "/items": 1,
+    "/modifiers": 1
+  },
+  "remote_fetched_at": "2026-11-03T03:16:32.507729+00:00",
+  "reference_counts": {
+    "products": 3,
+    "variants": 5,
+    "modifier_groups": 2,
+    "complements": 5,
+    "variant_modifier_assignments": 4
+  },
+  "remote_plan_counts": {
+    "products": 3,
+    "variants": 5,
+    "modifier_groups": 2,
+    "complements": 5,
+    "variant_modifier_assignments": 4
+  },
+  "identity_comparison": {
+    "Products": {
+      "added": [],
+      "not_in_active_plan": [],
+      "retained": 3
+    },
+    "ProductVariants": {
+      "added": [],
+      "not_in_active_plan": [],
+      "retained": 5
+    },
+    "ProductModifiers": {
+      "added": [],
+      "not_in_active_plan": [],
+      "retained": 2
+    },
+    "ProductComplements": {
+      "added": [],
+      "not_in_active_plan": [],
+      "retained": 5
+    }
+  },
+  "assignments_added": [],
+  "assignments_removed": [],
+  "commercial_changes_proposed": [
+    {
+      "table": "ProductVariants",
+      "loyverse_id": "128b68f8-4044-482f-b095-a6023e33f24f",
+      "field": "is_commercially_available",
+      "before": false,
+      "after": true
+    },
+    {
+      "table": "ProductVariants",
+      "loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+      "field": "is_commercially_available",
+      "before": false,
+      "after": true
+    },
+    {
+      "table": "ProductVariants",
+      "loyverse_id": "e18a3b39-eda7-4852-9ece-6f02a6f5cef5",
+      "field": "is_commercially_available",
+      "before": false,
+      "after": true
+    },
+    {
+      "table": "ProductVariants",
+      "loyverse_id": "ea50f13f-9246-4892-8c29-b9da20e741a1",
+      "field": "is_commercially_available",
+      "before": false,
+      "after": true
+    },
+    {
+      "table": "ProductVariants",
+      "loyverse_id": "f3d99230-acc8-4d58-b83f-08abb478b046",
+      "field": "is_commercially_available",
+      "before": false,
+      "after": true
+    }
+  ],
+  "validated_plan": {
+    "store_id": "9e30730f-a5b4-4485-8cc4-bc499cc6e239",
+    "synced_at": "2026-11-03 03:16:32.507729+00:00",
+    "products": [
+      {
+        "loyverse_id": "a3eeb052-e38b-4b8e-a132-48e7af894689",
+        "name": "Papas fritas"
+      },
+      {
+        "loyverse_id": "dc391044-d7bb-4657-998a-7d13d4287fb2",
+        "name": "Limonada natural"
+      },
+      {
+        "loyverse_id": "b0f2bbc1-3feb-4651-b778-e503cbd43d3f",
+        "name": "Hamburguesa clásica"
+      }
+    ],
+    "variants": [
+      {
+        "loyverse_id": "e18a3b39-eda7-4852-9ece-6f02a6f5cef5",
+        "product_loyverse_id": "a3eeb052-e38b-4b8e-a132-48e7af894689",
+        "name": "Papas fritas",
+        "price": "45.00",
+        "is_commercially_available": true
+      },
+      {
+        "loyverse_id": "128b68f8-4044-482f-b095-a6023e33f24f",
+        "product_loyverse_id": "dc391044-d7bb-4657-998a-7d13d4287fb2",
+        "name": "355 ml",
+        "price": "35.00",
+        "is_commercially_available": true
+      },
+      {
+        "loyverse_id": "ea50f13f-9246-4892-8c29-b9da20e741a1",
+        "product_loyverse_id": "dc391044-d7bb-4657-998a-7d13d4287fb2",
+        "name": "500 ml",
+        "price": "49.00",
+        "is_commercially_available": true
+      },
+      {
+        "loyverse_id": "f3d99230-acc8-4d58-b83f-08abb478b046",
+        "product_loyverse_id": "b0f2bbc1-3feb-4651-b778-e503cbd43d3f",
+        "name": "Sencilla",
+        "price": "89.00",
+        "is_commercially_available": true
+      },
+      {
+        "loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+        "product_loyverse_id": "b0f2bbc1-3feb-4651-b778-e503cbd43d3f",
+        "name": "Doble",
+        "price": "129.00",
+        "is_commercially_available": true
+      }
+    ],
+    "modifiers": [
+      {
+        "loyverse_id": "8f84c154-127f-4b30-9219-7de307a18636",
+        "name": "Extras bebida",
+        "display_order": 2
+      },
+      {
+        "loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Extras hamburguesa",
+        "display_order": 1
+      }
+    ],
+    "complements": [
+      {
+        "loyverse_id": "44f93f48-d3c9-425d-8aa4-381f40ba12ec",
+        "modifier_loyverse_id": "8f84c154-127f-4b30-9219-7de307a18636",
+        "name": "Chía",
+        "price": "5.00",
+        "display_order": 1
+      },
+      {
+        "loyverse_id": "ea950531-f90f-4d27-83db-31c697153a43",
+        "modifier_loyverse_id": "8f84c154-127f-4b30-9219-7de307a18636",
+        "name": "Hierbabuena",
+        "price": "5.00",
+        "display_order": 2
+      },
+      {
+        "loyverse_id": "299df615-6db6-489d-a526-4e6d8bf667a3",
+        "modifier_loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Queso extra",
+        "price": "15.00",
+        "display_order": 1
+      },
+      {
+        "loyverse_id": "254a728c-07f4-4498-b976-1d18d9e9fe16",
+        "modifier_loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Tocino",
+        "price": "20.00",
+        "display_order": 2
+      },
+      {
+        "loyverse_id": "5c8553d8-1fec-44b2-bfdf-64257d3bf38c",
+        "modifier_loyverse_id": "325d3f7e-a1fd-4001-af8d-02f3c9822a21",
+        "name": "Sin cebolla",
+        "price": "0.00",
+        "display_order": 3
+      }
+    ],
+    "assignments": [
+      [
+        "128b68f8-4044-482f-b095-a6023e33f24f",
+        "8f84c154-127f-4b30-9219-7de307a18636"
+      ],
+      [
+        "ea50f13f-9246-4892-8c29-b9da20e741a1",
+        "8f84c154-127f-4b30-9219-7de307a18636"
+      ],
+      [
+        "f3d99230-acc8-4d58-b83f-08abb478b046",
+        "325d3f7e-a1fd-4001-af8d-02f3c9822a21"
+      ],
+      [
+        "246aad80-4540-4c1a-8877-2e31bc03d668",
+        "325d3f7e-a1fd-4001-af8d-02f3c9822a21"
+      ]
+    ],
+    "deleted_products": [
+      "159eb16e-c383-439d-a839-3cec3612a31e",
+      "93d066a2-d9d0-47b5-ab5c-382f3f2105e0"
+    ],
+    "deleted_variants": [],
+    "deleted_modifiers": [],
+    "deleted_complements": []
+  },
+  "baseline_path": "C:\\Users\\ferch\\AppData\\Local\\Temp\\mitbol_hu007_sync_second_before.json",
+  "baseline_sha256": "00873e45caf421f6b2ce31ec05a2a287262d7175f8fb6a64227e0aeb2c3984dd",
+  "table_counts_before": {
+    "ProductComplements": 5,
+    "ProductImages": 1,
+    "ProductModifierAssignments": 4,
+    "ProductModifiers": 2,
+    "ProductTags": 1,
+    "ProductVariants": 5,
+    "Products": 3,
+    "Tags": 1,
+    "alembic_version": 1
+  },
+  "variants_before": [
+    {
+      "product_variant_id": 1,
+      "loyverse_id": "e18a3b39-eda7-4852-9ece-6f02a6f5cef5",
+      "name": "Papas fritas",
+      "price": "45.00",
+      "is_available": true,
+      "synced_at": "2026-11-02 08:31:17.250312-06:00",
+      "product_id": 1,
+      "is_commercially_available": false
+    },
+    {
+      "product_variant_id": 2,
+      "loyverse_id": "128b68f8-4044-482f-b095-a6023e33f24f",
+      "name": "355 ml",
+      "price": "35.00",
+      "is_available": true,
+      "synced_at": "2026-11-02 08:31:17.250312-06:00",
+      "product_id": 2,
+      "is_commercially_available": false
+    },
+    {
+      "product_variant_id": 3,
+      "loyverse_id": "ea50f13f-9246-4892-8c29-b9da20e741a1",
+      "name": "500 ml",
+      "price": "49.00",
+      "is_available": true,
+      "synced_at": "2026-11-02 08:31:17.250312-06:00",
+      "product_id": 2,
+      "is_commercially_available": false
+    },
+    {
+      "product_variant_id": 4,
+      "loyverse_id": "f3d99230-acc8-4d58-b83f-08abb478b046",
+      "name": "Sencilla",
+      "price": "89.00",
+      "is_available": true,
+      "synced_at": "2026-11-02 08:31:17.250312-06:00",
+      "product_id": 3,
+      "is_commercially_available": false
+    },
+    {
+      "product_variant_id": 5,
+      "loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+      "name": "Doble",
+      "price": "129.00",
+      "is_available": true,
+      "synced_at": "2026-11-02 08:31:17.250312-06:00",
+      "product_id": 3,
+      "is_commercially_available": false
+    }
+  ],
+  "snapshot_path": "C:\\Users\\ferch\\AppData\\Local\\Temp\\mitbol_hu007_second_remote_snapshot.pickle",
+  "snapshot_sha256": "74c192609abee621df24c7986d37bdd9e6c5b4cb58f28f333fb9c24dd0d933e7",
+  "sync_status": "committed",
+  "sync_result": {
+    "products_processed": 3,
+    "variants_processed": 5,
+    "modifiers_processed": 2,
+    "complements_processed": 5,
+    "assignments_inserted": 0,
+    "assignments_removed": 0,
+    "retired": {
+      "products": 0,
+      "variants": 0,
+      "modifiers": 0,
+      "complements": 0
+    }
+  },
+  "schema_unchanged": true,
+  "all_local_fields_and_enrichment_preserved": true,
+  "all_internal_ids_preserved": true,
+  "assignments_unchanged": true,
+  "reference_catalogue_identities_unchanged": true,
+  "commercial_values_match_validated_remote_plan": true,
+  "new_entities": [],
+  "retired_entities": [],
+  "sequence_definitions_unchanged": true,
+  "sequence_last_values_may_advance_on_upsert": true,
+  "sequences_before": [
+    {
+      "schemaname": "public",
+      "sequencename": "ProductComplements_product_complement_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 20
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "ProductImages_product_image_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 1
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "ProductModifiers_product_modifier_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 8
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "ProductVariants_product_variant_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 20
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "Products_product_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 12
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "Tags_tag_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 1
+    }
+  ],
+  "sequences_after": [
+    {
+      "schemaname": "public",
+      "sequencename": "ProductComplements_product_complement_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 25
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "ProductImages_product_image_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 1
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "ProductModifiers_product_modifier_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 10
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "ProductVariants_product_variant_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 25
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "Products_product_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 15
+    },
+    {
+      "schemaname": "public",
+      "sequencename": "Tags_tag_id_seq",
+      "sequenceowner": "postgres",
+      "data_type": "integer",
+      "start_value": 1,
+      "min_value": 1,
+      "max_value": 2147483647,
+      "increment_by": 1,
+      "cycle": false,
+      "cache_size": 1,
+      "last_value": 1
+    }
+  ],
+  "after_snapshot_path": "C:\\Users\\ferch\\AppData\\Local\\Temp\\mitbol_hu007_sync_second_after.json",
+  "after_snapshot_sha256": "ac345eca367591104346dd81740c921edf7176cd835b904d135ebc8592372e3b",
+  "variant_comparison": [
+    {
+      "product_variant_id": 1,
+      "loyverse_id": "e18a3b39-eda7-4852-9ece-6f02a6f5cef5",
+      "name": "Papas fritas",
+      "price_before": "45.00",
+      "price_after": "45.00",
+      "local_before": true,
+      "local_after": true,
+      "commercial_before": false,
+      "commercial_after": true,
+      "can_order": true
+    },
+    {
+      "product_variant_id": 2,
+      "loyverse_id": "128b68f8-4044-482f-b095-a6023e33f24f",
+      "name": "355 ml",
+      "price_before": "35.00",
+      "price_after": "35.00",
+      "local_before": true,
+      "local_after": true,
+      "commercial_before": false,
+      "commercial_after": true,
+      "can_order": true
+    },
+    {
+      "product_variant_id": 3,
+      "loyverse_id": "ea50f13f-9246-4892-8c29-b9da20e741a1",
+      "name": "500 ml",
+      "price_before": "49.00",
+      "price_after": "49.00",
+      "local_before": true,
+      "local_after": true,
+      "commercial_before": false,
+      "commercial_after": true,
+      "can_order": true
+    },
+    {
+      "product_variant_id": 4,
+      "loyverse_id": "f3d99230-acc8-4d58-b83f-08abb478b046",
+      "name": "Sencilla",
+      "price_before": "89.00",
+      "price_after": "89.00",
+      "local_before": true,
+      "local_after": true,
+      "commercial_before": false,
+      "commercial_after": true,
+      "can_order": true
+    },
+    {
+      "product_variant_id": 5,
+      "loyverse_id": "246aad80-4540-4c1a-8877-2e31bc03d668",
+      "name": "Doble",
+      "price_before": "129.00",
+      "price_after": "129.00",
+      "local_before": true,
+      "local_after": true,
+      "commercial_before": false,
+      "commercial_after": true,
+      "can_order": true
+    }
+  ],
+  "real_http_verification": {
+    "mode": "real TCP HTTP through temporary loopback Uvicorn",
+    "database_connections_readonly": true,
+    "administration_disabled": true,
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/api/menu",
+        "status": 200,
+        "product_count": 3,
+        "variant_count": 5,
+        "orderable_variant_count": 5
+      },
+      {
+        "method": "GET",
+        "path": "/api/menu/1",
+        "status": 200,
+        "can_order": true,
+        "price_min": "45.00",
+        "price_max": "45.00",
+        "has_price_range": false,
+        "modifiers_complements_and_enrichment_verified": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/menu/2",
+        "status": 200,
+        "can_order": true,
+        "price_min": "35.00",
+        "price_max": "49.00",
+        "has_price_range": true,
+        "modifiers_complements_and_enrichment_verified": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/menu/3",
+        "status": 200,
+        "can_order": true,
+        "price_min": "89.00",
+        "price_max": "129.00",
+        "has_price_range": true,
+        "modifiers_complements_and_enrichment_verified": true
+      }
+    ]
+  },
+  "temporary_http_server_stopped": true,
+  "duplicate_counts": {
+    "Products:product_id": 0,
+    "Products:loyverse_id": 0,
+    "ProductVariants:product_variant_id": 0,
+    "ProductVariants:loyverse_id": 0,
+    "ProductModifiers:product_modifier_id": 0,
+    "ProductModifiers:loyverse_id": 0,
+    "ProductComplements:product_complement_id": 0,
+    "ProductComplements:loyverse_id": 0,
+    "ProductModifierAssignments:product_variant_id,product_modifier_id": 0,
+    "ProductImages:product_image_id": 0,
+    "Tags:tag_id": 0,
+    "Tags:name": 0,
+    "ProductTags:product_variant_id,tag_id": 0
+  },
+  "orphan_counts": {
+    "ProductVariants:product_id": 0,
+    "ProductComplements:product_modifier_id": 0,
+    "ProductModifierAssignments:product_variant_id": 0,
+    "ProductModifierAssignments:product_modifier_id": 0,
+    "ProductImages:product_variant_id": 0,
+    "ProductTags:tag_id": 0,
+    "ProductTags:product_variant_id": 0
+  },
+  "timestamp_instants_verified": 15,
+  "timestamp_values_compared_as": "timezone-aware datetime instances, using equality of instants",
+  "revision_after": "20261102_0003",
+  "committed_state_verified_with_fresh_readonly_connection": true,
+  "no_more_real_sync_attempts_executed": true,
+  "tests": {
+    "passed": 446,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "warnings": 2,
+    "warning_descriptions": [
+      "Starlette httpx TestClient deprecation",
+      "AnyIO BlockingPortal alias deprecation"
+    ],
+    "seconds": "47.830",
+    "write_target": "isolated PostgreSQL databases only",
+    "isolated_databases": {
+      "incremental_migration_test_database": "mitbol_test_hu008_5056c545e3cc",
+      "empty_postgresql_database": "mitbol_test_hu008_c4c3a40d7fc5",
+      "isolated_postgresql_database": "mitbol_test_hu008_8195da9cc53a"
+    },
+    "remaining_test_rows": {
+      "Products": 0,
+      "ProductVariants": 0,
+      "ProductModifiers": 0,
+      "ProductComplements": 0,
+      "ProductModifierAssignments": 0,
+      "ProductImages": 0,
+      "Tags": 0,
+      "ProductTags": 0
+    },
+    "development_unchanged_during_tests": true,
+    "command": ".\\.venv\\Scripts\\python.exe -B -m pytest -p no:cacheprovider -q -ra --junitxml=<TEMP>/mitbol_hu007_second_sync_tests.xml",
+    "environment": {
+      "MITBOL_SYNC_POSTGRES_TESTS": "1",
+      "MITBOL_POSTGRES_TESTS": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    }
+  },
+  "alembic_current": "20261102_0003 (head)",
+  "alembic_check": "No new upgrade operations detected",
+  "successful_real_commits_total": 1,
+  "verification_complete": true,
+  "final_state": "Second authorized attempt committed and verified; no additional real synchronization performed",
+  "block_3_started": false,
+  "final_readme_generated": false
+}

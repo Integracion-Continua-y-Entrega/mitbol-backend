@@ -154,3 +154,36 @@ def sync_db(sync_test_database):
             )
         finally:
             transaction.rollback()
+
+
+@pytest.fixture(scope="session")
+def empty_postgresql_database(sync_test_database, record_testsuite_property):
+    """Base sin migraciones para validar el prototipo y el arranque de Alembic."""
+    name = "mitbol_test_hu008_" + uuid4().hex[:12]
+    url = sync_test_database.url.set(database=name)
+    maintenance = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    try:
+        with maintenance.connect() as connection:
+            assert connection.scalar(select(func.current_database())) == "postgres"
+            quoted = connection.dialect.identifier_preparer.quote(name)
+            connection.exec_driver_sql(f"CREATE DATABASE {quoted} TEMPLATE template0 ENCODING 'UTF8'")
+    finally:
+        maintenance.dispose()
+    engine = create_engine(url, connect_args={"connect_timeout": 5})
+    try:
+        yield engine
+    finally:
+        with engine.connect() as connection:
+            assert inspect(connection).get_table_names() == []
+        record_testsuite_property("empty_postgresql_database", name)
+        engine.dispose()
+
+
+@pytest.fixture
+def empty_postgresql_connection(empty_postgresql_database):
+    with empty_postgresql_database.connect() as connection, connection.begin():
+        assert connection.scalar(select(func.current_database())).startswith("mitbol_test_hu008_")
+        try:
+            yield connection
+        finally:
+            connection.rollback()
