@@ -19,6 +19,83 @@ El proyecto sigue una arquitectura por capas dentro del directorio `/app`:
 - `models/`: Definición de tablas relacionales.
 - `services/`: Lógica de integración externa.
 
+## Integración continua con GitHub Actions
+
+[`.github/workflows/backend-ci.yml`](.github/workflows/backend-ci.yml) ejecuta la
+suite completa al hacer push a `develop` o `feature/**`, y al abrir, reabrir o
+actualizar un Pull Request hacia `develop` o `main`. CI verifica automáticamente
+que los cambios mantienen las pruebas aprobadas; esta etapa no despliega la API.
+
+El job **Backend tests** usa Ubuntu 24.04, Python 3.13 (la misma serie que el
+entorno local verificado) y un servicio temporal `postgres:18`. GitHub espera su
+health check `pg_isready` antes de iniciar los pasos. Se instalan las dependencias
+fijadas en `requirements.txt`; `psycopg2-binary` y Pillow proporcionan los binarios
+necesarios mediante sus wheels, sin configurar un PostgreSQL del sistema.
+
+Después de descargar el código y configurar Python, se ejecuta:
+
+```bash
+python -m pip install -r requirements.txt
+python -m pip check
+python -m pytest -ra --junitxml=test-results/pytest.xml -p no:cacheprovider
+```
+
+El workflow activa las variables existentes `MITBOL_SYNC_POSTGRES_TESTS=1` y
+`MITBOL_POSTGRES_TESTS=1`. Las fixtures detectan `GITHUB_ACTIONS=true` (variable
+oficial del runner) y usan `DATABASE_URL` exclusivamente con el usuario ficticio
+`mitbol_ci`, el host `127.0.0.1` del runner y la base inicial `mitbol_test_ci`.
+Rechazan otras URLs y la desactivación de cualquiera de esas suites. En esta ruta
+no leen `.env` ni consultan `mitbol_dev`.
+
+Las fixtures crean tres bases `mitbol_test_hu008_<identificador>`: una migrada con
+`alembic upgrade head`, otra inicialmente vacía para comprobar validación y
+migraciones, y otra para la migración incremental de HU-005. Las pruebas de
+HU-007 también comprueban la actualización real desde la revisión anterior.
+Las verificaciones de esquema reutilizan la primera base en modo de sólo lectura.
+Las transacciones de cada prueba se revierten; todas las bases desaparecen junto
+con el servicio al finalizar el job. No hace falta ejecutar Alembic aparte ni
+crear bases manualmente.
+
+Las pruebas de HU-008, HU-001, HU-003, HU-005 y HU-007 usan estas fixtures.
+Loyverse se simula con RESPX, `httpx.MockTransport` y snapshots existentes. El
+token del job es ficticio, `ADMIN_ENABLED=false` y no se configura una clave
+administrativa global. Las pruebas administrativas crean aplicaciones aisladas
+con claves temporales. No se inicia un servidor ni una sincronización real.
+
+Las acciones oficiales están fijadas a commits de sus versiones publicadas.
+El token de GitHub sólo tiene `contents: read` y checkout no conserva sus
+credenciales. No se usan secretos del repositorio ni `pull_request_target`.
+El reporte JUnit se conserva siete días como artefacto **backend-pytest-results**,
+incluso si pytest falla; el código de salida de pytest determina el fallo del job.
+
+Para revisar una ejecución, abre **Actions → Backend CI → ejecución → Backend
+tests → Run complete test suite**. Allí aparecen las pruebas aprobadas, fallidas,
+errores y omisiones. El resumen de la ejecución permite descargar el artefacto.
+La instalación en Linux, el contenedor y los permisos de GitHub deben verificarse
+en la primera ejecución real en Actions.
+
+Para publicar la configuración desde la rama actual, revisa el diff y ejecuta
+manualmente:
+
+```powershell
+git add .github/workflows/backend-ci.yml tests/conftest.py tests/test_postgresql_schema.py tests/test_ci_configuration.py README.MD
+git commit -m "ci: run backend tests with isolated PostgreSQL"
+git push -u origin chore/github-actions-ci
+```
+
+Abre un Pull Request en GitHub con base `develop` y comparación
+`chore/github-actions-ci`. El push a esta rama `chore/` no activa el workflow;
+la apertura del PR sí lo activa. Espera el check **Backend tests** antes de
+fusionarlo. No se realizan commits, push ni cambios de protección automáticamente.
+
+Después de comprobar la primera ejecución, un administrador puede ir a
+**Settings → Branches → Add branch protection rule**, indicar `develop`, activar
+**Require a pull request before merging** y **Require status checks to pass
+before merging**, y seleccionar **Backend tests** (workflow **Backend CI**).
+Puede activar también **Require branches to be up to date before merging** y
+restringir los bypass. La disponibilidad depende de la visibilidad y el plan del
+repositorio. Usa el nombre del check que aparezca en el PR.
+
 ## 🛠️ Instalación y Uso Local
 
 Sigue estos pasos para correr el proyecto en tu entorno local de Windows:

@@ -1,4 +1,4 @@
-"""PostgreSQL aislado con migraciones completas; mitbol_dev sólo se lee."""
+"""PostgreSQL aislado; en GitHub Actions nunca se consulta mitbol_dev ni .env."""
 
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -14,11 +14,43 @@ from dotenv import dotenv_values
 import pytest
 from sqlalchemy import MetaData, Table, create_engine, inspect, select, func
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base
 from app.services.catalog_probe import CatalogSnapshot
 from app.services.sync_service import SyncService
+
+
+def _ci_database_url():
+    """En GitHub sólo admite el servicio temporal definido por el workflow."""
+    if os.getenv("GITHUB_ACTIONS") != "true":
+        return None
+    try:
+        url = make_url(os.environ["DATABASE_URL"])
+        valid = (
+            url.drivername == "postgresql+psycopg2"
+            and url.host == "127.0.0.1"
+            and url.database == "mitbol_test_ci"
+            and url.username == "mitbol_ci"
+            and not url.query
+        )
+    except (KeyError, ArgumentError, ValueError):
+        valid = False
+    if not valid:
+        raise pytest.UsageError(
+            "CI requiere DATABASE_URL del servicio PostgreSQL temporal: "
+            "usuario mitbol_ci, host 127.0.0.1 y base mitbol_test_ci, sin parámetros."
+        )
+    return url
+
+
+def pytest_configure(config):
+    if _ci_database_url() is not None and any(
+        os.getenv(flag) != "1"
+        for flag in ("MITBOL_SYNC_POSTGRES_TESTS", "MITBOL_POSTGRES_TESTS")
+    ):
+        raise pytest.UsageError("CI requiere ambas suites PostgreSQL activadas con valor 1.")
 
 
 @pytest.fixture
@@ -103,10 +135,13 @@ def sync_test_database(record_testsuite_property):
     if os.getenv("MITBOL_SYNC_POSTGRES_TESTS") != "1":
         pytest.skip("Activar MITBOL_SYNC_POSTGRES_TESTS=1 para PostgreSQL aislado")
     root = Path(__file__).resolve().parents[1]
-    source_url = make_url(dotenv_values(root / ".env")["DATABASE_URL"])
-    assert source_url.get_backend_name() == "postgresql"
-    assert source_url.database == "mitbol_dev"
-    before = _development_state(source_url)
+    source_url = _ci_database_url()
+    isolated_ci = source_url is not None
+    if not isolated_ci:
+        source_url = make_url(dotenv_values(root / ".env")["DATABASE_URL"])
+        assert source_url.get_backend_name() == "postgresql"
+        assert source_url.database == "mitbol_dev"
+        before = _development_state(source_url)
     name = "mitbol_test_hu008_" + uuid4().hex[:12]
     maintenance = create_engine(source_url.set(database="postgres"), isolation_level="AUTOCOMMIT")
     try:
@@ -130,13 +165,14 @@ def sync_test_database(record_testsuite_property):
             remaining = {table_name: connection.scalar(select(func.count()).select_from(table))
                          for table_name, table in Base.metadata.tables.items()}
         engine.dispose()
-        after = _development_state(source_url)
         # La evidencia puede incluirse en JUnit sin sobrescribir informes históricos.
         record_testsuite_property("isolated_postgresql_database", name)
-        record_testsuite_property("development_unchanged", str(before == after))
         record_testsuite_property("remaining_test_rows", json.dumps(remaining))
         assert all(value == 0 for value in remaining.values())
-        assert before == after, "El esquema, las filas o las secuencias de mitbol_dev cambiaron"
+        if not isolated_ci:
+            after = _development_state(source_url)
+            record_testsuite_property("development_unchanged", str(before == after))
+            assert before == after, "El esquema, las filas o las secuencias de mitbol_dev cambiaron"
 
 
 @pytest.fixture
