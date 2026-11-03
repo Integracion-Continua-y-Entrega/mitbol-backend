@@ -1,0 +1,81 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - develop
+      - 'feature/**'
+  pull_request:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Backend tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: mitbol_ci
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: mitbol_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mitbol_ci -d mitbol_test_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      # Credenciales ficticias: sólo existen en el servicio efímero de este job.
+      DATABASE_URL: postgresql+psycopg2://mitbol_ci:ci-test-password@127.0.0.1:5432/mitbol_test_ci
+      MITBOL_SYNC_POSTGRES_TESTS: '1'
+      MITBOL_POSTGRES_TESTS: '1'
+      LOYVERSE_ACCESS_TOKEN: ci-dummy-token
+      LOYVERSE_STORE_ID: test-store
+      ADMIN_ENABLED: 'false'
+      ADMIN_API_KEY: ''
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip check
+
+      - name: Run complete test suite
+        # Las fixtures crean tres bases aisladas y ejecutan Alembic donde corresponde.
+        # pytest propaga fallos y errores al estado del job; no se ignora su salida.
+        run: python -m pytest -ra --junitxml=test-results/pytest.xml -p no:cacheprovider
+
+      - name: Upload pytest report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-pytest-results
+          path: test-results/pytest.xml
+          if-no-files-found: warn
+          retention-days: 7

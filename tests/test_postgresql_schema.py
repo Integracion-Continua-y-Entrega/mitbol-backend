@@ -1,6 +1,7 @@
 """Verificación optativa del esquema instalado; todas las consultas son de lectura.
 
-Activar con MITBOL_POSTGRES_TESTS=1. No crea tablas, inserta filas ni borra datos.
+Activar con MITBOL_POSTGRES_TESTS=1. En CI inspecciona la base aislada migrada.
+Las consultas de esta fixture son de lectura.
 """
 
 import os
@@ -14,16 +15,21 @@ from app.models import Base
 
 
 @pytest.fixture(scope="module")
-def postgres_connection():
+def postgres_connection(request):
     if os.getenv("MITBOL_POSTGRES_TESTS") != "1":
         pytest.skip("Requiere MITBOL_POSTGRES_TESTS=1 y mitbol_dev migrada")
 
-    # Comprueba la misma configuración efectiva que utiliza la aplicación.
-    from app.core.config import Settings
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        # Reutiliza las migraciones de la suite; nunca consulta mitbol_dev en CI.
+        url = request.getfixturevalue("sync_test_database").url
+        assert url.database.startswith("mitbol_test_hu008_")
+    else:
+        # Conserva la verificación optativa del esquema local instalado.
+        from app.core.config import Settings
 
-    url = make_url(Settings().database_url)
-    assert url.get_backend_name() == "postgresql"
-    assert url.database == "mitbol_dev", "Las verificaciones sólo admiten mitbol_dev"
+        url = make_url(Settings().database_url)
+        assert url.get_backend_name() == "postgresql"
+        assert url.database == "mitbol_dev", "Las verificaciones locales sólo admiten mitbol_dev"
     engine = create_engine(url, connect_args={
         "connect_timeout": 5,
         "options": "-c default_transaction_read_only=on -c statement_timeout=15000",
@@ -31,7 +37,7 @@ def postgres_connection():
     try:
         with engine.connect() as connection:
             connection.exec_driver_sql("SET TRANSACTION READ ONLY")
-            assert connection.exec_driver_sql("SELECT current_database()").scalar_one() == "mitbol_dev"
+            assert connection.exec_driver_sql("SELECT current_database()").scalar_one() == url.database
             assert connection.exec_driver_sql("SHOW transaction_read_only").scalar_one() == "on"
             try:
                 yield connection
