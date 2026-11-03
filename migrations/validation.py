@@ -5,6 +5,18 @@ from alembic.util import CommandError
 from sqlalchemy import inspect
 from sqlalchemy.engine import Connection
 
+from app.db.connection import CloudDatabaseTarget, validate_local_connection
+
+
+def validate_migration_target(connection: Connection, target: CloudDatabaseTarget | None = None) -> None:
+    """Verifica la conexión antes de que Alembic cree siquiera alembic_version."""
+    if connection.dialect.name != "postgresql":
+        raise CommandError("Las migraciones de MITBOL requieren PostgreSQL.")
+    if target is not None:
+        target.validate_connection(connection)
+    else:
+        validate_local_connection(connection)
+
 
 def validate_initial_database(connection: Connection) -> None:
     """La primera revisión sólo se aplica a una base sin tablas de aplicación."""

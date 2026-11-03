@@ -4,11 +4,15 @@ from contextlib import contextmanager
 import re
 from typing import Callable
 
+from alembic.runtime.migration import MigrationContext
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.db.connection import (
+    CloudDatabaseTarget, DatabaseTargetError, environment_mode, validate_local_connection,
+)
 from app.models import (
     Product, ProductComplement, ProductModifier, ProductModifierAssignment, ProductVariant,
 )
@@ -22,13 +26,25 @@ from app.services.loyverse_client import LoyverseAPIClient
 
 # Un catálogo por base: todas las instancias del servicio usan la misma clave.
 CATALOG_SYNC_LOCK_KEY = 0x4D4954424F4C
+CATALOG_SCHEMA_REVISION = "20261102_0003"
+
+
+def validate_catalog_revision(connection) -> None:
+    if MigrationContext.configure(connection).get_current_heads() != (CATALOG_SCHEMA_REVISION,):
+        raise CatalogTargetError("La sincronización requiere la revisión Alembic 20261102_0003.")
 
 
 class SyncService:
     def __init__(
         self, session_factory: Callable[[], Session], *, expected_database: str, store_id: str,
+        cloud_target: CloudDatabaseTarget | None = None,
     ):
-        if expected_database != "mitbol_dev" and not re.fullmatch(
+        if cloud_target is not None:
+            if expected_database != cloud_target.expected_database:
+                raise CatalogTargetError("La base de sincronización no coincide con la autorización cloud.")
+        elif environment_mode() == "cloud":
+            raise CatalogTargetError("La sincronización cloud requiere autorización explícita de host y base.")
+        elif expected_database != "mitbol_dev" and not re.fullmatch(
             r"mitbol_test_hu008_[0-9a-f]{12}", expected_database,
         ):
             raise CatalogTargetError("El destino no es mitbol_dev ni una base aislada de pruebas.")
@@ -37,6 +53,7 @@ class SyncService:
         self.session_factory = session_factory
         self.expected_database = expected_database
         self.store_id = store_id
+        self.cloud_target = cloud_target
 
     @contextmanager
     def _transaction(self):
@@ -44,12 +61,19 @@ class SyncService:
             with self.session_factory() as session, session.begin():
                 if session.get_bind().dialect.name != "postgresql":
                     raise CatalogTargetError("La sincronización requiere PostgreSQL.")
+                if self.cloud_target is not None:
+                    self.cloud_target.validate_connection(session.connection())
+                    validate_catalog_revision(session.connection())
+                else:
+                    validate_local_connection(session.connection())
                 actual_database = session.scalar(select(func.current_database()))
                 if actual_database != self.expected_database:
                     raise CatalogTargetError("La conexión real no coincide con la base autorizada.")
                 if not session.scalar(select(func.pg_try_advisory_xact_lock(CATALOG_SYNC_LOCK_KEY))):
                     raise CatalogSyncBusyError("Ya hay una sincronización comercial en ejecución.")
                 yield session
+        except DatabaseTargetError as error:
+            raise CatalogTargetError(str(error)) from None
         except SQLAlchemyError as error:
             raise CatalogPersistenceError("Falló la persistencia; se revirtió la transacción.") from error
 

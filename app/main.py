@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
@@ -6,23 +8,36 @@ from app.api.menu import router as menu_router
 from app.api.media import router as media_router
 from app.core.config import Settings, settings
 from app.core.security import ADMIN_SECURITY_DESCRIPTION, AdminRequestGuard
+from app.db.database import session_factory_for
 from app.schemas.menu import MenuProductDetailResponse, MenuResponse
 from app.services.enrichment_errors import EnrichmentError
 from app.services.image_storage import LocalImageStorage
 
 def create_app(config: Settings | None = None) -> FastAPI:
     config = config or settings
+    config.validate_database_configuration()
     config.validate_admin_configuration()
+
+    @asynccontextmanager
+    async def lifespan(application):
+        try:
+            yield
+        finally:
+            application.state.session_factory.kw["bind"].dispose()
+
     application = FastAPI(
         title="API Menú Digital - mitbol",
-        description="Backend para la gestión del menú y sincronización con Loyverse. " + ADMIN_SECURITY_DESCRIPTION,
-        version="1.0.0", swagger_ui_parameters={"persistAuthorization": False},
+        description=("API pública de consulta del catálogo." if config.app_env == "cloud" else
+                     "Backend para la gestión del menú y sincronización con Loyverse. " + ADMIN_SECURITY_DESCRIPTION),
+        version="1.0.0", swagger_ui_parameters={"persistAuthorization": False}, lifespan=lifespan,
     )
     application.state.settings = config
+    application.state.session_factory = session_factory_for(config)
     application.state.image_storage = LocalImageStorage(config.image_storage_root)
     application.add_middleware(
-        CORSMiddleware, allow_origins=["http://localhost:5173"],
-        allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+        CORSMiddleware, allow_origins=config.cors_origins, allow_credentials=False,
+        allow_methods=["GET"] if not config.admin_enabled else ["GET", "POST", "PATCH", "PUT", "DELETE"],
+        allow_headers=["Content-Type"] if not config.admin_enabled else ["Content-Type", "X-Admin-Key"],
     )
     application.add_middleware(AdminRequestGuard, config=config)
 
