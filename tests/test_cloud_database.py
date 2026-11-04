@@ -87,26 +87,35 @@ def test_cloud_connection_forces_certificate_hostname_and_channel_binding(target
     assert url.port == 5432
 
 
-@pytest.mark.parametrize("attribute,value", [
-    ("host", "other.example.com"), ("dbname", "mitbol_dev"), ("port", 55432),
-    ("user", "owner"), ("ssl_in_use", False),
+@pytest.mark.parametrize("attribute,value,code", [
+    ("host", "other.example.com", "EFFECTIVE_HOST_MISMATCH"),
+    ("dbname", "mitbol_dev", "EFFECTIVE_DATABASE_MISMATCH"),
+    ("port", 55432, "EFFECTIVE_PORT_MISMATCH"),
+    ("user", "owner", "EFFECTIVE_USER_MISMATCH"),
+    ("ssl_in_use", False, "TLS_NOT_ACTIVE"),
 ])
-def test_driver_identity_is_verified_independently_of_url(target, attribute, value):
+def test_driver_identity_is_verified_independently_of_url(target, attribute, value, code):
     driver = driver_for(target)
     setattr(driver.info, attribute, value)
-    with pytest.raises(DatabaseTargetError):
+    with pytest.raises(DatabaseTargetError) as error:
         target.validate_driver(driver, target.validate_url(URL))
+    assert error.value.code == code
 
 
-@pytest.mark.parametrize("key,value", [
-    ("sslmode", "require"), ("channel_binding", "prefer"), ("hostaddr", "127.0.0.1"),
-    ("service", "other"), ("options", "-c search_path=wrong"), ("sslrootcert", "/other-ca.pem"),
+@pytest.mark.parametrize("key,value,code", [
+    ("sslmode", "require", "TLS_MODE_MISMATCH"),
+    ("channel_binding", "prefer", "CHANNEL_BINDING_MISMATCH"),
+    ("hostaddr", "127.0.0.1", "EFFECTIVE_OPTIONS_REJECTED"),
+    ("service", "other", "EFFECTIVE_OPTIONS_REJECTED"),
+    ("options", "-c search_path=wrong", "EFFECTIVE_OPTIONS_REJECTED"),
+    ("sslrootcert", "/other-ca.pem", "TLS_CA_MISMATCH"),
 ])
-def test_effective_libpq_options_cannot_weaken_verification(target, key, value):
+def test_effective_libpq_options_cannot_weaken_verification(target, key, value, code):
     driver = driver_for(target)
     driver.info.dsn_parameters[key] = value
-    with pytest.raises(DatabaseTargetError):
+    with pytest.raises(DatabaseTargetError) as error:
         target.validate_driver(driver, target.validate_url(URL))
+    assert error.value.code == code
 
 
 def test_current_database_is_checked_before_any_migration(target):
