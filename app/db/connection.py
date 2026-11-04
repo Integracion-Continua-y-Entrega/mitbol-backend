@@ -19,6 +19,10 @@ from sqlalchemy.exc import ArgumentError
 class DatabaseTargetError(ValueError):
     """Error operativo seguro: nunca incluye una URL ni datos del controlador."""
 
+    def __init__(self, message: str, *, code: str = "TARGET_VALIDATION_FAILED"):
+        super().__init__(message)
+        self.code = code
+
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 LIBPQ_OVERRIDES = ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS")
@@ -110,13 +114,22 @@ class CloudDatabaseTarget:
         """Valida parámetros efectivos, incluidos posibles defaults de libpq."""
         info = driver_connection.info
         params = info.dsn_parameters
-        if (info.host != self.expected_host or info.dbname != self.expected_database
-                or str(info.port) != str(url.port or 5432) or info.user != url.username
-                or not info.ssl_in_use or params.get("sslmode") != "verify-full"
-                or params.get("channel_binding") != "require"
-                or params.get("hostaddr") or params.get("service") or params.get("options")
-                or params.get("sslrootcert") != connection_arguments(url, self)["sslrootcert"]):
-            raise DatabaseTargetError("La identidad o TLS de la conexión real no coincide con el destino autorizado.")
+        checks = (
+            ("EFFECTIVE_HOST_MISMATCH", info.host == self.expected_host),
+            ("EFFECTIVE_DATABASE_MISMATCH", info.dbname == self.expected_database),
+            ("EFFECTIVE_PORT_MISMATCH", str(info.port) == str(url.port or 5432)),
+            ("EFFECTIVE_USER_MISMATCH", info.user == url.username),
+            ("TLS_NOT_ACTIVE", bool(info.ssl_in_use)),
+            ("TLS_MODE_MISMATCH", params.get("sslmode") == "verify-full"),
+            ("CHANNEL_BINDING_MISMATCH", params.get("channel_binding") == "require"),
+            ("EFFECTIVE_OPTIONS_REJECTED", not (params.get("hostaddr") or params.get("service") or params.get("options"))),
+            ("TLS_CA_MISMATCH", params.get("sslrootcert") == connection_arguments(url, self)["sslrootcert"]),
+        )
+        for code, valid in checks:
+            if not valid:
+                raise DatabaseTargetError(
+                    "La identidad o TLS de la conexión real no coincide con el destino autorizado.", code=code,
+                )
 
     def validate_connection(self, connection) -> None:
         """Sólo lectura; se ejecuta dentro de la transacción del operador."""
@@ -158,14 +171,18 @@ OR pg_catalog.has_database_privilege(current_user, pg_catalog.current_database()
 OR EXISTS (
     SELECT 1 FROM pg_catalog.pg_class c
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-    AND (pg_catalog.has_table_privilege(current_user, c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+    WHERE n.nspname = 'public'
+    AND CASE WHEN c.relkind IN ('r', 'p', 'v', 'm', 'f') THEN
+        (pg_catalog.has_table_privilege(current_user, c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
          OR pg_catalog.has_any_column_privilege(current_user, c.oid, 'INSERT,UPDATE,REFERENCES'))
+        ELSE false END
 ) OR EXISTS (
     SELECT 1 FROM pg_catalog.pg_class c
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind = 'S'
-    AND pg_catalog.has_sequence_privilege(current_user, c.oid, 'USAGE,UPDATE')
+    WHERE n.nspname = 'public'
+    AND CASE WHEN c.relkind = 'S' THEN
+        pg_catalog.has_sequence_privilege(current_user, c.oid, 'USAGE,UPDATE')
+        ELSE false END
 )
 """
 
