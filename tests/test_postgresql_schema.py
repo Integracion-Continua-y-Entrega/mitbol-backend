@@ -19,8 +19,8 @@ def postgres_connection(request):
     if os.getenv("MITBOL_POSTGRES_TESTS") != "1":
         pytest.skip("Requiere MITBOL_POSTGRES_TESTS=1 y mitbol_dev migrada")
 
-    if os.getenv("GITHUB_ACTIONS") == "true":
-        # Reutiliza las migraciones de la suite; nunca consulta mitbol_dev en CI.
+    if os.getenv("GITHUB_ACTIONS") == "true" or os.getenv("MITBOL_SYNC_TEST_CLUSTER"):
+        # Servicio CI o metadata temporal: nunca consulta mitbol_dev en estos modos.
         url = request.getfixturevalue("sync_test_database").url
         assert url.database.startswith("mitbol_test_hu008_")
     else:

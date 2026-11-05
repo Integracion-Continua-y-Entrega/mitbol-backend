@@ -5,6 +5,8 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
+import tempfile
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -13,7 +15,7 @@ from alembic.config import Config
 from dotenv import dotenv_values
 import pytest
 from sqlalchemy import MetaData, Table, create_engine, inspect, select, func
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import make_url, URL
 from sqlalchemy.exc import ArgumentError
 from sqlalchemy.orm import sessionmaker
 
@@ -134,6 +136,10 @@ def _development_state(url):
 def sync_test_database(record_testsuite_property):
     if os.getenv("MITBOL_SYNC_POSTGRES_TESTS") != "1":
         pytest.skip("Activar MITBOL_SYNC_POSTGRES_TESTS=1 para PostgreSQL aislado")
+    if os.getenv("MITBOL_SYNC_TEST_CLUSTER"):
+        # Etapa 3E: cluster desechable, sin .env, mitbol_dev ni Alembic.
+        yield from _metadata_test_database(record_testsuite_property)
+        return
     root = Path(__file__).resolve().parents[1]
     source_url = _ci_database_url()
     isolated_ci = source_url is not None
@@ -175,6 +181,40 @@ def sync_test_database(record_testsuite_property):
             assert before == after, "El esquema, las filas o las secuencias de mitbol_dev cambiaron"
 
 
+def _metadata_test_database(record_testsuite_property):
+    directory = Path(os.environ["MITBOL_SYNC_TEST_CLUSTER"]).resolve()
+    assert directory.name == "data"
+    assert directory.parent.parent == Path(tempfile.gettempdir()).resolve()
+    assert re.fullmatch(r"mitbol-sync-preflight-[a-f0-9]{32}", directory.parent.name)
+    port = int(os.environ["MITBOL_SYNC_TEST_PORT"])
+    assert 1024 <= port <= 65535
+    url = URL.create("postgresql+psycopg2", username="mitbol_ci", host="127.0.0.1",
+                     port=port, database="template1")
+    control = create_engine(url, isolation_level="AUTOCOMMIT", hide_parameters=True,
+                            connect_args={"connect_timeout": 5})
+    name = "mitbol_test_hu008_" + uuid4().hex[:12]
+    with control.connect() as connection:
+        assert connection.exec_driver_sql("SELECT current_user").scalar_one() == "mitbol_ci"
+        assert Path(connection.exec_driver_sql("SHOW data_directory").scalar_one()).resolve() == directory
+        assert int(connection.exec_driver_sql("SHOW server_version_num").scalar_one()) // 10000 == 18
+        quoted = connection.dialect.identifier_preparer.quote(name)
+        connection.exec_driver_sql(f"CREATE DATABASE {quoted} TEMPLATE template0 ENCODING 'UTF8'")
+    engine = create_engine(url.set(database=name), hide_parameters=True)
+    try:
+        with engine.begin() as connection:
+            Base.metadata.create_all(connection)
+            connection.exec_driver_sql("CREATE TABLE public.alembic_version (version_num varchar(32) PRIMARY KEY)")
+            connection.exec_driver_sql("INSERT INTO public.alembic_version VALUES ('20261102_0003')")
+        record_testsuite_property("isolated_postgresql_database", name)
+        record_testsuite_property("schema_source", "synthetic metadata; no migrations")
+        yield engine
+    finally:
+        engine.dispose()
+        with control.connect() as connection:
+            connection.exec_driver_sql(f"DROP DATABASE {quoted} WITH (FORCE)")
+        control.dispose()
+
+
 @pytest.fixture
 def sync_db(sync_test_database):
     engine = sync_test_database
@@ -197,10 +237,11 @@ def empty_postgresql_database(sync_test_database, record_testsuite_property):
     """Base sin migraciones para validar el prototipo y el arranque de Alembic."""
     name = "mitbol_test_hu008_" + uuid4().hex[:12]
     url = sync_test_database.url.set(database=name)
-    maintenance = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    control_database = "template1" if os.getenv("MITBOL_SYNC_TEST_CLUSTER") else "postgres"
+    maintenance = create_engine(url.set(database=control_database), isolation_level="AUTOCOMMIT")
     try:
         with maintenance.connect() as connection:
-            assert connection.scalar(select(func.current_database())) == "postgres"
+            assert connection.scalar(select(func.current_database())) == control_database
             quoted = connection.dialect.identifier_preparer.quote(name)
             connection.exec_driver_sql(f"CREATE DATABASE {quoted} TEMPLATE template0 ENCODING 'UTF8'")
     finally:
@@ -213,6 +254,13 @@ def empty_postgresql_database(sync_test_database, record_testsuite_property):
             assert inspect(connection).get_table_names() == []
         record_testsuite_property("empty_postgresql_database", name)
         engine.dispose()
+        if os.getenv("MITBOL_SYNC_TEST_CLUSTER"):
+            maintenance = create_engine(url.set(database=control_database), isolation_level="AUTOCOMMIT")
+            try:
+                with maintenance.connect() as connection:
+                    connection.exec_driver_sql(f"DROP DATABASE {quoted} WITH (FORCE)")
+            finally:
+                maintenance.dispose()
 
 
 @pytest.fixture

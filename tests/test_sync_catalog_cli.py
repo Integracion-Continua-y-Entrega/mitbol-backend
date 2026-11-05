@@ -1,6 +1,7 @@
 """Operación manual con credenciales ficticias; Loyverse siempre está simulado."""
 
 from dataclasses import replace
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,7 +9,7 @@ from alembic.runtime.migration import MigrationContext
 import httpx
 from pydantic import SecretStr
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 
 from app.cli import sync_catalog
 from app.db.connection import CloudDatabaseTarget, DatabaseTargetError
@@ -16,6 +17,8 @@ from app.models import Product
 from app.services.catalog_errors import CatalogTargetError, CatalogValidationError
 from app.services.loyverse_client import LoyverseAPIClient, LoyverseConfigurationError
 from app.services.sync_service import SyncService, validate_catalog_revision
+from app.services.catalog_manifest import catalog_manifest, manifest_sha256
+from app.services.catalog_transform import transform_catalog
 
 
 HOST = "ep-catalog.example.com"
@@ -25,13 +28,20 @@ ARGS = ["--expected-database", NAME, "--expected-host", HOST]
 
 
 @pytest.fixture
-def cli(monkeypatch):
+def cli(monkeypatch, commercial_snapshot):
     monkeypatch.setenv("APP_ENV", "cloud")
+    monkeypatch.setenv("ADMIN_ENABLED", "false")
     monkeypatch.setenv("EXPECTED_DATABASE", NAME)
     monkeypatch.setenv("EXPECTED_DATABASE_HOST", HOST)
     monkeypatch.setenv("DATABASE_URL", URL)
     monkeypatch.delenv("LOYVERSE_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("LOYVERSE_STORE_ID", raising=False)
+    manifest = catalog_manifest(transform_catalog(commercial_snapshot), commercial_snapshot.store)
+    approved = {"status": "ready_for_initial_sync", "writes": False, "database": NAME,
+                "host": HOST, "user": "operator", "revision": "20261102_0003",
+                "catalog_manifest": manifest, "catalog_sha256": manifest_sha256(manifest),
+                "table_counts": {name: 0 for name in sync_catalog.Base.metadata.tables}}
+    monkeypatch.setenv("MITBOL_SYNC_APPROVED_PREFLIGHT", json.dumps(approved))
     engine = MagicMock()
     factory = MagicMock(return_value=engine)
     monkeypatch.setattr(sync_catalog, "create_database_engine", factory)
@@ -39,7 +49,10 @@ def cli(monkeypatch):
     monkeypatch.setattr(sync_catalog, "preflight", preflight)
     synchronize = AsyncMock(return_value={"status": "synchronized"})
     monkeypatch.setattr(sync_catalog, "synchronize", synchronize)
-    return SimpleNamespace(engine=engine, factory=factory, preflight=preflight, synchronize=synchronize)
+    preview = AsyncMock(return_value={"store": {"id": "test-store"}, "loyverse_contacted": True})
+    monkeypatch.setattr(sync_catalog, "preview_catalog", preview)
+    return SimpleNamespace(engine=engine, factory=factory, preflight=preflight,
+                           synchronize=synchronize, preview=preview)
 
 
 @pytest.mark.parametrize("arguments", [ARGS, ARGS + ["--preflight"]])
@@ -55,6 +68,7 @@ def test_cli_defaults_to_preflight_without_token_or_store(cli, arguments, capsys
 
 @pytest.mark.parametrize("variable,value", [
     ("APP_ENV", "local"), ("APP_ENV", "production"), ("DATABASE_URL", ""),
+    ("ADMIN_ENABLED", "true"), ("ADMIN_ENABLED", ""),
     ("EXPECTED_DATABASE", "other"), ("EXPECTED_DATABASE_HOST", "other.example.com"),
     ("DATABASE_URL", URL.replace(NAME, "mitbol_dev")),
     ("DATABASE_URL", URL.replace("verify-full", "require")),
@@ -129,6 +143,11 @@ def test_cloud_preflight_is_a_real_read_only_transaction(sync_test_database):
     target.expected_database = sync_test_database.url.database
     target.expected_host = "isolated-postgresql"
     statements = []
+    with sync_test_database.connect() as connection:
+        before = connection.exec_driver_sql(
+            "SELECT sequencename, last_value FROM pg_catalog.pg_sequences "
+            "WHERE schemaname = 'public' ORDER BY sequencename"
+        ).all()
 
     def observe(connection, cursor, statement, parameters, context, many):
         statements.append(statement)
@@ -143,6 +162,14 @@ def test_cloud_preflight_is_a_real_read_only_transaction(sync_test_database):
     assert all(statement.lstrip().upper().startswith(("SET TRANSACTION READ ONLY", "SELECT"))
                for statement in statements)
     target.validate_connection.assert_called_once()
+    assert len(result["table_counts"]) == 8 and not any(result["table_counts"].values())
+    with sync_test_database.connect() as connection:
+        assert connection.exec_driver_sql("SHOW transaction_read_only").scalar_one() == "off"
+        after = connection.exec_driver_sql(
+            "SELECT sequencename, last_value FROM pg_catalog.pg_sequences "
+            "WHERE schemaname = 'public' ORDER BY sequencename"
+        ).all()
+    assert after == before
 
 
 def test_revision_guard_rejects_unmigrated_database_without_creating_tables(empty_postgresql_connection):
@@ -239,3 +266,133 @@ async def test_cloud_service_checks_revision_before_lock_http_or_upsert(sync_db)
         await service.synchronize(client)
     assert client.mock_calls == []
     assert sync_db.connection.execute(select(Product)).all() == []
+
+
+def test_reader_is_rejected_before_connecting(cli, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", URL.replace("operator:", "mitbol_render_reader:"))
+    assert sync_catalog.main(ARGS) == 1
+    cli.factory.assert_not_called()
+
+
+def test_initial_preflight_never_calls_persistence(cli, monkeypatch, capsys):
+    monkeypatch.setenv("LOYVERSE_ACCESS_TOKEN", "PRIVATE_TOKEN")
+    monkeypatch.setenv("LOYVERSE_STORE_ID", "test-store")
+    cli.preflight.return_value["table_counts"] = {"Products": 0}
+    assert sync_catalog.main(ARGS + ["--preflight", "--store-id", "test-store"]) == 0
+    assert cli.preflight.call_count == 2
+    assert all(call.kwargs == {"require_empty": True} for call in cli.preflight.call_args_list)
+    cli.preview.assert_awaited_once()
+    cli.synchronize.assert_not_called()
+    output = capsys.readouterr().out
+    assert '"status": "ready_for_initial_sync"' in output
+    assert '"writes": false' in output and '"loyverse_contacted": true' in output
+    assert "PRIVATE" not in output
+
+
+def test_initial_preflight_requires_token_and_store_before_connect(cli, monkeypatch):
+    monkeypatch.setenv("LOYVERSE_STORE_ID", "test-store")
+    assert sync_catalog.main(ARGS + ["--preflight", "--store-id", "test-store"]) == 1
+    cli.factory.assert_not_called()
+    cli.preview.assert_not_called()
+
+
+def test_changed_database_after_download_cannot_report_ready(cli, monkeypatch, capsys):
+    monkeypatch.setenv("LOYVERSE_ACCESS_TOKEN", "PRIVATE_TOKEN")
+    monkeypatch.setenv("LOYVERSE_STORE_ID", "test-store")
+    cli.preflight.side_effect = [cli.preflight.return_value, DatabaseTargetError("Las tablas cambiaron.")]
+    assert sync_catalog.main(ARGS + ["--preflight", "--store-id", "test-store"]) == 1
+    cli.preview.assert_awaited_once()
+    cli.synchronize.assert_not_called()
+    assert "ready_for_initial_sync" not in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["valid", "another_store", "broken_page", "invalid_price", "empty"])
+async def test_preview_uses_full_download_and_transform_without_persistence(commercial_snapshot, monkeypatch, mode):
+    calls = []
+
+    def respond(request):
+        calls.append(request.url.path)
+        assert request.method == "GET"
+        if request.url.path.endswith("/stores"):
+            store = commercial_snapshot.store if mode != "another_store" else {"id": "other", "name": "Otra"}
+            return httpx.Response(200, json={"stores": [store]})
+        assert request.url.params["show_deleted"] == "true"
+        if request.url.path.endswith("/items"):
+            if mode == "broken_page":
+                return httpx.Response(200, json={"items": [], "cursor": "again"})
+            items = list(commercial_snapshot.items) if mode != "empty" else []
+            if mode == "invalid_price":
+                from copy import deepcopy
+                items = deepcopy(items)
+                items[0]["variants"][0]["stores"][0]["price"] = None
+            return httpx.Response(200, json={"items": items})
+        return httpx.Response(200, json={"modifiers": list(commercial_snapshot.modifiers)})
+
+    monkeypatch.setattr(sync_catalog, "LoyverseAPIClient", lambda **kwargs: LoyverseAPIClient(
+        **kwargs, transport=httpx.MockTransport(respond),
+    ))
+    forbidden = MagicMock(side_effect=AssertionError("El preview intentó persistir"))
+    monkeypatch.setattr(SyncService, "_write", forbidden)
+    if mode == "valid":
+        report = await sync_catalog.preview_catalog("test-store", SecretStr("fake-token"))
+        assert report["planned_initial_inserts"] == {
+            "Products": 3, "ProductVariants": 5, "ProductModifiers": 2,
+            "ProductComplements": 5, "ProductModifierAssignments": 4,
+        }
+        assert report["commercially_available_variants"] == 5
+        assert report["commercially_unavailable_variants"] == 0
+    else:
+        from app.services.loyverse_client import LoyverseAPIError
+        with pytest.raises((LoyverseAPIError, CatalogValidationError, DatabaseTargetError)):
+            await sync_catalog.preview_catalog("test-store", SecretStr("fake-token"))
+    if mode == "another_store":
+        assert calls == ["/v1.0/stores"]
+    forbidden.assert_not_called()
+
+
+def test_initial_preflight_rejects_nonempty_catalog(sync_test_database):
+    target = MagicMock(spec=CloudDatabaseTarget)
+    target.expected_database = sync_test_database.url.database
+    target.expected_host = "isolated-postgresql"
+    with sync_test_database.begin() as connection:
+        connection.exec_driver_sql(
+            'INSERT INTO public."Products" (loyverse_id, name, synced_at) '
+            "VALUES ('preflight-fixture', 'Simulado', now())"
+        )
+    try:
+        with pytest.raises(DatabaseTargetError, match="ocho tablas vacías"):
+            sync_catalog.preflight(sync_test_database, target, require_empty=True)
+        assert sync_catalog.preflight(sync_test_database, target)["table_counts"]["Products"] == 1
+    finally:
+        with sync_test_database.begin() as connection:
+            connection.exec_driver_sql('DELETE FROM public."Products" WHERE loyverse_id = \'preflight-fixture\'')
+
+
+@pytest.mark.parametrize("failure", range(24))
+def test_operator_requires_every_individual_privilege(failure):
+    connection = MagicMock()
+    connection.execute.return_value.one.return_value = ("operator", "operator", "off", False)
+    connection.engine.url.username = "operator"
+    connection.connection.driver_connection.readonly = None
+    # CONNECT/USAGE + nueve SELECT/resolución + diez DML + cuatro secuencias.
+    connection.scalar.side_effect = [True] * failure + [False]
+    with pytest.raises(DatabaseTargetError):
+        sync_catalog._inspect_operator(connection)
+
+
+@pytest.mark.parametrize("user,session_user,default,driver_readonly,recovery", [
+    ("mitbol_render_reader", "mitbol_render_reader", "off", None, False),
+    ("other", "operator", "off", None, False),
+    ("operator", "operator", "on", None, False),
+    ("operator", "operator", "off", True, False),
+    ("operator", "operator", "off", None, True),
+])
+def test_operator_rejects_reader_role_switch_and_inherited_readonly(user, session_user, default, driver_readonly, recovery):
+    connection = MagicMock()
+    connection.execute.return_value.one.return_value = (user, session_user, default, recovery)
+    connection.engine.url.username = "operator"
+    connection.connection.driver_connection.readonly = driver_readonly
+    with pytest.raises(DatabaseTargetError):
+        sync_catalog._inspect_operator(connection)
+    connection.scalar.assert_not_called()
