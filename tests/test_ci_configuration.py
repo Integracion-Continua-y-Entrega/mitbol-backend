@@ -44,6 +44,8 @@ def test_ci_requires_both_postgresql_suites(monkeypatch, flag):
 
 
 def test_ci_fixture_never_reads_development_or_dotenv(monkeypatch):
+    # Simular CI sin heredar la selección del cluster temporal de una corrida local.
+    monkeypatch.delenv("MITBOL_SYNC_TEST_CLUSTER", raising=False)
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("DATABASE_URL", CI_URL)
     monkeypatch.setenv("MITBOL_SYNC_POSTGRES_TESTS", "1")

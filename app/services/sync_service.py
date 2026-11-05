@@ -38,6 +38,7 @@ class SyncService:
     def __init__(
         self, session_factory: Callable[[], Session], *, expected_database: str, store_id: str,
         cloud_target: CloudDatabaseTarget | None = None,
+        before_write: Callable[[Session, CatalogSnapshot, CatalogPlan], None] | None = None,
     ):
         if cloud_target is not None:
             if expected_database != cloud_target.expected_database:
@@ -54,6 +55,7 @@ class SyncService:
         self.expected_database = expected_database
         self.store_id = store_id
         self.cloud_target = cloud_target
+        self.before_write = before_write
 
     @contextmanager
     def _transaction(self):
@@ -75,7 +77,7 @@ class SyncService:
         except DatabaseTargetError as error:
             raise CatalogTargetError(str(error)) from None
         except SQLAlchemyError as error:
-            raise CatalogPersistenceError("Falló la persistencia; se revirtió la transacción.") from error
+            raise CatalogPersistenceError("Falló la persistencia; verifica el estado antes de repetir la operación.") from error
 
     def _plan(self, snapshot: CatalogSnapshot) -> CatalogPlan:
         if snapshot.store.get("id") != self.store_id:
@@ -85,7 +87,7 @@ class SyncService:
     def persist_snapshot(self, snapshot: CatalogSnapshot) -> dict:
         """Entrada para snapshots validados y pruebas; no realiza llamadas HTTP."""
         with self._transaction() as session:
-            result = self._write(session, self._plan(snapshot))
+            result = self._validated_write(session, snapshot)
         return result
 
     async def synchronize(self, client: LoyverseAPIClient) -> dict:
@@ -96,8 +98,14 @@ class SyncService:
         """
         with self._transaction() as session:
             snapshot = await fetch_catalog(client, self.store_id, include_deleted=True)
-            result = self._write(session, self._plan(snapshot))
+            result = self._validated_write(session, snapshot)
         return result
+
+    def _validated_write(self, session: Session, snapshot: CatalogSnapshot) -> dict:
+        plan = self._plan(snapshot)
+        if self.before_write is not None:
+            self.before_write(session, snapshot, plan)
+        return self._write(session, plan)
 
     @staticmethod
     def _upsert(session: Session, model, values: dict, fields: tuple[str, ...], *, parent=None) -> int:

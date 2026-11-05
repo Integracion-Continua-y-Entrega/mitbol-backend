@@ -183,8 +183,13 @@ durante la operación; si se cambian, hay que reiniciar el servicio para revalid
 
 ### Primer despliegue manual desde Render Dashboard
 
-Guía para ejecutar **después** de recuperar acceso a Neon, migrar, preparar el
-lector y autorizar la carga inicial. No crear el servicio durante esta preparación:
+El cierre confirmado de 3E y la preparación actual de 3F están en
+[`docs/deployment/render_stage3f.md`](docs/deployment/render_stage3f.md), con la
+configuración concreta de Neon, CI y las pruebas posteriores. Crear/desplegar el
+servicio sigue pendiente de autorización.
+
+Neon ya está migrado y el catálogo y el lector están auditados. Los siguientes
+pasos preparan el primer servicio; su creación/despliegue requiere autorización:
 
 1. Integrar mediante PR hacia `develop` los cambios revisados y esperar el check
    **Backend tests**. Render utilizará ese código de `develop`.
@@ -234,19 +239,21 @@ disco persistente ni pre-deploy command gratuito. Las migraciones y la carga
 inicial se ejecutarán desde un entorno operador controlado, nunca en el build o
 start de Render. La API requiere HTTPS; Render termina TLS en su proxy.
 
-Prerrequisitos aún pendientes: conexión real a Neon verificada desde otra red;
-esquema en `20261102_0003`; rol lector y contraseña establecidos; catálogo
-sincronizado con autorización; ProductImages vacía; credencial pooled del lector
-validada; y PR aprobado/CI verde en `develop`. La preparación local no sustituye
-la comprobación de instalación y conectividad del primer build de Render.
+Las auditorías posteriores de 3E ya confirmaron esquema, catálogo, lectura y TLS
+para el operador y el lector; no repetirlas. Para Render quedan la revisión y
+publicación autorizada del código elegido, su CI verde y la configuración pooled
+del lector. La preparación local no sustituye la comprobación de instalación y
+conectividad del primer build autorizado de Render. El estado concreto se
+mantiene en la guía de 3F enlazada arriba.
 
-### SQL propuesto para el lector de Render (no ejecutar todavía)
+### Lector de Render: Etapa 3D completada
 
 El SQL exacto está en
 [`docs/database/prepare_render_reader.sql`](docs/database/prepare_render_reader.sql).
-Se revisará y autorizará después de migrar. Se ejecuta desde la conexión directa
-TLS verificada como `neondb_owner` sobre `mitbol_cloud_dev`; el script comprueba
-base, operador y revisión antes de crear nada. Si el rol ya existe, se detiene.
+El rol ya se creó y verificó en `mitbol_cloud_dev`; no repetir el script ni la
+asignación de contraseña. Se conserva como referencia del procedimiento aprobado.
+Para otra base requerirá autorización independiente y una conexión directa TLS
+verificada; el script comprueba base, operador y revisión y rechaza un rol existente.
 
 El rol `mitbol_render_reader` tiene LOGIN y PASSWORD NULL inicialmente. Después
 de aprobar/aplicar el SQL, establecer su contraseña con el comando
@@ -258,8 +265,10 @@ Se concede únicamente CONNECT, USAGE sobre public y SELECT sobre Products,
 ProductVariants, ProductModifiers, ProductComplements, ProductModifierAssignments,
 ProductImages, Tags y ProductTags. No se concede SELECT sobre alembic_version,
 ni acceso a secuencias, escritura, DDL, ownership o membresías. El default read
-only del rol es una defensa adicional; los permisos reales impiden escrituras
-incluso si un cliente intenta desactivar ese default.
+only del rol es una defensa adicional; los permisos reales impiden el DML sobre
+el catálogo incluso si un cliente desactiva ese default. Esto no certifica ausencia
+absoluta de efectos persistentes por funciones internas: se conserva el riesgo
+residual documentado y aceptado en la Etapa 3D.
 
 El script retira CREATE/TEMPORARY de PUBLIC en **esta base** y CREATE de PUBLIC
 en public: PostgreSQL no permite negar individualmente permisos que un usuario
@@ -275,7 +284,11 @@ público, se revisará y concederá su SELECT explícitamente. Si cambia el rol 
 ejecuta Alembic, habrá que revisar también sus default privileges. El lector nunca
 ejecutará migraciones ni sincronizaciones.
 
-### Migraciones: procedimiento futuro, con autorización de la Etapa 3
+### Migraciones: referencia para una base nueva
+
+`mitbol_cloud_dev` ya está en `20261102_0003`. No repetir las migraciones ni el
+verificador de base vacía. Esta sección documenta el procedimiento para otra
+base nueva, con autorización independiente.
 
 Antes de migrar una base Neon nueva, usar `python -m app.cli.verify_neon --validate-url`
 para validar la configuración sin conectarse. Después, `python -m app.cli.verify_neon`
@@ -319,8 +332,9 @@ sustituto de migrar. No se modificaron las tres revisiones aprobadas.
 ### Sincronización manual y preflight
 
 `python -m app.cli.sync_catalog` no importa FastAPI, no utiliza la sesión global y
-no carga `.env`. Requiere `APP_ENV=cloud`, URL directa, `EXPECTED_DATABASE` y
-`EXPECTED_DATABASE_HOST`. Los argumentos deben coincidir con esa autorización.
+no carga `.env`. Requiere `APP_ENV=cloud`, `ADMIN_ENABLED=false`, URL directa,
+`EXPECTED_DATABASE` y `EXPECTED_DATABASE_HOST`. Los argumentos deben coincidir
+con esa autorización. La carga inicial ya se completó: no repetirla.
 
 Inspección predeterminada, sin token, sin tienda, sin contactar Loyverse y con una
 transacción PostgreSQL READ ONLY:
@@ -333,13 +347,14 @@ Verifica destino, TLS y revisión exacta `20261102_0003`. Es una operación de
 lectura de la base remota, por lo que sólo se ejecutará con el destino autorizado
 durante la Etapa 3. Omitir `--preflight` mantiene este mismo modo seguro.
 
-Para una sincronización autorizada, añadir en el proceso operador
-`LOYVERSE_ACCESS_TOKEN` y `LOYVERSE_STORE_ID`. Usar una credencial PostgreSQL de
-escritura, sin incorporarla a Render:
-
-```text
-python -m app.cli.sync_catalog --expected-database mitbol_cloud_dev --expected-host HOST_DIRECTO --store-id ID_TIENDA --execute
-```
+El procedimiento completo aplicado está en
+[`docs/loyverse/neon_stage3e_execute.md`](docs/loyverse/neon_stage3e_execute.md).
+El CLI de carga inicial exige las ocho tablas vacías, token y tienda explícitos,
+y un `MITBOL_SYNC_APPROVED_PREFLIGHT` válido en memoria para el modo `--execute`.
+Compara el manifiesto aprobado con la descarga real y vuelve a comprobar el
+vaciado bajo locks antes del primer DML. No basta con añadir `--execute` al
+preflight. No se usa este procedimiento para una segunda carga o sincronización
+periódica; ambas requerirían diseño y autorización independientes.
 
 El ID debe coincidir con `LOYVERSE_STORE_ID` y con una tienda activa accesible en
 Loyverse. Destino y revisión se vuelven a comprobar dentro de la transacción de
@@ -351,8 +366,8 @@ antiguo `app/api/sync.py` permanece desregistrado y no debe habilitarse.
 
 ### Fotografías y secuencia pendiente
 
-La base cloud nueva se poblará sólo con el catálogo comercial. `ProductImages`
-debe quedar vacía: no se copian referencias/archivos locales. El contrato actual
+La base cloud ya contiene el catálogo comercial. `ProductImages`
+permanece vacía: no se copiaron referencias/archivos locales. El contrato actual
 devuelve `image_url=null` y galerías vacías; administración y cargas están apagadas.
 No se modificaron archivos de `storage/` ni el proveedor local de almacenamiento.
 
@@ -361,37 +376,30 @@ falte el archivo; medios devuelve 404. Importar referencias sin archivos volver�
 a producir URLs rotas. Antes de hacerlo habrá que adaptar almacenamiento externo
 persistente y/o filtrar referencias inexistentes, conservando el contrato público.
 
-Neon ya está creado; quedan la conectividad real y la secuencia de autorizaciones
-detallada abajo. Sólo en la
-Etapa 4 se habilitará `After CI Checks Pass` para `develop`, manteniendo PR y el
-check obligatorio Backend tests. No se añadieron CD ni secretos a GitHub.
+Neon ya está sincronizado y auditado. Quedan la integración del código y el
+primer despliegue autorizado de Render con su conexión pooled del lector.
+Auto-Deploy permanece Off. Una futura habilitación de `After CI Checks Pass`
+requerirá autorización aparte, conservando PR y el check Backend tests.
+No se añadieron CD ni secretos a GitHub.
 
-### Retomar desde otra red y preparar el PR
+### Integrar el código y preparar el primer despliegue
 
-1. Recuperar las variables en un proceso operador seguro y repetir
-   `python -m app.cli.verify_neon --diagnose` con el endpoint directo.
-2. Confirmar `ready_for_migrations`; un timeout después de DNS/TCP no confirma
-   autenticación ni TLS y no autoriza cambios de credenciales o menor seguridad.
-3. Solicitar autorización y aplicar `20261102_0003`; verificar `alembic current`
-   y `alembic check` contra ese mismo destino autorizado.
-4. Revisar/autorizar el SQL del lector, aplicarlo y establecer la contraseña
-   mediante entrada oculta. Preparar su conexión pooled separada del operador.
-5. Autorizar la sincronización inicial con Loyverse mediante el CLI manual.
-6. Comprobar productos, variantes, complementos, can_order y ProductImages vacía.
-7. Completar los valores de Render descritos arriba, usando sólo el lector.
-8. Autorizar y realizar el primer despliegue manual, con Auto-Deploy Off.
-9. Comprobar HTTPS, `/`, `/api/menu`, detalle válido, 404 de producto inexistente,
+1. Revisar el diff y los archivos nuevos de `chore/neon-sync-preflight`, incluidas
+   pruebas aisladas y ausencia de secretos. No cambiar de rama ni descartar cambios.
+2. Sólo con autorización, seleccionar los archivos revisados, realizar los
+   commits/push y abrir el PR hacia `develop`. Exigir Backend tests aprobado.
+3. Preparar en Render los valores documentados, usando exclusivamente la conexión
+   pooled de `mitbol_render_reader`, sin credenciales del operador o Loyverse.
+4. Autorizar y realizar el primer despliegue manual, con Auto-Deploy Off.
+   No repetir migraciones, creación del lector, carga inicial o auditorías aprobadas.
+5. Comprobar HTTPS, `/`, `/api/menu`, detalle válido, 404 de producto inexistente,
    CORS desde el origen autorizado y 404 en administración/sincronización. `/`
    por sí solo no acredita conectividad a PostgreSQL.
-10. Compartir con frontend la URL base HTTPS y el contrato OpenAPI. Frontend no
+6. Compartir con frontend la URL base HTTPS y el contrato OpenAPI. Frontend no
     recibe contraseñas, claves administrativas ni token Loyverse.
 
-Para conservar los cambios sin confirmar en una rama independiente se puede
-ejecutar manualmente `git switch -c chore/render-readiness` desde la rama actual.
-Los cambios versionados y los archivos nuevos permanecen en el directorio de
-trabajo. Revisar `git diff`, los archivos nuevos y `git diff --check`; seleccionar
-los archivos explícitamente para el commit y revisar `git diff --cached`.
-Después, realizar commit/push y abrir manualmente el PR hacia `develop`.
+La rama de trabajo ya existe; no crear otra ni cambiar de rama para integrar
+estos cambios. Revisar también `git diff --cached` después de autorizar el staging.
 El push a `chore/*` no ejecuta este workflow; la apertura/actualización del PR a
 `develop` sí ejecuta Backend tests. No hacen falta secretos de Neon/Render en
 GitHub para estas pruebas. No se ejecutan esos pasos Git automáticamente.

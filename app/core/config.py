@@ -25,6 +25,14 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", hide_input_in_errors=True,
     )
 
+    def __init__(self, **values):
+        mode = values.get("app_env", os.getenv("APP_ENV", "local"))
+        if str(mode).strip().lower() in {"cloud", "test"} or os.getenv("RENDER", "").lower() == "true":
+            # Pydantic construye y lee DotEnvSettingsSource antes de llamar a
+            # settings_customise_sources: excluirla allí no evita abrir .env.
+            values["_env_file"] = None
+        super().__init__(**values)
+
     @classmethod
     def settings_customise_sources(cls, settings_cls, init_settings, env_settings,
                                    dotenv_settings, file_secret_settings):
