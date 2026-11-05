@@ -12,7 +12,8 @@ import pytest
 
 
 @pytest.mark.parametrize('mode', ['success', 'changed', 'counts', 'execute_error'])
-def test_documented_manual_workflow_is_single_attempt_and_restores_secrets(mode):
+@pytest.mark.parametrize('previous', [False, True])
+def test_documented_manual_workflow_is_single_attempt_and_restores_secrets(mode, previous):
     shell = shutil.which('powershell.exe') or shutil.which('pwsh')
     if not shell:
         pytest.skip('Requiere PowerShell')
@@ -53,8 +54,10 @@ $env:DATABASE_URL = 'configured-for-mock-only'
 $env:EXPECTED_DATABASE = 'mitbol_cloud_dev'
 $env:EXPECTED_DATABASE_HOST = 'ep-green-hill-bddfbmgh.c-8.us-east-2.aws.neon.tech'
 $env:LOYVERSE_STORE_ID = '9e30730f-a5b4-4485-8cc4-bc499cc6e239'
-$env:LOYVERSE_ACCESS_TOKEN = 'fake-before-token'
-$env:MITBOL_SYNC_APPROVED_PREFLIGHT = 'fake-before-approval'
+$oldToken = if (__PREVIOUS__) { 'fake-before-token' } else { $null }
+$oldApproval = if (__PREVIOUS__) { 'fake-before-approval' } else { $null }
+$env:LOYVERSE_ACCESS_TOKEN = $oldToken
+$env:MITBOL_SYNC_APPROVED_PREFLIGHT = $oldApproval
 $global:pfCalls = 0; $global:executeCalls = 0
 function Read-Host { param($Prompt, [switch]$AsSecureString)
     if (-not $AsSecureString) { throw 'Unhidden prompt' }
@@ -90,8 +93,12 @@ try {
 if ($failed -ne ($case -ne 'success')) { throw 'Unexpected outcome' }
 $expectedExecutions = if ($case -in @('success','execute_error')) { 1 } else { 0 }
 if ($global:executeCalls -ne $expectedExecutions) { throw 'Execution escaped gate' }
-if ($env:LOYVERSE_ACCESS_TOKEN -cne 'fake-before-token') { throw 'Previous token not restored' }
-if ($env:MITBOL_SYNC_APPROVED_PREFLIGHT -cne 'fake-before-approval') { throw 'Previous approval not restored' }
+if ($env:LOYVERSE_ACCESS_TOKEN -cne $oldToken) { throw 'Previous token not restored' }
+if ($env:MITBOL_SYNC_APPROVED_PREFLIGHT -cne $oldApproval) { throw 'Previous approval not restored' }
+if (-not __PREVIOUS__) {
+    if (Test-Path -LiteralPath Env:LOYVERSE_ACCESS_TOKEN) { throw 'Previously absent token still exists' }
+    if (Test-Path -LiteralPath Env:MITBOL_SYNC_APPROVED_PREFLIGHT) { throw 'Previously absent approval still exists' }
+}
 if ($case -ne 'counts') {
     $blocked=$false
     try { . ([scriptblock]::Create($allBlocks[1])) } catch { $blocked=$true }
@@ -99,7 +106,7 @@ if ($case -ne 'counts') {
 }
 Write-Output 'manual_workflow_mock_ok'
 """
-    for marker, value in {'__MODE__': mode, '__REPORT__': encoded(json.dumps(report)),
+    for marker, value in {'__MODE__': mode, '__PREVIOUS__': '$true' if previous else '$false', '__REPORT__': encoded(json.dumps(report)),
                           '__A__': encoded(blocks[0]), '__B__': encoded(blocks[1]), '__C__': encoded(blocks[2])}.items():
         program = program.replace(marker, value)
     child_env = {k:v for k,v in os.environ.items()

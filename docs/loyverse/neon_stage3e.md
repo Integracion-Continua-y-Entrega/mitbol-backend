@@ -197,7 +197,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Falló el preflight completo. No autorizar escrituras.' }
 }
 finally {
-    [Environment]::SetEnvironmentVariable('LOYVERSE_ACCESS_TOKEN', $previousLoyverseToken, 'Process')
+    # El proveedor Env elimina con $null; SetEnvironmentVariable no lo hace en PS 7.5+.
+    $env:LOYVERSE_ACCESS_TOKEN = $previousLoyverseToken
     $previousLoyverseToken = $null
     if ($loyversePointer -ne [IntPtr]::Zero) {
         [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($loyversePointer)

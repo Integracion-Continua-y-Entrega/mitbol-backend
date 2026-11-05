@@ -16,7 +16,8 @@ import pytest
     'wrong_client_user', 'wrong_host', 'wrong_database', 'wrong_port',
     'sql_identity_failure', 'sql_readonly_failure', 'sql_catalog_failure',
 ])
-def test_block_c_requires_client_tls_and_preserves_sql_failures(case, tmp_path):
+@pytest.mark.parametrize('previous', [False, True])
+def test_block_c_requires_client_tls_and_preserves_sql_failures(case, tmp_path, previous):
     shell = shutil.which('powershell.exe') or shutil.which('pwsh')
     if not shell:
         pytest.skip('Requiere PowerShell')
@@ -51,9 +52,12 @@ $env:APP_ENV='cloud'; $env:ADMIN_ENABLED='false'
 $env:EXPECTED_DATABASE='mitbol_cloud_dev'
 $env:EXPECTED_DATABASE_HOST='ep-green-hill-bddfbmgh.c-8.us-east-2.aws.neon.tech'
 $env:DATABASE_URL='PRIVATE_DATABASE_VALUE_NEVER_OUTPUT'
-$env:LC_ALL='previous-locale'; $env:LC_MESSAGES='previous-messages'
+$oldLocale = if (__PREVIOUS__) { 'previous-locale' } else { $null }
+$oldMessages = if (__PREVIOUS__) { 'previous-messages' } else { $null }
+$oldManifest = if (__PREVIOUS__) { 'previous-base64-manifest' } else { $null }
+$env:LC_ALL=$oldLocale; $env:LC_MESSAGES=$oldMessages
 $env:MITBOL_SYNC_APPROVED_MANIFEST='previous-public-manifest'
-$env:MITBOL_SYNC_APPROVED_MANIFEST_B64='previous-base64-manifest'
+$env:MITBOL_SYNC_APPROVED_MANIFEST_B64=$oldManifest
 $originalEncoding=[Console]::OutputEncoding
 $global:mitbolNeonApprovedPreflight=[pscustomobject]@{catalog_manifest=@{store=@{name=('Ch'+[char]0xed+'a')}}}
 $global:sqlCalls=0
@@ -97,10 +101,15 @@ try { & ([scriptblock]::Create($code)) } catch { $failed=$true }
 if($failed -ne ($case -ne 'proxy_false')){throw 'Unexpected client/SQL audit outcome'}
 $expectedCalls=if($case -eq 'proxy_false'){2}else{1}
 if($global:sqlCalls -ne $expectedCalls){throw 'Wrong login flow'}
-if($env:LC_ALL -cne 'previous-locale' -or $env:LC_MESSAGES -cne 'previous-messages' -or $env:MITBOL_SYNC_APPROVED_MANIFEST -cne 'previous-public-manifest'){throw 'Audit environment not restored'}
-if($env:MITBOL_SYNC_APPROVED_MANIFEST_B64 -cne 'previous-base64-manifest' -or [Console]::OutputEncoding.CodePage -ne $originalEncoding.CodePage){throw 'Manifest/encoding not restored'}
+if($env:LC_ALL -cne $oldLocale -or $env:LC_MESSAGES -cne $oldMessages -or $env:MITBOL_SYNC_APPROVED_MANIFEST -cne 'previous-public-manifest'){throw 'Audit environment not restored'}
+if($env:MITBOL_SYNC_APPROVED_MANIFEST_B64 -cne $oldManifest -or [Console]::OutputEncoding.CodePage -ne $originalEncoding.CodePage){throw 'Manifest/encoding not restored'}
+if (-not __PREVIOUS__) {
+    foreach ($name in @('LC_ALL', 'LC_MESSAGES', 'MITBOL_SYNC_APPROVED_MANIFEST_B64')) {
+        if (Test-Path -LiteralPath "Env:$name") { throw 'Previously absent audit variable still exists' }
+    }
+}
 Write-Output 'block_c_client_tls_mock_ok'
-""".replace('__CASE__', case).replace('__CODE__', encoded).replace('__BLOCK__', base64.b64encode(block.encode('utf-8')).decode('ascii'))
+""".replace('__CASE__', case).replace('__PREVIOUS__', '$true' if previous else '$false').replace('__CODE__', encoded).replace('__BLOCK__', base64.b64encode(block.encode('utf-8')).decode('ascii'))
     env = {k:v for k,v in os.environ.items() if k.upper() in {'SYSTEMROOT','SYSTEMDRIVE','WINDIR','PATH','TEMP','TMP','COMSPEC'}}
     process = subprocess.run([shell, '-NoProfile', '-NonInteractive', '-Command',
         '. ([scriptblock]::Create([Console]::In.ReadToEnd()))'], input=program, env=env,

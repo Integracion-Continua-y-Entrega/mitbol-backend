@@ -42,7 +42,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $mode = '__MODE__'
 $oldValue = if (__PREVIOUS__) { 'stage3e-fake-previous' } else { $null }
-[Environment]::SetEnvironmentVariable('LOYVERSE_ACCESS_TOKEN', $oldValue, 'Process')
+$env:LOYVERSE_ACCESS_TOKEN = $oldValue
+if ($null -eq $oldValue -and (Test-Path -LiteralPath Env:LOYVERSE_ACCESS_TOKEN)) { throw 'Test setup did not remove variable' }
 $env:LOYVERSE_STORE_ID = 'stage3e-fake-store'
 $script:preflightCalls = 0
 $script:freeCalls = 0
@@ -119,6 +120,7 @@ $expectedFrees = if ($mode -in @('empty', 'allocation_error')) { 0 } else { 1 }
 if ($script:freeCalls -ne $expectedFrees -or $script:activeBSTR -ne [IntPtr]::Zero) { throw 'BSTR not freed exactly once' }
 $restored = [Environment]::GetEnvironmentVariable('LOYVERSE_ACCESS_TOKEN', 'Process')
 if ($null -eq $oldValue) {
+    if (Test-Path -LiteralPath Env:LOYVERSE_ACCESS_TOKEN) { throw 'Previously absent variable still exists' }
     if ($null -ne $restored) { throw 'Previously absent variable not removed' }
 } elseif ($restored -cne $oldValue) { throw 'Previous variable not restored' }
 if ($null -ne $previousLoyverseToken -or $null -ne $loyverseSecret -or $loyversePointer -ne [IntPtr]::Zero) {

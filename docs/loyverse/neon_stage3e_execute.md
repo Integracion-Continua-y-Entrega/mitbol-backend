@@ -60,7 +60,7 @@ function global:Invoke-MitbolWithHiddenToken {
         & $Action
     }
     finally {
-        [Environment]::SetEnvironmentVariable('LOYVERSE_ACCESS_TOKEN', $previousLoyverseToken, 'Process')
+        $env:LOYVERSE_ACCESS_TOKEN = $previousLoyverseToken
         $previousLoyverseToken = $null
         if ($loyversePointer -ne [IntPtr]::Zero) {
             [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($loyversePointer)
@@ -147,7 +147,7 @@ Invoke-MitbolWithHiddenToken {
         if ($result.status -cne 'synchronized' -or $result.writes -ne $true) { throw 'Resultado no confirmado; auditar sin repetir.' }
     }
     finally {
-        [Environment]::SetEnvironmentVariable('MITBOL_SYNC_APPROVED_PREFLIGHT', $previousApproval, 'Process')
+        $env:MITBOL_SYNC_APPROVED_PREFLIGHT = $previousApproval
     }
 }
 }

@@ -51,6 +51,6 @@ try {
 finally {
     [Console]::OutputEncoding = $previousConsoleEncoding
     foreach ($variableName in $savedAuditEnvironment.Keys) {
-        [Environment]::SetEnvironmentVariable($variableName, $savedAuditEnvironment[$variableName], 'Process')
+        Set-Item -LiteralPath "Env:$variableName" -Value $savedAuditEnvironment[$variableName]
     }
 }
