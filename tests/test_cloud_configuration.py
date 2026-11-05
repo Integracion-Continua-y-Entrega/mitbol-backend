@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from pydantic_settings import SettingsError
+from pydantic_settings.sources import DotEnvSettingsSource
 import pytest
 from sqlalchemy.engine import Engine
 
@@ -26,6 +27,25 @@ def cloud_settings(**changes):
                   admin_enabled=False, loyverse_access_token=None)
     values.update(changes)
     return Settings(**values)
+
+
+@pytest.mark.parametrize("mode", ["cloud", "test"])
+@pytest.mark.parametrize("explicit_mode", [False, True])
+def test_cloud_and_test_never_open_dotenv_even_while_building_sources(monkeypatch, tmp_path, mode, explicit_mode):
+    source = tmp_path / ".env"
+    source.write_text("DATABASE_URL=must-not-be-read\n", encoding="utf-8")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Se intentó abrir dotenv antes de seleccionar las fuentes")
+
+    monkeypatch.setattr(DotEnvSettingsSource, "_read_env_file", forbidden)
+    monkeypatch.setenv("APP_ENV", "local" if explicit_mode else mode)
+    values = dict(_env_file=source, database_url=CLOUD_URL if mode == "cloud" else "postgresql://u:p@localhost/test",
+                  expected_database="mitbol_cloud_dev", expected_database_host="ep-catalog.example.com",
+                  cors_origins=["https://menu.example.com"], admin_enabled=False)
+    if explicit_mode:
+        values["app_env"] = mode
+    assert Settings(**values).app_env == mode
 
 
 def test_public_cloud_starts_without_loyverse_and_publishes_no_writes(monkeypatch, tmp_path):
