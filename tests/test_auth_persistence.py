@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from io import StringIO
+import json
 import os
 from pathlib import Path
 import re
@@ -75,6 +76,24 @@ def test_incremental_sql_is_reviewable_and_never_connects(monkeypatch):
     assert "CREATE TABLE \"Customers\"" not in sql
 
 
+def auth_target(connection):
+    """Diagnóstico sin DSN/secretos: dirección observada en el servidor, no en la URL."""
+    return dict(connection.execute(text("""
+        SELECT current_setting('server_version_num')::int AS server_version_num,
+               current_database() AS database, current_user AS current_user,
+               session_user AS session_user, host(inet_server_addr()) AS server_address,
+               inet_server_port() AS server_port
+    """)).mappings().one())
+
+
+def assert_auth_target(target):
+    assert target["current_user"] == target["session_user"] == "mitbol_ci", target
+    assert target["server_version_num"] // 10000 == 18, target
+    # Un puerto Docker publicado como 127.0.0.1 puede llegar a otra IP en PG.
+    # NULL significa socket Unix y tampoco satisface el guard SQL del escritor.
+    assert target["server_address"] in {"127.0.0.1", "::1"}, target
+
+
 @pytest.fixture(scope="module")
 def auth_database(record_testsuite_property):
     directory_value = os.getenv("MITBOL_AUTH_TEST_CLUSTER")
@@ -97,8 +116,9 @@ def auth_database(record_testsuite_property):
     name = "mitbol_test_auth_" + uuid4().hex
     quoted = control.dialect.identifier_preparer.quote(name)
     with control.connect() as connection:
-        assert connection.scalar(text("SELECT current_user")) == "mitbol_ci"
-        assert int(connection.scalar(text("SHOW server_version_num"))) // 10000 == 18
+        target = auth_target(connection)
+        record_testsuite_property("auth_control_target", json.dumps(target, sort_keys=True))
+        assert_auth_target(target)
         if directory is not None:
             assert Path(connection.scalar(text("SHOW data_directory"))).resolve() == directory
         connection.exec_driver_sql(f"CREATE DATABASE {quoted} TEMPLATE template0 ENCODING 'UTF8'")
@@ -106,6 +126,10 @@ def auth_database(record_testsuite_property):
                            connect_args={"connect_timeout": 5, "options": "-c statement_timeout=10000 -c lock_timeout=5000"})
     try:
         with engine.begin() as connection:
+            target = auth_target(connection)
+            record_testsuite_property("auth_isolated_target", json.dumps(target, sort_keys=True))
+            assert_auth_target(target)
+            assert target["database"] == name, target
             command.upgrade(config_for(connection), REVISION)
         record_testsuite_property("auth_isolated_database", name)
         yield engine

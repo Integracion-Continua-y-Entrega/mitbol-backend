@@ -43,45 +43,52 @@ actualizar un Pull Request hacia `develop` o `main`. CI verifica automáticament
 que los cambios mantienen las pruebas aprobadas; esta etapa no despliega la API.
 
 El job **Backend tests** usa Ubuntu 24.04, Python 3.13 (la misma serie que el
-entorno local verificado) y un servicio temporal `postgres:18`. GitHub espera su
-health check `pg_isready` antes de iniciar los pasos. Se instalan las dependencias
-fijadas en `requirements.txt`; `psycopg2-binary` y Pillow proporcionan los binarios
-necesarios mediante sus wheels, sin configurar un PostgreSQL del sistema.
+entorno local verificado) y binarios PostgreSQL 18 instalados desde el repositorio
+oficial PGDG con firma verificada. Ejecuta el mismo laboratorio temporal que en
+local, sin servicio Docker ni NAT. El PostgreSQL preinstalado en la imagen del
+runner no determina la versión de las pruebas. Se instalan las dependencias
+fijadas en `requirements.txt`.
 
 Después de descargar el código y configurar Python, se ejecuta:
 
 ```bash
 python -m pip install -r requirements.txt
 python -m pip check
-python -m pytest -ra --junitxml=test-results/pytest.xml -p no:cacheprovider
+MITBOL_TEST_PG_BIN=/usr/lib/postgresql/18/bin python -B scripts/test_auth_phase1.py --with-reader -ra --junitxml=test-results/pytest.xml
 ```
 
-El workflow activa las variables existentes `MITBOL_SYNC_POSTGRES_TESTS=1` y
-`MITBOL_POSTGRES_TESTS=1`. Las fixtures detectan `GITHUB_ACTIONS=true` (variable
-oficial del runner) y usan `DATABASE_URL` exclusivamente con el usuario ficticio
-`mitbol_ci`, el host `127.0.0.1` del runner y la base inicial `mitbol_test_ci`.
-Rechazan otras URLs y la desactivación de cualquiera de esas suites. En esta ruta
-no leen `.env` ni consultan `mitbol_dev`.
+El ejecutor activa `MITBOL_SYNC_POSTGRES_TESTS=1` y `MITBOL_POSTGRES_TESTS=1`,
+crea dos clústeres con `initdb -U mitbol_ci` y escucha sólo en `127.0.0.1`, en
+puertos aleatorios. El segundo clúster separa los roles de las pruebas del lector.
+Sanea el entorno heredado, incluyendo `GITHUB_ACTIONS` en el proceso pytest para
+seleccionar las fixtures de clúster temporal, y establece `APP_ENV=test`.
+Las fixtures contrastan el directorio real con `SHOW data_directory`, la versión
+18 y el operador antes de crear bases. No leen `.env` ni consultan `mitbol_dev`.
+Las validaciones de la ruta alternativa de servicio CI siguen cubiertas por tests.
 
-Las fixtures crean tres bases `mitbol_test_hu008_<identificador>`: una migrada hasta
-`20261102_0003` para el catálogo, otra inicialmente vacía para comprobar validación y
-migraciones, y otra para la migración incremental de HU-005. Las pruebas de
-HU-007 también comprueban la actualización real desde la revisión anterior.
-Las verificaciones de esquema reutilizan la primera base en modo de sólo lectura.
-Las transacciones de cada prueba se revierten; todas las bases desaparecen junto
-con el servicio al finalizar el job. No hace falta ejecutar Alembic aparte ni
-crear bases manualmente.
+Las fixtures crean bases `mitbol_test_hu008_<identificador>` con catálogo
+sintético equivalente a `20261102_0003` y otras bases vacías para comprobar las
+migraciones reales de HU-005/HU-007. Las verificaciones de esquema reutilizan el
+catálogo temporal en modo de sólo lectura. Se conservan las comprobaciones de
+migraciones, las transacciones y los savepoints; no hace falta ejecutar Alembic
+aparte ni crear bases manualmente.
 
 Las pruebas de autenticación crean además su propia base temporal
 `mitbol_test_auth_<identificador>`, aplican allí el head `20261106_0005` (incluye identidad de 0004) y
 comprueban sesiones, permisos y auditoría con cuentas sintéticas. Nunca aplican
-esa migración en Neon o mitbol_dev.
+esa migración en Neon o mitbol_dev. JUnit registra `auth_control_target` y
+`auth_isolated_target`: versión, base, current_user, session_user, dirección y
+puerto vistos por PostgreSQL, sin URLs ni secretos. El guard SQL del escritor
+conserva sus restricciones de PostgreSQL 18, nombre temporal, operador y TCP
+loopback. El ejecutor detiene ambos clústeres en `finally` y conserva los archivos
+temporales para diagnóstico.
 
 Las pruebas de HU-008, HU-001, HU-003, HU-005 y HU-007 usan estas fixtures.
 Loyverse se simula con RESPX, `httpx.MockTransport` y snapshots existentes. El
-token del job es ficticio, `ADMIN_ENABLED=false` y no se configura una clave
-administrativa global. Las pruebas administrativas crean aplicaciones aisladas
-con claves temporales. No se inicia un servidor ni una sincronización real.
+ejecutor excluye los tokens heredados, mantiene `ADMIN_ENABLED=false` y
+`AUTH_ENABLED=false` y no configura una clave administrativa global.
+Las pruebas administrativas crean aplicaciones aisladas
+con claves temporales. No se inicia un servidor HTTP ni una sincronización real.
 
 Las acciones oficiales están fijadas a commits de sus versiones publicadas.
 El token de GitHub sólo tiene `contents: read` y checkout no conserva sus
@@ -92,21 +99,22 @@ incluso si pytest falla; el código de salida de pytest determina el fallo del j
 Para revisar una ejecución, abre **Actions → Backend CI → ejecución → Backend
 tests → Run complete test suite**. Allí aparecen las pruebas aprobadas, fallidas,
 errores y omisiones. El resumen de la ejecución permite descargar el artefacto.
-La instalación en Linux, el contenedor y los permisos de GitHub deben verificarse
-en la primera ejecución real en Actions.
+La instalación PGDG y la ejecución en Ubuntu deben confirmarse en la siguiente
+corrida real de Actions. La corrección, evidencia y límites de validación están
+en el [reporte del error de preparación del escritor](docs/security/admin_auth_ci_fix.md).
 
 Para publicar la configuración desde la rama actual, revisa el diff y ejecuta
 manualmente:
 
 ```powershell
-git add .github/workflows/backend-ci.yml tests/conftest.py tests/test_postgresql_schema.py tests/test_ci_configuration.py README.MD
-git commit -m "ci: run backend tests with isolated PostgreSQL"
-git push -u origin chore/github-actions-ci
+git add .github/workflows/backend-ci.yml tests/test_auth_persistence.py tests/test_ci_configuration.py tests/test_admin_writer.py README.MD docs/security/admin_auth_ci_fix.md
+git commit -m "ci: run admin security tests on isolated loopback PostgreSQL 18"
+git push origin design/admin-auth-security
 ```
 
-Abre un Pull Request en GitHub con base `develop` y comparación
-`chore/github-actions-ci`. El push a esta rama `chore/` no activa el workflow;
-la apertura del PR sí lo activa. Espera el check **Backend tests** antes de
+El Pull Request usa base `develop` y comparación `design/admin-auth-security`.
+Actualizar el PR activa el workflow mediante `pull_request.synchronize`.
+Espera el check **Backend tests** antes de
 fusionarlo. No se realizan commits, push ni cambios de protección automáticamente.
 
 Después de comprobar la primera ejecución, un administrador puede ir a

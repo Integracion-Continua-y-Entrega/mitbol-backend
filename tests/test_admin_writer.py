@@ -142,6 +142,14 @@ def test_prepare_rejects_reexecution_and_wrong_database_without_changing_role(wr
     execute_script(r.writer, VERIFY.read_text(encoding="utf-8"))
 
 
+@pytest.mark.parametrize("role", ["writer", "reader"])
+def test_prepare_rejects_non_operator_logins_without_changing_acl(writer_database, role):
+    r = writer_database
+    with pytest.raises(DBAPIError, match="WRITER_LOCAL_TARGET"):
+        execute_script(getattr(r, role), PREPARE.read_text(encoding="utf-8"))
+    execute_script(r.writer, VERIFY.read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize("table", ["Persons", "PersonalAccounts", "Employees", "Roles", "EmployeeRoles", "AccountSessions", "AuditEvents"])
 def test_reader_cannot_read_authentication_even_after_writer_setup(writer_database, table):
     denied(writer_database.reader, f'SELECT * FROM "{table}"')
