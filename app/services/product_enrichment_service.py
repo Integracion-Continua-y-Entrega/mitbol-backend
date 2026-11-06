@@ -11,6 +11,9 @@ from app.models import Product, ProductImage, ProductTag, ProductVariant, Tag
 from app.schemas.enrichment import DescriptionResponse, ImageResponse, TagResponse
 from app.services.enrichment_errors import EnrichmentError, StorageError
 from app.services.image_storage import LocalImageStorage, validate_image
+from app.services.admin_transaction import (
+    commit_changes, managed, rollback_changes, track_image_storage,
+)
 
 logger = logging.getLogger(__name__)
 IMAGE_STORAGE_LOCK_KEY = 0x4855303035494D47
@@ -21,19 +24,19 @@ def database_errors(db):
     try:
         yield
     except EnrichmentError:
-        db.rollback()
+        rollback_changes(db)
         raise
     except IntegrityError:
-        db.rollback()
+        rollback_changes(db)
         raise EnrichmentError(409, "La operación entra en conflicto con los datos existentes.") from None
     except (OperationalError, InterfaceError, TimeoutError):
-        db.rollback()
+        rollback_changes(db)
         raise EnrichmentError(503, "La base de datos no está disponible temporalmente.") from None
     except OSError:
-        db.rollback()
+        rollback_changes(db)
         raise StorageError() from None
     except Exception as error:
-        db.rollback()
+        rollback_changes(db)
         logger.error("Falló una operación de enriquecimiento (%s).", type(error).__name__)
         raise EnrichmentError(500, "No fue posible completar la operación.") from None
 
@@ -73,7 +76,7 @@ def update_description(db, product_id, description):
         product.description = description
         db.flush()
         result = DescriptionResponse.model_validate(product)
-        db.commit()
+        commit_changes(db)
         return result
 
 
@@ -92,7 +95,7 @@ def create_tag(db, name):
         db.add(tag)
         db.flush()
         result = TagResponse.model_validate(tag)
-        db.commit()
+        commit_changes(db)
         return result
 
 
@@ -103,7 +106,7 @@ def associate_tag(db, variant_id, tag_id):
         db.execute(insert(ProductTag).values(
             product_variant_id=variant_id, tag_id=tag_id,
         ).on_conflict_do_nothing(index_elements=["product_variant_id", "tag_id"]))
-        db.commit()
+        commit_changes(db)
 
 
 def remove_tag(db, variant_id, tag_id):
@@ -113,7 +116,7 @@ def remove_tag(db, variant_id, tag_id):
         assignment = db.get(ProductTag, (variant_id, tag_id))
         if assignment is not None:
             db.delete(assignment)
-        db.commit()
+        commit_changes(db)
 
 
 def list_images(db, variant_id):
@@ -172,17 +175,20 @@ def add_image(db, storage: LocalImageStorage, variant_id, content, display_order
             display_order = 0 if maximum is None else maximum + 1
             if display_order > 2_147_483_647:
                 raise EnrichmentError(409, "No hay un orden disponible al final; especifica display_order.")
+        track_image_storage(db, storage)
         try:
             operation = storage.prepare_create(processed, extension, variant.product_id, variant_id)
             image = ProductImage(product_variant_id=variant_id, image_url=operation.image_url, display_order=display_order)
             db.add(image)
             db.flush()
             result = ImageResponse.model_validate(image)
-            db.commit()
+            commit_changes(db)
         except Exception:
-            _recover_failed(db, storage)
+            if not managed(db):
+                _recover_failed(db, storage)
             raise
-        _finalize(storage, operation, True)
+        if not managed(db):
+            _finalize(storage, operation, True)
         return result
 
 
@@ -192,7 +198,7 @@ def update_image_order(db, variant_id, image_id, display_order):
         image.display_order = display_order
         db.flush()
         result = ImageResponse.model_validate(image)
-        db.commit()
+        commit_changes(db)
         return result
 
 
@@ -201,6 +207,7 @@ def delete_image(db, storage: LocalImageStorage, variant_id, image_id):
         _storage_lock(db)
         storage.recover(db)
         image = require_image(db, variant_id, image_id)
+        track_image_storage(db, storage)
         try:
             # Si otra fila referencia la misma URL, conserva el archivo compartido.
             shared = db.scalar(select(func.count()).select_from(ProductImage).where(
@@ -209,9 +216,10 @@ def delete_image(db, storage: LocalImageStorage, variant_id, image_id):
             operation = None if shared else storage.prepare_delete(image.image_url)
             db.delete(image)
             db.flush()
-            db.commit()
+            commit_changes(db)
         except Exception:
-            _recover_failed(db, storage)
+            if not managed(db):
+                _recover_failed(db, storage)
             raise
-        if operation is not None:
+        if operation is not None and not managed(db):
             _finalize(storage, operation, False)

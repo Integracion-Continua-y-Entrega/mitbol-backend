@@ -23,30 +23,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: mitbol_ci
-          POSTGRES_PASSWORD: ci-test-password
-          POSTGRES_DB: mitbol_test_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U mitbol_ci -d mitbol_test_ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-
     env:
-      # Credenciales ficticias: sólo existen en el servicio efímero de este job.
-      DATABASE_URL: postgresql+psycopg2://mitbol_ci:ci-test-password@127.0.0.1:5432/mitbol_test_ci
-      MITBOL_SYNC_POSTGRES_TESTS: '1'
-      MITBOL_POSTGRES_TESTS: '1'
-      LOYVERSE_ACCESS_TOKEN: ci-dummy-token
-      LOYVERSE_STORE_ID: test-store
-      ADMIN_ENABLED: 'false'
-      ADMIN_API_KEY: ''
+      # El ejecutor inicia PG18 propio; no utiliza el PostgreSQL del sistema,
+      # servicios Docker, .env ni credenciales de bases reales.
+      MITBOL_TEST_PG_BIN: /usr/lib/postgresql/18/bin
 
     steps:
       - name: Checkout repository
@@ -66,10 +46,22 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip check
 
+      - name: Install PostgreSQL 18 binaries
+        # ubuntu-24.04 incluye PG16; instalar explícitamente la versión exigida.
+        # Repositorio oficial PGDG, con verificación de firma acotada a su clave.
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error --location https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          printf '%s\n' 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/mitbol-pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-18 postgresql-client-18
+          "$MITBOL_TEST_PG_BIN/postgres" --version
+
       - name: Run complete test suite
-        # Las fixtures crean tres bases aisladas y ejecutan Alembic donde corresponde.
+        # Mismo ejecutor local: initdb -U mitbol_ci, puertos aleatorios y TCP
+        # 127.0.0.1 sin NAT. Contrasta data_directory y detiene ambos clústeres.
         # pytest propaga fallos y errores al estado del job; no se ignora su salida.
-        run: python -m pytest -ra --junitxml=test-results/pytest.xml -p no:cacheprovider
+        run: python -B scripts/test_auth_phase1.py --with-reader -ra --junitxml=test-results/pytest.xml
 
       - name: Upload pytest report
         if: ${{ always() }}

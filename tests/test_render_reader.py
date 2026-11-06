@@ -19,7 +19,7 @@ from app.core.config import Settings
 from app.db.connection import READ_ONLY_ROLE_SQL
 from app.db.database import get_db
 from app.main import create_app
-from app.models import Base, Product, ProductVariant, ProductModifier, ProductComplement, ProductModifierAssignment
+from app.models import AuthBase, Base, Product, ProductVariant, ProductModifier, ProductComplement, ProductModifierAssignment
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -164,6 +164,25 @@ def test_reader_has_only_required_catalog_selects_and_no_privileged_memberships(
         assert connection.exec_driver_sql("SELECT count(*) FROM pg_auth_members WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user)").scalar_one() == 0
     finally:
         connection.exec_driver_sql("RESET ROLE")
+
+
+def test_reader_cannot_read_new_identity_or_security_tables(reader_database):
+    database = reader_database
+    with database.engine.begin() as connection:
+        AuthBase.metadata.create_all(connection)
+    create_reader(database)
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("SET LOCAL ROLE mitbol_render_reader")
+        for name in AuthBase.metadata.tables:
+            assert not connection.scalar(text(
+                "SELECT has_table_privilege(current_user, :relation, 'SELECT')"
+            ), {"relation": f'public."{name}"'})
+        assert connection.exec_driver_sql(READ_ONLY_ROLE_SQL).scalar_one() is False
+    with database.engine.connect() as connection:
+        connection.exec_driver_sql("SET ROLE mitbol_render_reader")
+        with pytest.raises(ProgrammingError):
+            connection.exec_driver_sql('SELECT password_hash FROM "PersonalAccounts"')
+        connection.rollback()
 
 
 @pytest.mark.parametrize("statement", [

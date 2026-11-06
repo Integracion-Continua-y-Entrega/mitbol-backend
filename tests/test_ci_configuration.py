@@ -74,4 +74,40 @@ def test_ci_fixture_never_reads_development_or_dotenv(monkeypatch):
     assert urls[1].database.startswith("mitbol_test_hu008_")
     assert all(url.host == "127.0.0.1" for url in urls)
     upgrade.assert_called_once()
-    assert upgrade.call_args.args[1] == "head"
+    # La regresión pública conserva el esquema de catálogo usado en producción;
+    # autenticación migra el head en otra base temporal independiente.
+    assert upgrade.call_args.args[1] == "20261102_0003"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("server_version_num", 170000),
+    ("current_user", "postgres"),
+    ("session_user", "postgres"),
+    ("server_address", None),
+    ("server_address", "172.18.0.2"),
+    ("server_address", "192.0.2.1"),
+])
+def test_auth_fixture_rejects_unauthorized_server_before_creating_database(monkeypatch, field, value):
+    import test_auth_persistence as persistence
+
+    monkeypatch.delenv("MITBOL_AUTH_TEST_CLUSTER", raising=False)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("DATABASE_URL", CI_URL)
+    target = dict(server_version_num=180000, database="postgres", current_user="mitbol_ci",
+                  session_user="mitbol_ci", server_address="127.0.0.1", server_port=5432)
+    target[field] = value
+    engine = MagicMock()
+    engine.dialect = postgresql.dialect()
+    connection = engine.connect.return_value.__enter__.return_value
+    connection.execute.return_value.mappings.return_value.one.return_value = target
+    monkeypatch.setattr(persistence, "create_engine", MagicMock(return_value=engine))
+    record = MagicMock()
+    fixture = persistence.auth_database.__wrapped__(record)
+    with pytest.raises(AssertionError):
+        next(fixture)
+    connection.exec_driver_sql.assert_not_called()
+    record.assert_called_once()
+    name, diagnostic = record.call_args.args
+    assert name == "auth_control_target"
+    assert "fake" not in diagnostic and "postgresql+psycopg2" not in diagnostic
+    assert persistence.json.loads(diagnostic) == target

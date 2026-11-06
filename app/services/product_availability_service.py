@@ -5,6 +5,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.models import Product, ProductVariant
 from app.schemas.availability import ProductAvailabilityResponse, VariantAvailabilityResponse
+from app.services.admin_transaction import commit_changes
 from app.services.availability_rules import product_can_order, variant_can_order
 from app.services.enrichment_errors import EnrichmentError
 from app.services.product_enrichment_service import database_errors
@@ -68,7 +69,7 @@ def update_product_availability(db, product_id, is_available):
         product.is_available = is_available
         db.flush()
         result = _product_response(product)
-        db.commit()
+        commit_changes(db)
         return result
 
 
@@ -84,5 +85,5 @@ def update_variant_availability(db, variant_id, is_available):
         variant.is_available = is_available
         db.flush()
         result = _variant_response(variant)
-        db.commit()
+        commit_changes(db)
         return result
