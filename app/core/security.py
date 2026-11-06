@@ -1,4 +1,4 @@
-"""Credencial compartida para backend local; no representa usuarios ni roles."""
+"""Guard administrativo local: sesiones individuales o clave legada excluyente."""
 
 from ipaddress import ip_address
 from secrets import compare_digest
@@ -8,6 +8,10 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 from starlette.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
+from fastapi.routing import iter_route_contexts
+from starlette._utils import get_route_path
+from uuid import uuid4
 
 from app.core.config import Settings
 
@@ -69,6 +73,31 @@ class AdminRequestGuard:
         self.app = app
         self.config = config
 
+    def authorize_session(self, request, scope):
+        from app.core.auth_errors import AuthError
+        from app.core.auth_http import cookie_name
+
+        # Obtiene los permisos de las dependencias de la ruta real, sin una
+        # segunda lista de URLs que pueda quedar desactualizada.
+        permissions = {"catalog:read"}
+        matched = False
+        for route in iter_route_contexts(request.app.routes):
+            if (getattr(route, "dependant", None) is not None and route.path_regex.match(get_route_path(scope))
+                    and scope["method"] in route.methods):
+                matched = True
+                permissions.update(permission for dep in route.dependant.dependencies
+                                   if (permission := getattr(dep.call, "required_permission", None)))
+                break
+        if not matched:
+            raise AuthError(404, "Recurso no encontrado.")
+        with request.app.state.auth_service.authenticated(
+            request.cookies.get(cookie_name(self.config)), request_id=uuid4(),
+            csrf_header=request.headers.get("x-csrf-token"),
+            require_csrf=request.method not in {"GET", "HEAD", "OPTIONS"},
+        ) as context:
+            if not permissions <= context.principal.permissions:
+                raise AuthError(403, "No tienes permiso para esta operación.", code="INSUFFICIENT_PERMISSION")
+
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or not (
             scope["path"] == "/api/admin" or scope["path"].startswith("/api/admin/")
@@ -77,7 +106,30 @@ class AdminRequestGuard:
             return
         request = Request(scope)
         error = None
-        if not self.config.admin_enabled:
+        if self.config.auth_enabled and not self.config.auth_catalog_enabled:
+            await JSONResponse({"detail": "Recurso no encontrado."}, status_code=404)(scope, receive, send)
+            return
+        if self.config.auth_enabled:
+            from app.core.auth_errors import AuthError
+            from app.core.auth_http import auth_error_response, validate_auth_request
+
+            try:
+                validate_auth_request(request, self.config)
+                await run_in_threadpool(self.authorize_session, request, scope)
+            except AuthError as auth_error:
+                await auth_error_response(auth_error, self.config)(scope, receive, send)
+                return
+            original_send = send
+
+            async def private_send(message):
+                if message["type"] == "http.response.start":
+                    message = dict(message)
+                    message["headers"] = [(k, v) for k, v in message["headers"] if k.lower() != b"cache-control"]
+                    message["headers"].append((b"cache-control", b"no-store"))
+                await original_send(message)
+
+            send = private_send
+        elif not self.config.admin_enabled:
             error = (404, "Recurso no encontrado.")
         elif not local_admin_request(request):
             error = (403, "La administración sólo admite acceso backend local.")

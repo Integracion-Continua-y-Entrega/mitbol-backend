@@ -2,6 +2,22 @@
 
 Este repositorio contiene la capa de lógica de negocio del sistema de menú digital para el restaurante **mitbol**. Expone una API RESTful que alimenta la interfaz de los comensales y el panel de administración.
 
+La integración local de sesiones individuales y permisos Admin/Staff con HU-005 y
+HU-007 está documentada en [Autenticación administrativa, fase 3](docs/security/admin_auth_phase3.md),
+incluidos contratos para React, auditoría y pruebas aisladas. `AUTH_ENABLED=false`
+por defecto; cloud mantiene autenticación y administración deshabilitadas. La
+clave compartida legada no sustituye una sesión en el modo individual.
+
+La [fase 4](docs/security/admin_auth_phase4.md) documenta y prueba en PostgreSQL
+temporal el escritor con permisos por columna y su separación del lector. Incluye
+la matriz SQL y el procedimiento futuro para Neon/Render; no habilita cloud ni
+crea roles en infraestructura real.
+
+La [fase 5](docs/security/admin_auth_phase5.md) añade límites persistentes en
+PostgreSQL, aprovisionamiento por operador, CORS separado y gates administrativos
+apagados por defecto. Incluye scripts propuestos y guías Neon/Render/React. El
+dominio sigue pendiente y la autenticación cloud continúa bloqueada.
+
 ## 🚀 Tecnologías Utilizadas
 
 - **Framework:** [FastAPI](https://fastapi.tiangolo.com/)
@@ -47,14 +63,19 @@ oficial del runner) y usan `DATABASE_URL` exclusivamente con el usuario ficticio
 Rechazan otras URLs y la desactivación de cualquiera de esas suites. En esta ruta
 no leen `.env` ni consultan `mitbol_dev`.
 
-Las fixtures crean tres bases `mitbol_test_hu008_<identificador>`: una migrada con
-`alembic upgrade head`, otra inicialmente vacía para comprobar validación y
+Las fixtures crean tres bases `mitbol_test_hu008_<identificador>`: una migrada hasta
+`20261102_0003` para el catálogo, otra inicialmente vacía para comprobar validación y
 migraciones, y otra para la migración incremental de HU-005. Las pruebas de
 HU-007 también comprueban la actualización real desde la revisión anterior.
 Las verificaciones de esquema reutilizan la primera base en modo de sólo lectura.
 Las transacciones de cada prueba se revierten; todas las bases desaparecen junto
 con el servicio al finalizar el job. No hace falta ejecutar Alembic aparte ni
 crear bases manualmente.
+
+Las pruebas de autenticación crean además su propia base temporal
+`mitbol_test_auth_<identificador>`, aplican allí el head `20261106_0005` (incluye identidad de 0004) y
+comprueban sesiones, permisos y auditoría con cuentas sintéticas. Nunca aplican
+esa migración en Neon o mitbol_dev.
 
 Las pruebas de HU-008, HU-001, HU-003, HU-005 y HU-007 usan estas fixtures.
 Loyverse se simula con RESPX, `httpx.MockTransport` y snapshots existentes. El

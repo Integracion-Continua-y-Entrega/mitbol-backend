@@ -74,4 +74,6 @@ def test_ci_fixture_never_reads_development_or_dotenv(monkeypatch):
     assert urls[1].database.startswith("mitbol_test_hu008_")
     assert all(url.host == "127.0.0.1" for url in urls)
     upgrade.assert_called_once()
-    assert upgrade.call_args.args[1] == "head"
+    # La regresión pública conserva el esquema de catálogo usado en producción;
+    # autenticación migra el head en otra base temporal independiente.
+    assert upgrade.call_args.args[1] == "20261102_0003"

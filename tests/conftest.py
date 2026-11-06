@@ -160,7 +160,9 @@ def sync_test_database(record_testsuite_property):
     test_url = source_url.set(database=name)
     config = Config(str(root / "alembic.ini"))
     config.attributes["database_url"] = test_url.render_as_string(hide_password=False)
-    command.upgrade(config, "head")
+    # Regresión del catálogo sobre la revisión autorizada que usa Render/Neon.
+    # La autenticación prueba su head por separado en una base temporal propia.
+    command.upgrade(config, "20261102_0003")
     engine = create_engine(test_url, connect_args={
         "connect_timeout": 5, "options": "-c statement_timeout=15000",
     })

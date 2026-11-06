@@ -31,6 +31,7 @@ ENRICHMENT_TABLES = {"ProductImages", "Tags", "ProductTags"}
 INITIAL_REVISION = "20261029_0001"
 ENRICHMENT_REVISION = "20261102_0002"
 AVAILABILITY_REVISION = "20261102_0003"
+AUTH_REVISION = "20261105_0004"
 
 
 def alembic_config(output=None):
@@ -107,7 +108,7 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
     output = StringIO()
     command.upgrade(alembic_config(output), "head", sql=True)
     sql = output.getvalue()
-    assert sql.count("CREATE TABLE") == 9  # Ocho de negocio y alembic_version.
+    assert sql.count("CREATE TABLE") == 18  # Catálogo, identidad, límites y versión.
     for name in CATALOG_TABLES | ENRICHMENT_TABLES:
         assert f'CREATE TABLE "{name}"' in sql
     assert "CREATE TABLE alembic_version" in sql
@@ -122,7 +123,9 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
 
 def test_hu007_extends_hu005_without_changing_its_ancestry():
     scripts = ScriptDirectory.from_config(alembic_config())
-    assert scripts.get_heads() == [AVAILABILITY_REVISION]
+    assert scripts.get_heads() == ["20261106_0005"]
+    assert scripts.get_revision("20261106_0005").down_revision == AUTH_REVISION
+    assert scripts.get_revision(AUTH_REVISION).down_revision == AVAILABILITY_REVISION
     assert scripts.get_revision(AVAILABILITY_REVISION).down_revision == ENRICHMENT_REVISION
     assert scripts.get_revision(ENRICHMENT_REVISION).down_revision == INITIAL_REVISION
 
