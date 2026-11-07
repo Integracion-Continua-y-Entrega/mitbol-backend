@@ -188,7 +188,9 @@ OR EXISTS (
 
 
 def create_database_engine(value: str | URL, *, target: CloudDatabaseTarget | None = None,
-                           read_only: bool = False):
+                           read_only: bool = False, writer_profile: bool = False):
+    if writer_profile and (target is None or read_only):
+        raise DatabaseTargetError("El perfil writer requiere destino TLS remoto y pool independiente.")
     url = target.validate_url(value) if target else postgresql_url(value)
     defaults = dict(pool_pre_ping=True, pool_size=3, max_overflow=2, pool_timeout=10,
                     hide_parameters=True, connect_args=connection_arguments(url, target))
@@ -199,14 +201,18 @@ def create_database_engine(value: str | URL, *, target: CloudDatabaseTarget | No
             target.validate_driver(driver_connection, url)
             # Una conexión recién abierta no contiene trabajo de la aplicación.
             try:
-                with driver_connection.cursor() as cursor:
-                    cursor.execute("SELECT pg_catalog.current_database()")
-                    if cursor.fetchone()[0] != target.expected_database:
-                        raise DatabaseTargetError("La base real no coincide con el destino cloud autorizado.")
-                    if read_only:
-                        cursor.execute(READ_ONLY_ROLE_SQL)
-                        if cursor.fetchone()[0]:
-                            raise DatabaseTargetError("La API cloud requiere un usuario PostgreSQL sin permisos de escritura.")
+                if writer_profile:
+                    from app.db.writer_policy import validate_writer_connection
+                    validate_writer_connection(driver_connection)
+                else:
+                    with driver_connection.cursor() as cursor:
+                        cursor.execute("SELECT pg_catalog.current_database()")
+                        if cursor.fetchone()[0] != target.expected_database:
+                            raise DatabaseTargetError("La base real no coincide con el destino cloud autorizado.")
+                        if read_only:
+                            cursor.execute(READ_ONLY_ROLE_SQL)
+                            if cursor.fetchone()[0]:
+                                raise DatabaseTargetError("La API cloud requiere un usuario PostgreSQL sin permisos de escritura.")
             finally:
                 driver_connection.rollback()
             if read_only:

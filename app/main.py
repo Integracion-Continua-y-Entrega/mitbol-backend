@@ -32,7 +32,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
 
     application = FastAPI(
         title="API Menú Digital - mitbol",
-        description=("API pública de consulta del catálogo." if config.app_env == "cloud" else
+        description=("API pública de consulta del catálogo." if config.app_env == "cloud" and not config.auth_enabled else
                      "Administración local con sesiones individuales, permisos y CSRF." if config.auth_enabled else
                      "Backend para la gestión del menú y sincronización con Loyverse. " + ADMIN_SECURITY_DESCRIPTION),
         version="1.0.0", swagger_ui_parameters={"persistAuthorization": False}, lifespan=lifespan,

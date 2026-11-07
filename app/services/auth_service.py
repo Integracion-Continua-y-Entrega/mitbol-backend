@@ -67,6 +67,7 @@ def csrf_for_context(token, account, employee, roles, permissions):
 class AuthService:
     def __init__(self, session_factory, config, *, clock=None):
         self.sessions = session_factory
+        self.cloud_target = config.cloud_target if config.app_env == "cloud" else None
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.policy = SessionPolicy(timedelta(seconds=config.auth_absolute_seconds),
                                     timedelta(seconds=config.auth_idle_seconds))
@@ -88,11 +89,14 @@ class AuthService:
     def transaction(self):
         try:
             with self.sessions() as db, db.begin():
-                validate_local_connection(db.connection())
+                if self.cloud_target:
+                    self.cloud_target.validate_connection(db.connection())
+                else:
+                    validate_local_connection(db.connection())
                 connection = db.connection()
                 identity = db.execute(text("SELECT current_database(), current_user, session_user")).one()
                 if identity != (connection.engine.url.database, connection.engine.url.username, connection.engine.url.username):
-                    raise DatabaseTargetError("Identidad local de autenticación inesperada.")
+                    raise DatabaseTargetError("Identidad de autenticación inesperada.")
                 yield db
         except (SQLAlchemyError, DatabaseTargetError):
             raise AuthError(503, "La autenticación no está disponible temporalmente.", code="AUTH_UNAVAILABLE") from None

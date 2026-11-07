@@ -1,4 +1,4 @@
-"""Barrera HTTP del módulo local; no autoriza por CORS ni cabeceras de proxy."""
+"""Barrera HTTP local o perfil Render explícito; nunca confía en IP de cabeceras."""
 
 from ipaddress import ip_address
 from urllib.parse import urlsplit
@@ -15,7 +15,24 @@ def cookie_name(config):
 
 def clear_session_cookie(response, config):
     response.delete_cookie(cookie_name(config), path="/", secure=config.auth_cookie_secure,
-                           httponly=True, samesite="lax")
+                           httponly=True, samesite="none" if config.auth_cookie_partitioned else "lax")
+    partition_session_cookie(response, config)
+
+
+def partition_session_cookie(response, config):
+    if config.auth_cookie_partitioned:
+        # Starlette exige Python 3.14 para partitioned=True. El proyecto usa 3.13;
+        # añadir el atributo estándar sólo a la cookie recién emitida, sin tocar
+        # Morsel global ni interpolar datos del cliente.
+        key, value = response.raw_headers[-1]
+        assert key == b"set-cookie"
+        response.raw_headers[-1] = (key, value + b"; Partitioned")
+
+
+def login_rate_address(request, config):
+    # Conservador: ninguna IP/cabecera falsificada abre cuotas nuevas en Render.
+    # AUTH_IP_ATTEMPTS es allí una cuota GLOBAL, además del límite por cuenta.
+    return "0.0.0.0" if config.app_env == "cloud" else request.client.host
 
 
 def auth_error_response(error, config):
@@ -29,8 +46,18 @@ def auth_error_response(error, config):
 
 
 def validate_auth_request(request, config):
-    if not config.auth_enabled or config.app_env == "cloud":
+    if not config.auth_enabled:
         raise AuthError(404, "Recurso no encontrado.")
+    if config.app_env == "cloud":
+        config.validate_auth_configuration()
+        # Render fuerza HTTPS público y termina TLS antes del HTTP interno.
+        # Host se valida sin usar Forwarded/X-Forwarded-Host/Proto ni peer IP.
+        expected = urlsplit(config.auth_public_origin).netloc
+        hosts = request.headers.getlist("host")
+        origins = request.headers.getlist("origin")
+        if hosts != [expected] or origins != config.auth_origins:
+            raise AuthError(403, "Host u origen administrativo no autorizado.", code="ORIGIN_REJECTED")
+        return
     try:
         host = urlsplit("//" + request.headers.get("host", ""))
         local = bool(request.client and ip_address(request.client.host).is_loopback

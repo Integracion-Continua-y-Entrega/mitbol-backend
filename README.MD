@@ -15,8 +15,10 @@ crea roles en infraestructura real.
 
 La [fase 5](docs/security/admin_auth_phase5.md) añade límites persistentes en
 PostgreSQL, aprovisionamiento por operador, CORS separado y gates administrativos
-apagados por defecto. Incluye scripts propuestos y guías Neon/Render/React. El
-dominio sigue pendiente y la autenticación cloud continúa bloqueada.
+apagados por defecto. Incluye scripts y guías Neon/Render/React. El perfil
+actual de integración, cookies particionadas y activación cloud opt-in está en
+[Integración administrativa con React](docs/security/admin_frontend_integration.md).
+No se han activado las variables ni creado cuentas definitivas en Render/Neon.
 
 La [HU-004 — Código QR del menú](docs/learning/hu004/README.md) publica la URL
 estable del frontend mediante `GET /api/menu/config` y `PUBLIC_MENU_URL`
@@ -43,7 +45,7 @@ El proyecto sigue una arquitectura por capas dentro del directorio `/app`:
 ## Integración continua con GitHub Actions
 
 [`.github/workflows/backend-ci.yml`](.github/workflows/backend-ci.yml) ejecuta la
-suite completa al hacer push a `develop` o `feature/**`, y al abrir, reabrir o
+suite completa al hacer push a `develop`, y al abrir, reabrir o
 actualizar un Pull Request hacia `develop` o `main`. CI verifica automáticamente
 que los cambios mantienen las pruebas aprobadas; esta etapa no despliega la API.
 
