@@ -1,11 +1,12 @@
 # MITBOL — Autenticación administrativa, fase 5
 
-**Actualización de integración:** el perfil cloud y la guía para React están en
-[admin_frontend_integration.md](admin_frontend_integration.md). Los bloqueos
+**Actualización de integración:** el perfil académico actual y la guía para React están en
+[frontend_remote_dev.md](frontend_remote_dev.md). Los bloqueos
 cloud descritos abajo corresponden al cierre histórico de fase 5 y fueron
 sustituidos por un perfil Render explícito, no por acceso remoto abierto.
 AUTH_ENABLED/ADMIN_ENABLED siguen apagados en Render. El usuario confirmó que
-la cuenta ficticia 1 ya fue desactivada: no repetir 6.5 ni crear Staff ficticio.
+la cuenta ficticia 1 está desactivada. Su reactivación y las altas ficticias están
+preparadas para el entorno académico; requieren autorización antes de escribir.
 
 Fecha: 6 de noviembre de 2026, America/Mexico_City. Rama conservada: `design/admin-auth-security`.
 
@@ -17,8 +18,8 @@ en `audit/neon-auth-migration-preflight`, prepara las primeras cuentas mediante
 el CLI existente: [sección 6.1](#61-primeras-cuentas-en-neon--preparación-sin-escrituras).
 Actualización: el usuario creó y verificó la cuenta ficticia Admin 1 mediante
 el SELECT de 6.3: cuenta/empleado activos, Argon2id, rol `{admin}` y auditoría de
-creación presentes. No repetir esa consulta ahora ni crear Staff ficticio en
-production. Su desactivación queda preparada, sin ejecutar, en 6.5.
+creación presentes. Su desactivación posterior fue confirmada; 6.5 se conserva
+como referencia. La rama llamada production contiene la base académica de pruebas.
 La sección 7 se conserva
 como referencia histórica del aprovisionamiento SQL ya completado.
 
@@ -206,11 +207,11 @@ Primer comando, desde la raíz del backend; **no conecta ni modifica Neon**:
 & .\.venv\Scripts\python.exe -B -m app.cli.admin_accounts --help
 ```
 
-Preparar dos identidades aprobadas distintas: email, nombre/teléfono reales,
-código laboral único y fecha laboral legítima; contraseña de aplicación única
-de 15–1024 caracteres guardada en el gestor de contraseñas. El modelo actual
-exige Employee incluso al propietario: si sus datos laborales no están
-definidos, no inventarlos ni crear esa cuenta hasta resolverlos.
+El entorno actual `production / mitbol_cloud_dev` es **académico**. Para las
+cuentas ficticias Admin/Staff seguir [frontend remoto](frontend_remote_dev.md):
+identidades sintéticas distintas, código único y contraseña de aplicación única
+de 15–1024 caracteres guardada en el gestor. El modelo exige Employee incluso
+al Admin. Los datos laborales reales corresponderán a la futura entrega al negocio.
 
 En PowerShell interactivo, sin depurador, grabación de pantalla, transcripción
 ni redirección de salida, definir la función siguiente. **Definirla no conecta
@@ -288,8 +289,9 @@ de los hashes/datos insertados. Tratar también esos hashes como confidenciales.
 
 ### 6.2 Altas autorizadas — ESCRIBEN EN NEON, no ejecutadas
 
-Referencia para futuras cuentas legítimas. La prueba Admin 1 ya está verificada;
-**no ejecutar esta sección ni crear un Staff ficticio ahora**.
+Estas operaciones requieren autorización de escritura. La cuenta ficticia 1 está
+desactivada: se puede reactivar con `access` conservando su auditoría, o crear
+otras cuentas sintéticas en la base académica según [frontend remoto](frontend_remote_dev.md).
 
 Después de autorización explícita, ejecutar **una vez para Admin**:
 
@@ -297,7 +299,7 @@ Después de autorización explícita, ejecutar **una vez para Admin**:
 Invoke-MitbolAccountOperation -Operation create
 ```
 
-Responder a los prompts: `admin`, datos reales aprobados, fecha `AAAA-MM-DD`,
+Responder a los prompts: `admin`, datos sintéticos aprobados, fecha `AAAA-MM-DD`,
 `si` para activar cuenta/perfil laboral y contraseña nueva/confirmación ocultas.
 No poner la contraseña en un comando. Resultado esperado tras COMMIT:
 `Operación confirmada. Cuenta <id>; referencia de auditoría <uuid>.`

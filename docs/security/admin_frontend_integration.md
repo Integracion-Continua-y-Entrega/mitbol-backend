@@ -1,5 +1,11 @@
 # Integración administrativa React → FastAPI
 
+**Desarrollo del equipo desde localhost sin backend local:** seguir
+[Frontend local → Render académico actual](frontend_remote_dev.md). El laboratorio
+de este documento es opcional. El perfil `restaurant` descrito aquí conserva sus
+restricciones; `frontend_dev` admite sólo localhost en el Render/Neon académicos
+actuales. No se necesita otro servicio ni otra rama.
+
 6 de noviembre de 2026. Código en `feature/admin-frontend-integration`, desde
 `origin/develop`. No se cambiaron Neon, Render, permisos SQL ni cuentas reales.
 Cuenta ficticia 1 desactivada por el usuario; no reutilizarla ni crear otra.
@@ -85,14 +91,15 @@ respuestas completos están en `/docs` del laboratorio. A = Admin, S = Staff.
 | PUT `/api/admin/variants/{id}/tags/{tag_id}` | — | A + CSRF; asociación idempotente, 204 |
 | DELETE `/api/admin/variants/{id}/tags/{tag_id}` | — | A + CSRF; 204 |
 | GET `/api/admin/variants/{id}/images` | — | A/S, referencias existentes |
-| POST `/api/admin/variants/{id}/images` | FormData `file`, `display_order` opcional | A: images:write; sólo laboratorio, 201 |
-| PATCH `/api/admin/variants/{id}/images/{image_id}` | `{display_order:integer}` | A; sólo laboratorio |
-| DELETE `/api/admin/variants/{id}/images/{image_id}` | — | A; sólo laboratorio, 204 |
+| POST `/api/admin/variants/{id}/images` | FormData `file`, `display_order` opcional | A: images:write; laboratorio o frontend_dev, 201 |
+| PATCH `/api/admin/variants/{id}/images/{image_id}` | `{display_order:integer}` | A; laboratorio o frontend_dev |
+| DELETE `/api/admin/variants/{id}/images/{image_id}` | — | A; laboratorio o frontend_dev, 204 |
 
 Todas las escrituras administrativas exigen sesión/Origin/CSRF. Imágenes:
 JPEG/PNG/WebP estático, 5 MB y 20 MP, sin fijar Content-Type manual en FormData.
-Cloud mantiene las tres escrituras de imágenes cerradas por falta de
-almacenamiento duradero. No hay altas de usuarios/roles, escritura de precios,
+El perfil cloud `restaurant` mantiene las tres escrituras de imágenes cerradas
+por falta de almacenamiento duradero; `frontend_dev` permite archivos efímeros
+exclusivamente de pruebas. No hay altas de usuarios/roles, escritura de precios,
 IDs Loyverse ni sincronización accesibles por estos contratos.
 
 Errores: 401 credencial/sesión inválida o expirada; 403 permiso/CSRF/Host/Origin;
@@ -118,7 +125,7 @@ Python 3.13 no ofrece el atributo Partitioned en Morsel; se añade el atributo
 estándar a la cookie recién emitida por Starlette, también al borrarla. No se
 modifica Morsel global ni se interpola texto de la petición en ese encabezado.
 
-El perfil HTTP cloud exige Host `mitbol-backend.onrender.com` y Origin exactamente
+El perfil HTTP cloud `restaurant` exige Host `mitbol-backend.onrender.com` y Origin exactamente
 `https://mitbol-frontend.onrender.com`, incluso en GET privados; rechaza valores
 ausentes/duplicados. CORS es exacto con credenciales; CSRF sigue obligatorio.
 
@@ -159,8 +166,9 @@ El pool del escritor reutiliza el bloque de verificación SQL aprobado en
 `docs/database/verify_admin_writer_neon.sql`, sólo lectura, al abrir conexiones
 físicas y **después** de verificar TLS/destino. El despliegue debe conservar ese
 archivo del repositorio. No crea roles, modifica grants ni lee alembic_version.
-Falta crear las cuentas **definitivas** por el bootstrap ya existente, con
-autorización separada y datos legítimos; no reactivar cuenta 1 ni crear ficticias.
+Para la entrega al restaurante se crearán cuentas definitivas en infraestructura
+separada. El entorno académico actual permite reactivar la cuenta ficticia 1 y
+crear Staff mediante el bootstrap, tras autorización: [procedimiento vigente](frontend_remote_dev.md).
 
 Falta integrar este código, desplegarlo con flags false y autorizar/configurar
 los secretos anteriores. Después, autorizar login con catálogo cerrado y probar

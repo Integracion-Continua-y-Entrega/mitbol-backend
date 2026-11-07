@@ -20,6 +20,12 @@ actual de integración, cookies particionadas y activación cloud opt-in está e
 [Integración administrativa con React](docs/security/admin_frontend_integration.md).
 No se han activado las variables ni creado cuentas definitivas en Render/Neon.
 
+Para desarrollar React en `http://localhost:5173` contra el **Render académico
+actual**, seguir [Frontend local → API Render](docs/security/frontend_remote_dev.md).
+`AUTH_PROFILE=frontend_dev` reutiliza `mitbol-backend.onrender.com` y Neon
+`production / mitbol_cloud_dev`, sin crear servicios ni ramas. Los compañeros
+sólo ejecutan React; no necesitan backend/PostgreSQL ni un frontend publicado.
+
 La [HU-004 — Código QR del menú](docs/learning/hu004/README.md) publica la URL
 estable del frontend mediante `GET /api/menu/config` y `PUBLIC_MENU_URL`
 opcional. No necesita PostgreSQL ni autenticación. Generación, descarga e

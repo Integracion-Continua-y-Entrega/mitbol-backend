@@ -1,4 +1,4 @@
-// Integración: localhost en desarrollo; perfil Render con cookies CHIPS tras autorizar despliegue.
+// Puede apuntar al backend local o a la API Render de pruebas con cookies CHIPS.
 export class ApiError extends Error {
   constructor(public status: number, public detail: unknown, public retryAfter?: number) {
     super(`La API respondió ${status}`);
@@ -69,9 +69,9 @@ export function adminApi(baseUrl = "http://localhost:8000") {
   };
 }
 
-// Se conserva React local -> menú público Render, sin cookie administrativa.
-export async function publicMenu() {
-  const response = await fetch("https://mitbol-backend.onrender.com/api/menu", { credentials: "omit" });
+// Menú del entorno académico; puede indicarse otra URL explícita para un laboratorio local.
+export async function publicMenu(baseUrl = "https://mitbol-backend.onrender.com") {
+  const response = await fetch(`${baseUrl}/api/menu`, { credentials: "omit" });
   if (!response.ok) throw new ApiError(response.status, "No se pudo consultar el menú");
   return response.json();
 }
