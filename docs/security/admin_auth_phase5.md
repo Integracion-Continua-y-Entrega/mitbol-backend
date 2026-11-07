@@ -1,5 +1,12 @@
 # MITBOL — Autenticación administrativa, fase 5
 
+**Actualización de integración:** el perfil cloud y la guía para React están en
+[admin_frontend_integration.md](admin_frontend_integration.md). Los bloqueos
+cloud descritos abajo corresponden al cierre histórico de fase 5 y fueron
+sustituidos por un perfil Render explícito, no por acceso remoto abierto.
+AUTH_ENABLED/ADMIN_ENABLED siguen apagados en Render. El usuario confirmó que
+la cuenta ficticia 1 ya fue desactivada: no repetir 6.5 ni crear Staff ficticio.
+
 Fecha: 6 de noviembre de 2026, America/Mexico_City. Rama conservada: `design/admin-auth-security`.
 
 Actualización operativa: las migraciones 0004/0005 en Neon ya fueron completadas
@@ -384,6 +391,9 @@ secundarios en toda la base. Registrar esta limitación para la apertura remota;
 no revocar PUBLIC, cambiar privilegios o repetir verificadores ahora.
 
 ### 6.5 Cerrar la prueba de la cuenta ficticia 1 — preparado, no ejecutado
+
+**Estado posterior confirmado por el usuario: ya desactivada. No repetir este
+procedimiento; se conserva sólo como referencia.**
 
 La comprobación de 6.3 ya fue satisfactoria según el usuario: `account_id=1`,
 `account_active=true`, `employee_active=true`, `argon2id=true`, `roles={admin}`

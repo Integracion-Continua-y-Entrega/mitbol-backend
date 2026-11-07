@@ -1,4 +1,4 @@
-// Ejemplo de integración, sin cambios en React. Usar API local o dominio aprobado.
+// Integración: localhost en desarrollo; perfil Render con cookies CHIPS tras autorizar despliegue.
 export class ApiError extends Error {
   constructor(public status: number, public detail: unknown, public retryAfter?: number) {
     super(`La API respondió ${status}`);
@@ -35,7 +35,15 @@ export function adminApi(baseUrl = "http://localhost:8000") {
       const result = await request("/api/auth/login", "POST", { email, password });
       csrf = result.csrf_token;
       // Detecta cookie bloqueada: 200 de login por sí solo no confirma persistencia.
-      await request("/api/auth/me");
+      try {
+        await request("/api/auth/me");
+      } catch (error) {
+        csrf = undefined;
+        if (error instanceof ApiError && error.status === 401) {
+          throw new Error("El navegador no conservó la cookie de sesión. Comprueba compatibilidad/configuración de cookies; no repitas el login automáticamente.");
+        }
+        throw error;
+      }
       return result.user;
     },
     async restore() {
@@ -51,6 +59,12 @@ export function adminApi(baseUrl = "http://localhost:8000") {
     description: (id: number, description: string | null) => request(`/api/admin/products/${id}/description`, "PATCH", { description }),
     createTag: (name: string) => request("/api/admin/tags", "POST", { name }),
     attachTag: (variantId: number, tagId: number) => request(`/api/admin/variants/${variantId}/tags/${tagId}`, "PUT"),
+    detachTag: (variantId: number, tagId: number) => request(`/api/admin/variants/${variantId}/tags/${tagId}`, "DELETE"),
+    variantAvailability: (id: number, available: boolean) => request(`/api/admin/variants/${id}/availability`, "PATCH", { is_available: available }),
+    changePassword: async (current: string, next: string) => {
+      await request("/api/auth/change-password", "POST", { current_password: current, new_password: next });
+      csrf = undefined;
+    },
     request,
   };
 }

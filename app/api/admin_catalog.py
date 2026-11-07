@@ -28,7 +28,7 @@ Identifier = Annotated[int, Path(ge=1, le=2_147_483_647, description="ID interno
 def create_admin_router(*, authenticated=False, images_enabled=True):
     """Un único contrato; los modos individual y legado nunca se mezclan."""
     security_description = (
-        "Sesión individual local y permisos MITBOL. Las escrituras exigen Origin y X-CSRF-Token."
+        "Sesión individual y permisos MITBOL. Las escrituras exigen Origin y X-CSRF-Token."
         if authenticated else ADMIN_SECURITY_DESCRIPTION
     )
 
@@ -37,7 +37,7 @@ def create_admin_router(*, authenticated=False, images_enabled=True):
 
     Database = Annotated[Session, Depends(get_authenticated_database if authenticated else get_db)]
     router = APIRouter(
-        prefix="/api/admin", tags=["Administración local"],
+        prefix="/api/admin", tags=["Administración"],
         dependencies=[Depends(require_permission("catalog:read") if authenticated else require_local_admin)],
         responses={code: {"model": MenuErrorResponse, "description": detail} for code, detail in {
             401: "Sesión o credencial administrativa ausente, inválida o expirada.",

@@ -67,6 +67,9 @@ def main() -> int:
     reader_started = False
     reader_data = None
     args = sys.argv[1:]
+    serve_admin = "--serve-admin" in args
+    if serve_admin and args not in (["--serve-admin"], ["--serve-admin", "--check"]):
+        raise SystemExit("Usar --serve-admin [--check], sin argumentos pytest.")
     with_reader = "--with-reader" in args
     args = [argument for argument in args if argument != "--with-reader"]
     try:
@@ -81,6 +84,26 @@ def main() -> int:
         started = True
         child_env["MITBOL_SYNC_TEST_PORT"] = str(port)
         child_env["MITBOL_AUTH_TEST_PORT"] = str(port)
+        if serve_admin:
+            demo_args = [sys.executable, "-B", "-m", "app.cli.dev_admin"]
+            if "--check" in args:
+                demo_args.append("--check")
+                return run(demo_args, check=False).returncode
+            # Uvicorn en el proceso principal: consola y Ctrl+C normales también
+            # en Windows. El entorno ya saneado se limita a ESTE proceso.
+            os.environ.clear()
+            os.environ.update(child_env)
+            sys.path.insert(0, str(project))
+            from app.cli.dev_admin import main as serve_demo
+            previous_args = sys.argv
+            sys.argv = ["dev_admin"]
+            try:
+                serve_demo()
+                return 0
+            except KeyboardInterrupt:
+                return 0
+            finally:
+                sys.argv = previous_args
         if with_reader:
             # Las pruebas de ACL necesitan roles de clúster propios y no comparten
             # ese estado con las pruebas de catálogo/autenticación.

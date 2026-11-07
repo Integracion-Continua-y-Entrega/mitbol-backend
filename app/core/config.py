@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     auth_database_url: str | None = Field(default=None, repr=False)
     auth_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     auth_cookie_secure: bool = True
+    auth_cookie_partitioned: bool = False
+    auth_public_origin: str | None = None
+    auth_proxy_mode: Literal["direct", "render"] = "direct"
     auth_absolute_seconds: int = Field(default=28_800, gt=0, le=28_800)
     auth_idle_seconds: int = Field(default=1_800, gt=0, le=28_800)
     auth_touch_seconds: int = Field(default=60, ge=0, le=300)
@@ -144,16 +147,22 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_auth_configuration(self):
         if self.app_env == "cloud":
-            if self.auth_enabled:
-                raise ValueError("AUTH_ENABLED está bloqueado en cloud hasta aprobar dominios, proxy y publicación; un limitador no basta.")
             if not self.auth_cookie_secure:
                 raise ValueError("Cloud exige cookies Secure; HTTP sólo se admite en desarrollo local.")
+            if self.auth_enabled and (os.getenv("RENDER") != "true" or self.auth_proxy_mode != "render"
+                    or not self.auth_cookie_partitioned or self.auth_limit_backend != "postgresql"
+                    or self.auth_public_origin != "https://mitbol-backend.onrender.com"
+                    or self.auth_origins != ["https://mitbol-frontend.onrender.com"]
+                    or self.auth_images_enabled or self.expected_database != "mitbol_cloud_dev"):
+                raise ValueError("AUTH_ENABLED bloqueado: cloud requiere el perfil Render explícito, cookies particionadas, PostgreSQL y orígenes aprobados; imágenes cerradas.")
         if not self.auth_enabled:
             return self
         if self.auth_images_enabled and not self.auth_catalog_enabled:
             raise ValueError("Las imágenes requieren habilitar explícitamente el catálogo administrativo.")
         if self.admin_enabled:
             raise ValueError("La autenticación de cuentas y la clave administrativa local son modos excluyentes.")
+        if self.auth_cookie_partitioned and not self.auth_cookie_secure:
+            raise ValueError("Las cookies Partitioned requieren Secure.")
         if self.auth_idle_seconds > self.auth_absolute_seconds or self.auth_touch_seconds >= self.auth_idle_seconds:
             raise ValueError("Los plazos de sesión y renovación no son coherentes.")
         if self.auth_limit_backend == "postgresql":
@@ -166,12 +175,20 @@ class Settings(BaseSettings):
             raise ValueError("El limitador local sólo admite un proceso/worker.")
         if not self.auth_database_url:
             raise ValueError("AUTH_DATABASE_URL explícita es obligatoria para el módulo local.")
+        self.explicit_origins(self.auth_origins)
+        if self.app_env == "cloud":
+            # Perfil cerrado para la topología actual. No confiar en X-Forwarded-For:
+            # la cuota de red se comparte globalmente entre las instancias.
+            url = self.cloud_target.validate_url(self.auth_database_url)
+            public_url = self.cloud_target.validate_url(self.database_url)
+            if url.username != "mitbol_admin_writer" or public_url.username != "mitbol_render_reader":
+                raise ValueError("Cloud requiere writer administrativo y reader público independientes.")
+            return self
         url = local_database_url(self.auth_database_url)
         if (not re.fullmatch(r"mitbol_test_auth_[a-f0-9]{32}|mitbol_auth_local", url.database or "")
                 or not url.username or url.username in {"neondb_owner", "mitbol_render_reader"}
                 or set(url.query) - {"sslmode", "connect_timeout", "application_name"}):
             raise ValueError("La autenticación local requiere una base aislada y su identidad técnica local.")
-        self.explicit_origins(self.auth_origins)
         if not self.auth_origins or any(urlsplit(origin).hostname not in {"localhost", "127.0.0.1", "::1"}
                                         for origin in self.auth_origins):
             raise ValueError("AUTH_ORIGINS sólo admite orígenes loopback explícitos en esta fase.")
