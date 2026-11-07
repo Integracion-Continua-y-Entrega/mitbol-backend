@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     admin_api_key: SecretStr | None = None
     image_storage_root: Path = Path("storage/product-images")
     auth_enabled: bool = False
+    auth_profile: Literal["restaurant", "frontend_dev"] = "restaurant"
     auth_catalog_enabled: bool = False
     auth_images_enabled: bool = False
     auth_database_url: str | None = Field(default=None, repr=False)
@@ -118,9 +119,18 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_database_configuration(self):
         environment_mode(self.app_env)
+        if self.auth_profile == "frontend_dev" and self.app_env != "cloud":
+            raise ValueError("frontend_dev requiere APP_ENV=cloud para el entorno académico Render.")
         postgresql_url(self.database_url)
         if self.cloud_target is not None:
             self.cloud_target.validate_url(self.database_url)
+            if self.auth_profile == "frontend_dev":
+                # Perfil opt-in del entorno académico actual, también al preparar
+                # variables con AUTH_ENABLED=false. No deducir uso por nombre de rama.
+                if (os.getenv("RENDER") != "true"
+                        or self.auth_public_origin != "https://mitbol-backend.onrender.com"
+                        or os.getenv("RENDER_EXTERNAL_URL") != self.auth_public_origin):
+                    raise ValueError("frontend_dev requiere el Render académico actual y AUTH_PUBLIC_ORIGIN igual a RENDER_EXTERNAL_URL.")
             if self.public_menu_url and (urlsplit(self.public_menu_url).scheme != "https"
                     or urlsplit(self.public_menu_url).hostname in {"localhost", "127.0.0.1", "::1"}):
                 raise ValueError("PUBLIC_MENU_URL cloud requiere un destino HTTPS remoto.")
@@ -151,10 +161,16 @@ class Settings(BaseSettings):
                 raise ValueError("Cloud exige cookies Secure; HTTP sólo se admite en desarrollo local.")
             if self.auth_enabled and (os.getenv("RENDER") != "true" or self.auth_proxy_mode != "render"
                     or not self.auth_cookie_partitioned or self.auth_limit_backend != "postgresql"
-                    or self.auth_public_origin != "https://mitbol-backend.onrender.com"
-                    or self.auth_origins != ["https://mitbol-frontend.onrender.com"]
-                    or self.auth_images_enabled or self.expected_database != "mitbol_cloud_dev"):
-                raise ValueError("AUTH_ENABLED bloqueado: cloud requiere el perfil Render explícito, cookies particionadas, PostgreSQL y orígenes aprobados; imágenes cerradas.")
+                    or self.expected_database != "mitbol_cloud_dev"):
+                raise ValueError("AUTH_ENABLED bloqueado: cloud requiere el perfil Render explícito, cookies particionadas, PostgreSQL y orígenes aprobados.")
+            if self.auth_enabled:
+                if self.auth_profile == "frontend_dev":
+                    self.validate_database_configuration()
+                    if self.auth_origins != ["http://localhost:5173"]:
+                        raise ValueError("frontend_dev sólo admite el origen http://localhost:5173.")
+                elif (self.auth_public_origin != "https://mitbol-backend.onrender.com"
+                        or self.auth_origins != ["https://mitbol-frontend.onrender.com"] or self.auth_images_enabled):
+                    raise ValueError("AUTH_ENABLED bloqueado: el perfil del restaurante no admite localhost ni escrituras de imágenes.")
         if not self.auth_enabled:
             return self
         if self.auth_images_enabled and not self.auth_catalog_enabled:

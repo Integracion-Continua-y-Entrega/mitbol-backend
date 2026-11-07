@@ -76,10 +76,13 @@ def test_cloud_pool_uses_tls_target_and_writer_policy(monkeypatch):
 
 
 @pytest.fixture
-def cloud_backend(writer_backend, monkeypatch):
+def cloud_backend(writer_backend, monkeypatch, request):
     b = writer_backend
     from app.db import auth_database as pools
-    config = render_config(monkeypatch)
+    changes = getattr(request, "param", {})
+    if changes.get("auth_profile") == "frontend_dev":
+        monkeypatch.setenv("RENDER_EXTERNAL_URL", changes["auth_public_origin"])
+    config = render_config(monkeypatch, image_storage_root=b.storage.root, **changes)
     def writer_engine(value, *, target, writer_profile):
         assert target.expected_host == config.expected_database_host and writer_profile
         return b.roles.writer
@@ -95,7 +98,7 @@ def cloud_backend(writer_backend, monkeypatch):
     app.state.session_factory.kw["bind"].dispose()
     app.state.session_factory = sessionmaker(bind=b.roles.reader)
     try:
-        with TestClient(app, base_url=BACKEND, headers={"Origin": ORIGIN}) as client:
+        with TestClient(app, base_url=config.auth_public_origin, headers={"Origin": config.auth_origins[0]}) as client:
             yield SimpleNamespace(original=b, app=app, client=client, config=config)
     finally:
         with b.sessions.begin() as db:
