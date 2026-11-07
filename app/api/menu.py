@@ -3,11 +3,11 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.menu import MenuErrorResponse, MenuProductDetailResponse, MenuResponse
+from app.schemas.menu import MenuErrorResponse, MenuProductDetailResponse, MenuPublicConfigResponse, MenuResponse
 from app.services import menu_service
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,23 @@ def get_menu(db: Session = Depends(get_db)) -> MenuResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No fue posible consultar el menú.",
         ) from None
+
+
+@router.get(
+    "/menu/config",
+    response_model=MenuPublicConfigResponse,
+    summary="Consultar la URL pública del menú para el QR general",
+    description=(
+        "HU-004: URL del frontend definida por PUBLIC_MENU_URL, independiente del catálogo. "
+        "Consulta pública sin sesión, acceso a PostgreSQL ni llamadas a Loyverse. "
+        "Devuelve menu_url: null si aún no está configurada. "
+        "Frontend genera la vista previa, imagen descargable e impresión del QR. "
+        "No se deriva la URL de Host ni de cabeceras de proxy."
+    ),
+)
+def get_public_menu_config(request: Request, response: Response) -> MenuPublicConfigResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return MenuPublicConfigResponse(menu_url=request.app.state.settings.public_menu_url)
 
 
 @router.get(

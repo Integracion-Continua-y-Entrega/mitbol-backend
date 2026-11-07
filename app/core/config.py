@@ -4,7 +4,7 @@ import re
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, HttpUrl, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.db.connection import CloudDatabaseTarget, environment_mode, local_database_url, postgresql_url
@@ -13,6 +13,7 @@ from app.db.connection import CloudDatabaseTarget, environment_mode, local_datab
 class Settings(BaseSettings):
     app_env: str = "local"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    public_menu_url: str | None = None
     loyverse_access_token: SecretStr | None = None
     loyverse_store_id: str | None = None
     database_url: str = Field(repr=False)
@@ -71,6 +72,24 @@ class Settings(BaseSettings):
     def valid_environment(cls, value):
         return environment_mode(value)
 
+    @field_validator("public_menu_url")
+    @classmethod
+    def valid_public_menu_url(cls, value):
+        if value is None or value == "":
+            return None
+        message = "PUBLIC_MENU_URL requiere una URL HTTP(S) sin credenciales, query ni fragmento; HTTP sólo en loopback."
+        if value != value.strip() or "\\" in value or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError(message)
+        try:
+            url = HttpUrl(value)
+        except ValidationError:
+            raise ValueError(message) from None
+        if (url.username is not None or url.password is not None
+                or "@" in urlsplit(value).netloc or url.query is not None or url.fragment is not None
+                or (url.scheme == "http" and urlsplit(str(url)).hostname not in {"localhost", "127.0.0.1", "::1"})):
+            raise ValueError(message)
+        return str(url)
+
     @field_validator("cors_origins")
     @classmethod
     def explicit_origins(cls, values):
@@ -99,6 +118,9 @@ class Settings(BaseSettings):
         postgresql_url(self.database_url)
         if self.cloud_target is not None:
             self.cloud_target.validate_url(self.database_url)
+            if self.public_menu_url and (urlsplit(self.public_menu_url).scheme != "https"
+                    or urlsplit(self.public_menu_url).hostname in {"localhost", "127.0.0.1", "::1"}):
+                raise ValueError("PUBLIC_MENU_URL cloud requiere un destino HTTPS remoto.")
             if "cors_origins" not in self.model_fields_set or not self.cors_origins:
                 raise ValueError("Cloud requiere CORS_ORIGINS explícito y no vacío.")
             for origin in self.cors_origins:

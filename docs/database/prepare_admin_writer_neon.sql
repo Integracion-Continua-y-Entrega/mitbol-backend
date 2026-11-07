@@ -1,4 +1,6 @@
 -- PROPUESTA NO EJECUTADA. Generada desde ACL de laboratorio. Revisar antes de autorizar.
+-- TLS externo obligatorio en el cliente: verify-full, CA y channel_binding=require.
+-- La marca de sesión no acredita TLS por sí sola; usar el procedimiento fase 5, sección 7.
 BEGIN;
 SET LOCAL search_path = pg_catalog, public;
 SET LOCAL statement_timeout = '15s';
@@ -10,8 +12,8 @@ BEGIN
        OR session_user <> 'neondb_owner'
        OR coalesce(current_setting('mitbol.approved_admin_write', true), '') <> 'phase5-reviewed'
        OR current_setting('server_version_num')::int / 10000 <> 18
-       OR NOT coalesce((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false) THEN
-        RAISE EXCEPTION 'NEON_WRITER_NOT_APPROVED: destino, operador, TLS, versión o aprobación no válidos.';
+       OR coalesce(current_setting('mitbol.external_tls_verified', true), '') <> 'verify-full-channel-binding' THEN
+        RAISE EXCEPTION 'NEON_WRITER_NOT_APPROVED: destino, operador, versión o marcas de ejecución no válidos.';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
        (SELECT 1 FROM public.alembic_version WHERE version_num = '20261106_0005') THEN
