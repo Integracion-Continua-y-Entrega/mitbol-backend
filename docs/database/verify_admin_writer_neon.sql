@@ -1,4 +1,6 @@
 -- PROPUESTA NO EJECUTADA: LOGIN independiente con TLS verificado. Sólo catálogos.
+-- TLS externo obligatorio en el cliente: verify-full, CA y channel_binding=require.
+-- La marca de sesión no acredita TLS por sí sola; usar el procedimiento fase 5, sección 7.
 -- FASE 4: verificación de ACL, sólo lectura, desde un LOGIN independiente.
 -- No usa SET ROLE ni asume que el nombre de rol prueba sus privilegios.
 BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
@@ -32,9 +34,9 @@ DECLARE
 BEGIN
     IF current_database() <> 'mitbol_cloud_dev'
        OR current_user <> 'mitbol_admin_writer' OR session_user <> 'mitbol_admin_writer'
-       OR NOT coalesce((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false)
+       OR coalesce(current_setting('mitbol.external_tls_verified', true), '') <> 'verify-full-channel-binding'
        OR current_setting('server_version_num')::int / 10000 <> 18 THEN
-        RAISE EXCEPTION 'WRITER_LOCAL_IDENTITY';
+        RAISE EXCEPTION 'WRITER_NEON_IDENTITY';
     END IF;
     SELECT oid INTO writer FROM pg_roles WHERE rolname = current_user;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE oid = writer AND

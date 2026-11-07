@@ -18,6 +18,11 @@ PostgreSQL, aprovisionamiento por operador, CORS separado y gates administrativo
 apagados por defecto. Incluye scripts propuestos y guías Neon/Render/React. El
 dominio sigue pendiente y la autenticación cloud continúa bloqueada.
 
+La [HU-004 — Código QR del menú](docs/learning/hu004/README.md) publica la URL
+estable del frontend mediante `GET /api/menu/config` y `PUBLIC_MENU_URL`
+opcional. No necesita PostgreSQL ni autenticación. Generación, descarga e
+impresión del QR corresponden al frontend; no se modifican Neon ni Render.
+
 ## 🚀 Tecnologías Utilizadas
 
 - **Framework:** [FastAPI](https://fastapi.tiangolo.com/)

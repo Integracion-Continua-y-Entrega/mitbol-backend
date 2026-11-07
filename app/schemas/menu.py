@@ -122,6 +122,12 @@ class MenuErrorResponse(BaseModel):
     detail: str = Field(description="Mensaje público del error, sin detalles de infraestructura.")
 
 
+class MenuPublicConfigResponse(BaseModel):
+    menu_url: str | None = Field(
+        description="URL pública estable del frontend para el QR general; null mientras no esté configurada."
+    )
+
+
 class MenuComplement(BaseModel):
     product_complement_id: int = Field(description="ID interno estable del complemento.")
     name: str = Field(description="Nombre de la opción registrado en PostgreSQL.")

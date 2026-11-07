@@ -17,8 +17,8 @@ BEGIN
        OR session_user <> 'neondb_owner'
        OR coalesce(current_setting('mitbol.approved_admin_write', true), '') <> 'phase5-reviewed'
        OR current_setting('server_version_num')::int / 10000 <> 18
-       OR NOT coalesce((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false) THEN
-        RAISE EXCEPTION 'NEON_WRITER_NOT_APPROVED: destino, operador, TLS, versión o aprobación no válidos.';
+       OR coalesce(current_setting('mitbol.external_tls_verified', true), '') <> 'verify-full-channel-binding' THEN
+        RAISE EXCEPTION 'NEON_WRITER_NOT_APPROVED: destino, operador, versión o marcas de ejecución no válidos.';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
        (SELECT 1 FROM public.alembic_version WHERE version_num = '20261106_0005') THEN
@@ -32,6 +32,8 @@ $guard$;
 
 """
     return ("-- PROPUESTA NO EJECUTADA. Generada desde ACL de laboratorio. Revisar antes de autorizar.\n"
+            "-- TLS externo obligatorio en el cliente: verify-full, CA y channel_binding=require.\n"
+            "-- La marca de sesión no acredita TLS por sí sola; usar el procedimiento fase 5, sección 7.\n"
             + source[source.index("BEGIN;"):start] + guard + source[end:]).replace(
                 "base temporal", "base aprobada").replace("base temporal", "base aprobada")
 
@@ -40,9 +42,12 @@ def render_verify():
     source = (DIRECTORY / "verify_admin_writer_local.sql").read_text(encoding="utf-8")
     source = source.replace("current_database() !~ '^mitbol_test_auth_[a-f0-9]{32}$'", "current_database() <> 'mitbol_cloud_dev'")
     source = source.replace("OR coalesce(inet_server_addr() NOT IN ('127.0.0.1'::inet, '::1'::inet), true)",
-        "OR NOT coalesce((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false)")
-    return ("-- PROPUESTA NO EJECUTADA: LOGIN independiente con TLS verificado. Sólo catálogos.\n" + source).replace(
-        "WRITER_POLICY_OK_LOCAL_ONLY", "WRITER_POLICY_OK_REVIEWED_PROFILE")
+        "OR coalesce(current_setting('mitbol.external_tls_verified', true), '') <> 'verify-full-channel-binding'")
+    return ("-- PROPUESTA NO EJECUTADA: LOGIN independiente con TLS verificado. Sólo catálogos.\n"
+            "-- TLS externo obligatorio en el cliente: verify-full, CA y channel_binding=require.\n"
+            "-- La marca de sesión no acredita TLS por sí sola; usar el procedimiento fase 5, sección 7.\n" + source).replace(
+        "WRITER_POLICY_OK_LOCAL_ONLY", "WRITER_POLICY_OK_REVIEWED_PROFILE").replace(
+        "WRITER_LOCAL_IDENTITY", "WRITER_NEON_IDENTITY")
 
 
 def main():
