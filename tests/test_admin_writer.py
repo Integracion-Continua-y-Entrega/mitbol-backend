@@ -12,9 +12,11 @@ import pytest
 from sqlalchemy import create_engine, delete, event, text
 from sqlalchemy.exc import DBAPIError
 
+from app.services.sync_service import CATALOG_SYNC_LOCK_KEY
+from copy import deepcopy
 from test_auth_persistence import auth_database, config_for
 from test_auth_api import backend as auth_backend, password_hash, login, csrf_headers
-from test_auth_admin_api import backend as catalog_backend
+from test_auth_admin_api import audit_rows, backend as catalog_backend, catalog_state, product_path
 import test_auth_admin_api as admin_tests
 import test_auth_api as auth_tests
 from app.db.connection import READ_ONLY_ROLE_SQL
@@ -25,6 +27,7 @@ from app.repositories import auth as repo
 ROOT = Path(__file__).resolve().parents[1]
 PREPARE = ROOT / "docs/database/prepare_admin_writer_local.sql"
 VERIFY = ROOT / "docs/database/verify_admin_writer_local.sql"
+HIGHLIGHTS_DELTA = ROOT / "docs/database/update_admin_writer_highlights.sql"
 
 
 def execute_script(engine, sql):
@@ -142,6 +145,66 @@ def test_prepare_rejects_reexecution_and_wrong_database_without_changing_role(wr
     execute_script(r.writer, VERIFY.read_text(encoding="utf-8"))
 
 
+def highlights_delta_sql(direction):
+    source = HIGHLIGHTS_DELTA.read_text(encoding="utf-8")
+    assert direction in {"upgrade", "rollback"}
+    return source.replace("BEGIN;", "BEGIN;\nSET LOCAL mitbol.approved_admin_write = 'hu006-reviewed';\n"
+                          f"SET LOCAL mitbol.hu006_direction = '{direction}';", 1)
+
+
+def test_highlights_delta_requires_explicit_approval(writer_database):
+    with pytest.raises(DBAPIError, match="HU006_NOT_APPROVED"):
+        execute_script(writer_database.owner, HIGHLIGHTS_DELTA.read_text(encoding="utf-8"))
+    execute_script(writer_database.writer, VERIFY.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("role", ["writer", "reader"])
+def test_highlights_delta_rejects_non_operator_login(writer_database, role):
+    with pytest.raises(DBAPIError, match="HU006_WRONG_TARGET_OR_OPERATOR"):
+        execute_script(getattr(writer_database, role), highlights_delta_sql("upgrade"))
+    execute_script(writer_database.writer, VERIFY.read_text(encoding="utf-8"))
+
+
+def test_highlights_delta_rejects_maintenance_database(writer_database):
+    control = create_engine(writer_database.owner.url.set(database="postgres"), hide_parameters=True)
+    try:
+        with pytest.raises(DBAPIError, match="HU006_WRONG_TARGET_OR_OPERATOR"):
+            execute_script(control, highlights_delta_sql("upgrade"))
+    finally:
+        control.dispose()
+
+
+def test_highlights_delta_roundtrip_changes_only_two_column_grants(writer_database):
+    r = writer_database
+
+    def column_policy():
+        with r.owner.connect() as db:
+            return dict(db.execute(text("""SELECT attname,
+                has_column_privilege('mitbol_admin_writer', 'public."Products"', attname, 'UPDATE')
+                FROM pg_attribute WHERE attrelid = 'public."Products"'::regclass
+                  AND attnum > 0 AND NOT attisdropped""")).all())
+
+    upgraded = column_policy()
+    try:
+        execute_script(r.owner, highlights_delta_sql("rollback"))
+        previous = column_policy()
+        assert {key for key in upgraded if previous[key] != upgraded[key]} == {"is_featured", "is_new"}
+        assert previous["is_featured"] is previous["is_new"] is False
+        denied(r.writer, 'UPDATE "Products" SET is_featured = true')
+        denied(r.writer, 'UPDATE "Products" SET is_new = false')
+        execute_script(r.owner, highlights_delta_sql("upgrade"))
+        assert column_policy() == upgraded
+        execute_script(r.owner, highlights_delta_sql("upgrade"))  # Idempotente.
+        execute_script(r.writer, VERIFY.read_text(encoding="utf-8"))
+        with r.reader.connect() as db:
+            assert not db.scalar(text("SELECT has_column_privilege(current_user, 'public.\"Products\"', 'is_featured', 'UPDATE')"))
+            assert not db.scalar(text("SELECT has_column_privilege(current_user, 'public.\"Products\"', 'is_new', 'UPDATE')"))
+    finally:
+        # Solo el laboratorio guardado por writer_database; restaurar ante fallo.
+        with r.owner.begin() as db:
+            db.exec_driver_sql('GRANT UPDATE (is_featured, is_new) ON public."Products" TO mitbol_admin_writer')
+
+
 @pytest.mark.parametrize("role", ["writer", "reader"])
 def test_prepare_rejects_non_operator_logins_without_changing_acl(writer_database, role):
     r = writer_database
@@ -171,6 +234,100 @@ def test_staff_description_is_denied_with_real_writer_connection(backend):
     assert not any(row[1].startswith('UPDATE "Products"') for row in b.observed)
 
 
+def test_highlights_and_audit_share_real_writer_transaction(backend):
+    b = backend
+    admin_tests.test_admin_updates_highlights_and_public_menu_reflects_it(b)
+    changes = [row for row in b.observed if row[1].startswith('UPDATE "Products"')]
+    assert len(changes) == 1 and changes[0][0] == "writer"
+    audits = [row for row in b.observed if row[1].startswith('INSERT INTO "AuditEvents"')
+              and row[2:] == changes[0][2:]]
+    assert len(audits) == 1 and audits[0][0] == "writer"
+
+
+def test_staff_highlights_denied_with_real_writer_connection(backend):
+    admin_tests.test_staff_cannot_update_highlights_and_preserves_catalog(backend)
+    assert not any(row[1].startswith('UPDATE "Products"') for row in backend.observed)
+
+
+@pytest.mark.parametrize("featured,new", [(False, False), (False, True), (True, False), (True, True)])
+def test_writer_persists_each_highlight_configuration_without_other_changes(backend, featured, new):
+    b = backend
+    before = catalog_state(b)
+    login_response = login(b)
+    assert login_response.status_code == 200
+    response = b.client.put(product_path(b, "highlights"), headers=csrf_headers(login_response),
+                            json={"is_featured": featured, "is_new": new})
+    assert response.status_code == 200
+    assert response.json() == {"product_id": b.product_id, "is_featured": featured, "is_new": new}
+    expected = deepcopy(before)
+    product = next(row for row in expected["Products"] if row["product_id"] == b.product_id)
+    product.update(is_featured=featured, is_new=new)
+    assert catalog_state(b) == expected
+    row, = audit_rows(b)
+    assert row.action == "catalog.product.highlights"
+
+
+@pytest.mark.parametrize("method", ["GET", "PUT"])
+def test_highlights_missing_product_never_changes_catalog(backend, method):
+    b = backend
+    headers = csrf_headers(login(b))
+    before = catalog_state(b)
+    path = "/api/admin/products/2147483647/highlights"
+    response = b.client.request(method, path, headers=headers,
+                                json={"is_featured": True, "is_new": False} if method == "PUT" else None)
+    assert response.status_code == 404
+    assert catalog_state(b) == before
+    assert not audit_rows(b)
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"is_featured": True}, {"is_featured": None, "is_new": False},
+    {"is_featured": True, "is_new": 0}, {"is_featured": "true", "is_new": False},
+    {"is_featured": True, "is_new": False, "is_active": True},
+])
+def test_writer_rejects_invalid_highlight_payload_before_modification(backend, payload):
+    b = backend
+    headers = csrf_headers(login(b))
+    before = catalog_state(b)
+    assert b.client.put(product_path(b, "highlights"), headers=headers, json=payload).status_code == 422
+    assert catalog_state(b) == before
+    assert not audit_rows(b)
+
+
+def test_highlights_conflict_with_catalog_sync(backend):
+    """El escritor rechaza cambios durante sincronización y continúa tras liberar el bloqueo."""
+    b = backend
+    login_response = login(b)
+    assert login_response.status_code == 200
+    before = catalog_state(b)
+    path = product_path(b, "highlights")
+    with b.roles.owner.begin() as connection:
+        connection.execute(
+            text('SELECT pg_advisory_xact_lock(:key)'),
+            {'key': CATALOG_SYNC_LOCK_KEY},
+        )
+        response = b.client.put(path,
+                                headers=csrf_headers(login_response),
+                                json={"is_featured": True, "is_new": False})
+        assert response.status_code == 409
+        assert catalog_state(b) == before
+        assert audit_rows(b) == []
+
+    response = b.client.put(path,
+                            headers=csrf_headers(login_response),
+                            json={"is_featured": True, "is_new": False})
+    assert response.status_code == 200
+    assert response.json() == {"product_id": b.product_id, "is_featured": True, "is_new": False}
+    row, = audit_rows(b)
+    assert (row.action, row.actor_account_id, row.resource_type, row.resource_id, row.outcome) == (
+            "catalog.product.highlights",
+            b.ids["admin"][0],
+            "product",
+            str(b.product_id),
+            "success"
+        )
+
+
 @pytest.mark.parametrize("role", ["admin", "staff"])
 @pytest.mark.parametrize("resource", ["products", "variants"])
 def test_real_availability_with_minimal_writer(backend, role, resource):
@@ -185,7 +342,7 @@ def test_images_with_minimal_writer(backend):
     admin_tests.test_images_keep_existing_validation_references_media_and_audit(backend)
 
 
-@pytest.mark.parametrize("operation", ["description", "product_availability", "variant_availability", "tag", "attach", "remove", "upload", "order", "delete"])
+@pytest.mark.parametrize("operation", ["highlights", "description", "product_availability", "variant_availability", "tag", "attach", "remove", "upload", "order", "delete"])
 def test_each_mutation_rolls_back_with_its_audit_under_writer(backend, operation):
     admin_tests.test_audit_failure_rolls_back_every_real_mutation_and_image_side_effects(backend, operation)
 
@@ -234,7 +391,8 @@ FORBIDDEN = [
     'UPDATE "Products" SET is_active = false',
     'UPDATE "Products" SET name = \'forbidden\'',
     'UPDATE "Products" SET synced_at = now()',
-    'UPDATE "Products" SET is_featured = true',
+    'UPDATE "Products" SET is_featured = true, name = \'forbidden\'',
+    'UPDATE "Products" SET is_new = false, is_active = true',
     'UPDATE "ProductVariants" SET price = 0',
     'UPDATE "ProductVariants" SET loyverse_id = \'forbidden\'',
     'UPDATE "ProductVariants" SET is_commercially_available = false',

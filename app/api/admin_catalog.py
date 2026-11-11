@@ -1,4 +1,4 @@
-"""Contratos existentes de HU-005/HU-007 para administración local protegida."""
+"""Contratos administrativos de HU-005/HU-006/HU-007 con protección existente."""
 
 from typing import Annotated
 
@@ -14,11 +14,13 @@ from app.schemas.enrichment import (
     ImageResponse, TagCreate, TagListResponse, TagResponse,
 )
 from app.schemas.menu import MenuErrorResponse
+from app.schemas.highlights import ProductHighlightsResponse, ProductHighlightsUpdate
 from app.schemas.availability import (
     AvailabilityUpdate, ProductAvailabilityResponse, VariantAvailabilityResponse,
 )
 from app.services import product_enrichment_service as service
 from app.services import product_availability_service as availability
+from app.services import product_highlights_service as highlights
 from app.services.enrichment_errors import StorageError
 from app.services.image_storage import MAX_IMAGE_BYTES
 
@@ -35,7 +37,8 @@ def create_admin_router(*, authenticated=False, images_enabled=True):
     def permission(code):
         return [Depends(require_permission(code))] if authenticated else []
 
-    Database = Annotated[Session, Depends(get_authenticated_database if authenticated else get_db)]
+    database_dependency = get_authenticated_database if authenticated else get_db
+    Database = Annotated[Session, Depends(database_dependency)]
     router = APIRouter(
         prefix="/api/admin", tags=["Administración"],
         dependencies=[Depends(require_permission("catalog:read") if authenticated else require_local_admin)],
@@ -50,6 +53,38 @@ def create_admin_router(*, authenticated=False, images_enabled=True):
             503: "Base de datos o almacenamiento temporalmente no disponible.",
         }.items()},
     )
+
+
+    @router.get(
+        "/products/{product_id}/highlights",
+        response_model=ProductHighlightsResponse,
+        summary="Consultar destacados y novedades del producto",
+        description="Consulta los indicadores locales, incluso si el producto está inactivo. " + security_description,
+    )
+    def get_product_highlights(product_id: Identifier, db: Session = Depends(database_dependency)):
+        return highlights.get_product_highlights(db=db, product_id=product_id)
+
+
+    @router.put(
+        "/products/{product_id}/highlights",
+        response_model=ProductHighlightsResponse,
+        dependencies=permission("settings:write"),
+        summary="Actualizar destacados y novedades del producto",
+        description="Reemplaza ambos indicadores sin cambiar disponibilidad ni datos comerciales. " + security_description,
+    )
+    def update_product_highlights(
+        product_id: Identifier,
+        payload: ProductHighlightsUpdate,
+        db: Session = Depends(database_dependency),
+    ):
+        result = highlights.update_product_highlights(
+            db=db,
+            product_id=product_id,
+            is_new=payload.is_new,
+            is_featured=payload.is_featured,
+        )
+        audit_success(db, "catalog.product.highlights", "product", product_id)
+        return result
 
 
     @router.get("/products/{product_id}/availability", response_model=ProductAvailabilityResponse, summary="Consultar disponibilidad del producto")

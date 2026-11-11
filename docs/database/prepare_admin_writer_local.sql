@@ -49,7 +49,8 @@ GRANT SELECT (product_image_id, product_variant_id, image_url, display_order, cr
 GRANT SELECT (tag_id, name, created_at) ON public."Tags" TO mitbol_admin_writer;
 GRANT SELECT (product_variant_id, tag_id) ON public."ProductTags" TO mitbol_admin_writer;
 
-GRANT UPDATE (description, is_available) ON public."Products" TO mitbol_admin_writer;
+-- HU-006: únicamente indicadores locales adicionales; sin UPDATE de tabla completa.
+GRANT UPDATE (description, is_available, is_featured, is_new) ON public."Products" TO mitbol_admin_writer;
 GRANT UPDATE (is_available) ON public."ProductVariants" TO mitbol_admin_writer;
 GRANT INSERT (name) ON public."Tags" TO mitbol_admin_writer;
 GRANT INSERT (product_variant_id, tag_id), DELETE ON public."ProductTags" TO mitbol_admin_writer;

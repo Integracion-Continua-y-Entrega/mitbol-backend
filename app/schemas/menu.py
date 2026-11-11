@@ -80,6 +80,12 @@ class MenuProduct(BaseModel):
     variants: list[MenuVariant] = Field(
         description="Variantes ordenadas por ID, incluidas las no disponibles."
     )
+    is_featured: bool = Field(
+        description="Indicador local de producto destacado; no modifica su disponibilidad."
+    )
+    is_new: bool = Field(
+        description="Indicador local de novedad, gestionado manualmente."
+    )
 
 
 class MenuResponse(BaseModel):
@@ -100,6 +106,8 @@ class MenuResponse(BaseModel):
                     "description": None,
                     "image_url": None,
                     "is_active": True,
+                    "is_featured": False,
+                    "is_new": True,
                     "is_available": True,
                     "can_order": True,
                     "price_min": "35.00",
@@ -182,6 +190,8 @@ class MenuProductDetailResponse(BaseModel):
                 "description": None,
                 "image_url": None,
                 "is_active": True,
+                "is_featured": True,
+                "is_new": False,
                 "is_available": True,
                 "can_order": True,
                 "price_min": "89.00",

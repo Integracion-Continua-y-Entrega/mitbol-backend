@@ -36,6 +36,11 @@ La [HU-002 — Buscar y filtrar productos](docs/learning/hu002/README.md) añade
 `GET /api/menu/tags`. Conserva las reglas de disponibilidad y las variantes
 completas del producto. Categorías permanece pendiente de soporte relacional.
 
+La [HU-006 — Destacados y novedades](docs/learning/hu006/README.md) incorpora
+consulta/edición administrativa de `is_featured` e `is_new` y los publica en menú
+y detalle. Su [procedimiento de publicación](docs/deployment/hu006_rollout.md)
+coordina la actualización del escritor SQL existente con el backend en Render.
+
 ## 🚀 Tecnologías Utilizadas
 
 - **Framework:** [FastAPI](https://fastapi.tiangolo.com/)
