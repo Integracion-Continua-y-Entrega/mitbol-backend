@@ -19,6 +19,8 @@ from app.schemas.menu import (
     MenuImage,
     MenuTag,
 )
+from app.services.menu_search import apply_name_search
+from app.services.menu_tag_filter import apply_tag_filter
 
 
 class MenuReadError(RuntimeError):
@@ -91,7 +93,7 @@ def _build_product(product: Product, images: dict, tags: dict) -> MenuProduct:
     )
 
 
-def get_menu(db: Session) -> MenuResponse:
+def get_menu(db: Session, q: str | None = None, tag_ids: list[int] | None = None) -> MenuResponse:
     """Carga productos y variantes por lotes; la sesión pertenece a get_db."""
     statement = (
         select(Product)
@@ -99,6 +101,8 @@ def get_menu(db: Session) -> MenuResponse:
         .options(selectinload(Product.variants))
         .order_by(Product.product_id)
     )
+    statement = apply_name_search(statement=statement, q=q)
+    statement = apply_tag_filter(statement=statement, tag_ids=tag_ids)
     try:
         products = db.scalars(statement).all()
         images, tags = _load_enrichment(db, products)

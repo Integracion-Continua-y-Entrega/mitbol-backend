@@ -7,17 +7,18 @@ from decimal import Decimal
 import json
 from types import SimpleNamespace
 from uuid import uuid4
+from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import delete, event, select
 from sqlalchemy.exc import InterfaceError, OperationalError, ProgrammingError, TimeoutError
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import get_db
 from app.models import (
-    Base, Product, ProductComplement, ProductModifier, ProductModifierAssignment, ProductVariant,
+    Base, Product, ProductComplement, ProductModifier, ProductModifierAssignment, ProductTag, ProductVariant, Tag,
 )
 from app.schemas.menu import MenuComplement, MenuProductDetailResponse, MenuResponse, MenuVariant
 
@@ -63,6 +64,127 @@ def add_product(menu_db):
             session.flush()
         return product
     return add
+
+
+@pytest.fixture
+def tagged_menu(menu_db, add_product):
+    """HU-002: escenario sintético para practicar pruebas de filtros reales."""
+    burger = add_product(name="Hamburguesa Doble", prices=("89.00", "129.00"), available=False)
+    lemonade = add_product(name="Limonada")
+    hidden = add_product(name="Hamburguesa oculta", active=False)
+    plain = add_product(name="Papas sin etiquetas")
+    suffix = uuid4().hex
+    with menu_db.sessions() as session, session.begin():
+        first = Tag(name=f"hu002-primera-{suffix}")
+        second = Tag(name=f"hu002-segunda-{suffix}")
+        unused = Tag(name=f"hu002-sin-asignar-{suffix}")
+        session.add_all([first, second, unused])
+        session.flush()
+        first_id, second_id, unused_id = first.tag_id, second.tag_id, unused.tag_id
+        session.add_all([
+            ProductTag(product_variant_id=variant.product_variant_id, tag_id=first_id)
+            for variant in burger.variants
+        ])
+        session.add_all([
+            ProductTag(product_variant_id=lemonade.variants[0].product_variant_id, tag_id=second_id),
+            ProductTag(product_variant_id=hidden.variants[0].product_variant_id, tag_id=first_id),
+        ])
+    return SimpleNamespace(
+        burger=burger, lemonade=lemonade, hidden=hidden, plain=plain,
+        first_id=first_id, second_id=second_id, unused_id=unused_id,
+    )
+
+
+def test_menu_tag_filter_keeps_whole_product(menu_client, tagged_menu):
+    """Dos variantes coincidentes producen un único producto, incluso agotado."""
+    response = menu_client.get("/api/menu", params={"tag_id": tagged_menu.first_id})
+
+    assert response.status_code == 200
+    products = response.json()["products"]
+    assert len(products) == 1
+    product = products[0]
+    assert product["product_id"] == tagged_menu.burger.product_id
+    assert product["is_available"] is False
+    assert product["can_order"] is False
+    assert [variant["product_variant_id"] for variant in product["variants"]] == [
+        variant.product_variant_id for variant in tagged_menu.burger.variants
+    ]
+    assert (product["price_min"], product["price_max"]) == ("89.00", "129.00")
+
+
+def test_menu_tag_filter_keeps_nonmatching_variants(menu_client, menu_db, tagged_menu):
+    """Coincidir solo en una variante no recorta variantes ni altera precios."""
+    unmatched = tagged_menu.burger.variants[1]
+    with menu_db.sessions() as session, session.begin():
+        session.execute(delete(ProductTag).where(
+            ProductTag.product_variant_id == unmatched.product_variant_id,
+        ))
+
+    response = menu_client.get("/api/menu", params={"tag_id": tagged_menu.first_id})
+
+    assert response.status_code == 200
+    product, = response.json()["products"]
+    assert product["product_id"] == tagged_menu.burger.product_id
+    assert [variant["product_variant_id"] for variant in product["variants"]] == [
+        variant.product_variant_id for variant in tagged_menu.burger.variants
+    ]
+    assert product["variants"][0]["tags"]
+    assert product["variants"][1]["tags"] == []
+    assert (product["price_min"], product["price_max"]) == ("89.00", "129.00")
+
+
+@pytest.mark.parametrize("tag_keys,q,expected_keys", [
+    ([], None, ["burger", "lemonade", "plain"]),
+    (["first_id"], None, ["burger"]),
+    (["second_id"], None, ["lemonade"]),
+    (["first_id", "second_id"], None, ["burger", "lemonade"]),
+    (["first_id", "first_id"], None, ["burger"]),
+    (["unused_id"], None, []),
+    (["missing_id"], None, []),
+    (["missing_id", "second_id"], None, ["lemonade"]),
+    (["first_id"], "  DOBLE  ", ["burger"]),
+    (["second_id"], "doble", []),
+    (["first_id", "second_id"], "  LIM  ", ["lemonade"]),
+    (["first_id", "second_id"], "   ", ["burger", "lemonade"]),
+])
+def test_menu_tag_filter_combinations(menu_client, tagged_menu, tag_keys, q, expected_keys):
+    tagged_menu.missing_id = max(tagged_menu.first_id, tagged_menu.second_id, tagged_menu.unused_id) + 1_000_000
+    params = [("tag_id", getattr(tagged_menu, key)) for key in tag_keys]
+    if q is not None:
+        params.append(("q", q))
+
+    response = menu_client.get("/api/menu", params=params)
+
+    assert response.status_code == 200
+    identifiers = [product["product_id"] for product in response.json()["products"]]
+    expected = [getattr(tagged_menu, key).product_id for key in expected_keys]
+    assert identifiers == expected
+    assert identifiers == sorted(set(identifiers))
+
+
+def test_public_tags_postgresql_lists_unassigned_and_sorts_by_name(menu_client, menu_db, tagged_menu):
+    # Insertar esta etiqueta al final distingue orden alfabético de orden por ID.
+    with menu_db.sessions() as session, session.begin():
+        first_by_name = Tag(name=f"a-hu002-{uuid4().hex}")
+        session.add(first_by_name)
+        session.flush()
+        first_id = first_by_name.tag_id
+
+    response = menu_client.get("/api/menu/tags")
+
+    assert response.status_code == 200
+    tags = response.json()
+    assert [tag["tag_id"] for tag in tags] == [
+        first_id, tagged_menu.first_id, tagged_menu.second_id, tagged_menu.unused_id,
+    ]
+    assert [tag["name"] for tag in tags] == sorted(tag["name"] for tag in tags)
+    assert all(set(tag) == {"tag_id", "name"} for tag in tags)
+
+
+def test_public_tags_postgresql_empty_returns_200(menu_client):
+    response = menu_client.get("/api/menu/tags")
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 @pytest.fixture
@@ -153,6 +275,41 @@ def test_single_and_multiple_variant_prices(menu_client, add_product, prices, mi
     assert [variant["price"] for variant in product["variants"]] == list(prices)
 
 
+@pytest.mark.parametrize("q,expected_names", [
+    (None, ["Hamburguesa Doble", "Limonada", "Oferta 100%", "Combo_A"]),
+    ("", ["Hamburguesa Doble", "Limonada", "Oferta 100%", "Combo_A"]),
+    ("   ", ["Hamburguesa Doble", "Limonada", "Oferta 100%", "Combo_A"]),
+    ("  DOBLE  ", ["Hamburguesa Doble"]),
+    ("lim", ["Limonada"]),
+    ("inexistente", []),
+    ("%", ["Oferta 100%"]),
+    ("_", ["Combo_A"]),
+    ("' OR 1=1 --", []),
+])
+def test_menu_name_search_preserves_public_products(menu_client, add_product, q, expected_names):
+    """HU-002: recorrido HTTP real y coincidencias en PostgreSQL temporal."""
+    add_product(name="Hamburguesa Doble", available=False)
+    add_product(name="Limonada")
+    add_product(name="Oferta 100%")
+    add_product(name="Combo_A")
+    add_product(name="Hamburguesa Doble oculta", active=False)
+
+    params = {} if q is None else {"q": q}
+    response = menu_client.get("/api/menu", params=params)
+
+    assert response.status_code == 200
+    products = response.json()["products"]
+    assert [product["name"] for product in products] == expected_names
+    identifiers = [product["product_id"] for product in products]
+    assert identifiers == sorted(set(identifiers))
+    for product in products:
+        assert product["is_active"] is True
+        assert product["variants"]  # La búsqueda conserva las variantes.
+        if product["name"] == "Hamburguesa Doble":
+            assert product["is_available"] is False
+            assert product["can_order"] is False
+
+
 @pytest.mark.parametrize("available,flags,minimum,maximum", [
     (True, (True, True), "35.00", "49.00"),
     (False, (True, True), "35.00", "49.00"),
@@ -175,6 +332,81 @@ def test_stored_availability_and_effective_can_order(
     assert [variant["can_order"] for variant in product["variants"]] == [available and flag for flag in flags]
     assert (product["price_min"], product["price_max"]) == (minimum, maximum)
     assert product["has_price_range"] is (minimum != maximum)
+
+
+@pytest.mark.parametrize("rows,expected", [
+    ([], []),
+    ([SimpleNamespace(tag_id=7, name="vegano", created_at="internal")],
+     [{"tag_id": 7, "name": "vegano"}]),
+])
+def test_public_tags_http_contract(api_app, rows, expected):
+    """Sesión simulada: comprueba ruta, delegación y serialización pública."""
+    db = Mock()
+    db.scalars.return_value.all.return_value = rows
+    api_app.dependency_overrides[get_db] = lambda: db
+    with TestClient(api_app) as client:
+        response = client.get("/api/menu/tags")
+    assert response.status_code == 200
+    assert response.json() == expected
+    db.scalars.assert_called_once()
+    db.commit.assert_not_called()
+    db.close.assert_not_called()
+
+
+@pytest.mark.parametrize("error_type,expected_status", [
+    (OperationalError, 503),
+    (TimeoutError, 503),
+    (ProgrammingError, 500),
+])
+def test_public_tags_errors_are_sanitized(api_app, caplog, error_type, expected_status):
+    sensitive = "synthetic_secret_must_not_escape"
+    error = (error_type(sensitive) if error_type is TimeoutError
+             else error_type("SELECT", {}, Exception(sensitive)))
+    db = Mock()
+    db.scalars.side_effect = error
+    api_app.dependency_overrides[get_db] = lambda: db
+    with TestClient(api_app) as client:
+        response = client.get("/api/menu/tags")
+    assert response.status_code == expected_status
+    assert sensitive not in response.text + caplog.text
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "", "1.5"])
+def test_menu_tag_ids_reject_invalid_items_before_query(api_app, value):
+    db = Mock()
+    api_app.dependency_overrides[get_db] = lambda: db
+    with TestClient(api_app) as client:
+        response = client.get("/api/menu", params=[("tag_id", "7"), ("tag_id", value)])
+    assert response.status_code == 422
+    db.scalars.assert_not_called()
+
+
+def test_menu_tag_ids_reach_query_with_name_filter(api_app):
+    from sqlalchemy.dialects import postgresql
+
+    db = Mock()
+    db.scalars.return_value.all.return_value = []
+    api_app.dependency_overrides[get_db] = lambda: db
+    with TestClient(api_app) as client:
+        response = client.get("/api/menu", params=[("q", "  DOBLE  "), ("tag_id", "7"), ("tag_id", "8")])
+    assert response.status_code == 200
+    assert response.json() == {"currency": "MXN", "products": []}
+    compiled = db.scalars.call_args.args[0].compile(dialect=postgresql.dialect())
+    assert "DOBLE" in compiled.params.values()
+    assert [7, 8] in compiled.params.values()
+    assert 'JOIN "ProductTags" ON' in str(compiled)
+    assert '"Products".is_active IS true' in str(compiled)
+
+
+def test_public_tags_openapi(api_app):
+    with TestClient(api_app) as client:
+        schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/api/menu/tags"]["get"]
+    assert not operation.get("security")
+    assert {"200", "500", "503"} <= set(operation["responses"])
+    body = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert body["type"] == "array"
+    assert body["items"]["$ref"].endswith("/MenuTag")
 
 
 def test_commercially_inactive_products_are_excluded(menu_client, add_product):
@@ -336,8 +568,20 @@ def test_openapi_and_swagger_describe_public_contract(api_app):
     assert response.status_code == 200
     schema = response.json()
     operation = schema["paths"]["/api/menu"]["get"]
+    search = next(parameter for parameter in operation["parameters"] if parameter["name"] == "q")
+    assert search["in"] == "query"
+    assert search["required"] is False
+    assert search["description"]
+    assert {item["type"] for item in search["schema"]["anyOf"]} == {"string", "null"}
+    tag_filter = next(parameter for parameter in operation["parameters"] if parameter["name"] == "tag_id")
+    assert tag_filter["in"] == "query"
+    assert tag_filter["required"] is False
+    assert tag_filter["description"]
+    array_schema = next(item for item in tag_filter["schema"]["anyOf"] if item["type"] == "array")
+    assert array_schema["items"]["type"] == "integer"
+    assert array_schema["items"]["exclusiveMinimum"] == 0
     assert not operation.get("security")
-    assert set(operation["responses"]) == {"200", "500", "503"}
+    assert set(operation["responses"]) == {"200", "422", "500", "503"}
     assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/MenuResponse")
     models = schema["components"]["schemas"]
     assert models["MenuVariant"]["properties"]["price"]["type"] == "string"
