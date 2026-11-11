@@ -31,6 +31,11 @@ estable del frontend mediante `GET /api/menu/config` y `PUBLIC_MENU_URL`
 opcional. No necesita PostgreSQL ni autenticación. Generación, descarga e
 impresión del QR corresponden al frontend; no se modifican Neon ni Render.
 
+La [HU-002 — Buscar y filtrar productos](docs/learning/hu002/README.md) añade
+`q` opcional y filtros repetibles `tag_id` a `GET /api/menu`, junto con
+`GET /api/menu/tags`. Conserva las reglas de disponibilidad y las variantes
+completas del producto. Categorías permanece pendiente de soporte relacional.
+
 ## 🚀 Tecnologías Utilizadas
 
 - **Framework:** [FastAPI](https://fastapi.tiangolo.com/)

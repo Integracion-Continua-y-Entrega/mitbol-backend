@@ -3,12 +3,13 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
+from pydantic import PositiveInt
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.menu import MenuErrorResponse, MenuProductDetailResponse, MenuPublicConfigResponse, MenuResponse
-from app.services import menu_service
+from app.schemas.menu import MenuErrorResponse, MenuProductDetailResponse, MenuPublicConfigResponse, MenuResponse, MenuTag
+from app.services import menu_service, menu_tags
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Menú"])
@@ -20,6 +21,10 @@ router = APIRouter(prefix="/api", tags=["Menú"])
     summary="Consultar el menú digital",
     description=(
         "Consulta pública sin autenticación, basada en PostgreSQL y sin llamadas a Loyverse. "
+        "Permite buscar por fragmento del nombre mediante q, sin distinguir mayúsculas "
+        "e ignorando espacios exteriores; omitirlo o dejarlo vacío devuelve el listado general. "
+        "Permite repetir tag_id para filtrar por cualquiera de las etiquetas seleccionadas. "
+        "Si se proporciona q, se aplican ambos filtros; se conservan todas las variantes. "
         "Excluye productos comercialmente inactivos y mantiene visibles los agotados. "
         "Utiliza can_order para habilitar la selección: is_available conserva el estado almacenado. "
         "can_order incluye la disponibilidad comercial de la variante sincronizada desde Loyverse. "
@@ -48,9 +53,30 @@ router = APIRouter(prefix="/api", tags=["Menú"])
         },
     },
 )
-def get_menu(db: Session = Depends(get_db)) -> MenuResponse:
+def get_menu(
+    db: Session = Depends(get_db),
+    q: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Fragmento del nombre del producto, sin distinguir mayúsculas y con "
+                "espacios exteriores ignorados. Vacío o ausente: sin filtro por nombre."
+            ),
+        ),
+    ] = None,
+    tag_ids: Annotated[
+        list[PositiveInt] | None,
+        Query(
+            alias="tag_id",
+            description=(
+                "IDs positivos de etiquetas. Repite tag_id para seleccionar varias; "
+                "basta con cualquiera de ellas. Se combina con q mediante AND."
+            ),
+        ),
+    ] = None,
+) -> MenuResponse:
     try:
-        return menu_service.get_menu(db)
+        return menu_service.get_menu(db, q=q, tag_ids=tag_ids)
     except menu_service.MenuUnavailableError as error:
         # Sólo se registra el tipo: el mensaje del controlador puede contener SQL o credenciales.
         logger.warning("Menú temporalmente no disponible (%s).", type(error.__cause__).__name__)
@@ -82,6 +108,39 @@ def get_menu(db: Session = Depends(get_db)) -> MenuResponse:
 def get_public_menu_config(request: Request, response: Response) -> MenuPublicConfigResponse:
     response.headers["Cache-Control"] = "no-store"
     return MenuPublicConfigResponse(menu_url=request.app.state.settings.public_menu_url)
+
+
+@router.get(
+    "/menu/tags",
+    response_model=list[MenuTag],
+    summary="Consultar etiquetas de productos",
+    description=(
+        "Consulta pública de todas las etiquetas registradas, incluidas las no asignadas. "
+        "Ordenadas por nombre e ID. Sin etiquetas devuelve 200 y []. "
+        "No consulta Loyverse ni requiere autenticación."
+    ),
+    responses={
+        500: {"model": MenuErrorResponse, "description": "Error interno al consultar etiquetas."},
+        503: {"model": MenuErrorResponse, "description": "PostgreSQL temporalmente no disponible."},
+    },
+)
+def get_menu_tags(db: Session = Depends(get_db)) -> list[MenuTag]:
+    """Entrega las etiquetas utilizando el servicio de lectura."""
+    try:
+        return menu_tags.get_menu_tags(db)
+    except menu_service.MenuUnavailableError as error:
+        logger.warning("Etiquetas temporalmente no disponibles (%s).", type(error.__cause__).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Las etiquetas no están disponibles temporalmente.",
+        ) from None
+    except Exception as error:
+        cause = error.__cause__ if isinstance(error, menu_service.MenuReadError) else error
+        logger.error("Falló la consulta de etiquetas (%s).", type(cause).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No fue posible consultar las etiquetas.",
+        ) from None
 
 
 @router.get(
