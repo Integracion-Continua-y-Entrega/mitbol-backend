@@ -45,6 +45,16 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip check
 
+      - name: Fix Ubuntu mirrors (DNS resolve issue)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure* 2>/dev/null || true
+          sudo tee /etc/apt/sources.list << 'EOF'
+          deb http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu noble-security main restricted universe multiverse
+          EOF
+          sudo apt-get update
+
       - name: Install PostgreSQL 18 binaries
         # ubuntu-24.04 incluye PG16; instalar explícitamente la versión exigida.
         # Repositorio oficial PGDG, con verificación de firma acotada a su clave.
