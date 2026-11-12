@@ -1,9 +1,10 @@
 # HU-010 — Administración de sincronizaciones
 
-Estado: consulta administrativa de fechas y actividad integrada; solicitud manual pendiente. Rama
+Estado: alcance backend permitido implementado; historial persistente pendiente. Rama
 `feature/hu-010-sync-management`, creada desde develop `7d9b1c6`, que integra HU-009.
-Se añadió el GET protegido y se prepararon grants mínimos. No hay nuevos
-procesos de sincronización o despliegues activados.
+Se añadieron GET de estado, POST manual, worker privado y entrada periódica.
+La ejecución real sigue deshabilitada sin configuración explícita. No se han
+activado procesos, programadores o despliegues en infraestructura real.
 
 ## Alcance y límite de aceptación
 
@@ -27,9 +28,10 @@ un historial de ejecuciones ni añadir tablas por iniciativa propia.
   ProductComplements y Discounts.
 - Autenticación, protección CSRF/Origin y permisos administrativos existentes.
 
-No se identificó un planificador periódico activo en el código revisado. Se
-deberá preparar una entrada reutilizable con el mismo bloqueo; la programación
-en infraestructura y el despliegue se gestionarán por separado.
+No hay un planificador periódico activo en este repositorio. La entrada
+`app.cli.run_sync` permite que un programador externo invoque una operación y
+omita el intento si el destino está ocupado. Configurar el horario y desplegar
+los procesos queda a cargo del encargado de infraestructura.
 
 ## Bloques de implementación
 
@@ -42,13 +44,13 @@ en infraestructura y el despliegue se gestionarán por separado.
 | 5 | Entrada periódica reutilizable, errores seguros y pruebas de convivencia con solicitudes manuales. |
 | 6 | Regresiones, contrato para frontend, documentación y commits por bloque funcional. |
 
-Antes del bloque 4 se definirá el canal entre la solicitud web y el ejecutor:
-no se concederá DML comercial al rol web ni se expondrán credenciales de Loyverse
-a React. La ejecución real permanecerá deshabilitada hasta disponer de una
-configuración operativa explícita. No se reactivará el router legado de sincronización.
+La solicitud web delega por HTTP autenticado a un worker loopback independiente.
+No se concede DML comercial al rol web ni se exponen credenciales de Loyverse a
+React. El worker tiene configuración, pool y proceso operativos propios. Sin
+URL/token de delegación, el POST devuelve 503. El router legado sigue deshabilitado.
 
-Propuesta inicial de permisos: `catalog:read` para consultar estado y
-`settings:write` para solicitar ejecuciones (Admin, no Staff). Reutiliza los
+Permisos: `catalog:read` para consultar estado y `settings:write` para solicitar
+ejecuciones (Admin, no Staff), además de Origin y CSRF. Reutiliza los
 códigos existentes; no requiere nuevas tablas de permisos.
 
 ## Semántica del estado
@@ -155,3 +157,86 @@ ocupada sin liberar bloqueos ajenos, aislamiento por base y tipo de clave,
 lectura web con operador independiente y regresiones de catálogo/descuentos.
 Los dos avisos de deprecación existentes de Starlette/TestClient continúan.
 No se habilitó una solicitud manual o un planificador periódico.
+
+## Solicitud manual
+
+El cuerpo `ManualSyncRequest` requiere target, limitado a `catalog` o `discounts`.
+No acepta `all`, valores por defecto, credenciales, base, tienda o identidad
+enviadas por el cliente. Se aprobaron **35 pruebas** de este contrato y los
+esquemas de estado en 0.17 segundos, sin abrir PostgreSQL.
+
+`ManualSyncCoordinator` recibe callbacks asíncronos
+configurados por el servidor para cada proceso y falla si no hay uno disponible.
+No reutiliza la sesión del rol web ni busca credenciales implícitas. Espera el
+callback elegido y propaga su resultado; no reintenta o usa el otro proceso.
+
+`POST /api/admin/sync/requests` acepta `{"target":"catalog"}` o
+`{"target":"discounts"}`. Solo existe con cuentas administrativas y catálogo
+habilitados. La clave local legada no habilita esta operación. La autorización
+revalida permiso, sesión, Origin y CSRF en una transacción corta que termina
+antes de esperar al worker, para permitir consultar estado desde la misma cuenta.
+El evento `sync.manual.authorize` registra esa autorización en AuditEvents;
+no acredita finalización ni sustituye un historial completo de ejecuciones.
+
+Se devuelve 200 y status=completed únicamente tras recibir y validar el resultado
+del worker. El resultado contiene conteos estrictos, no el payload Loyverse.
+No hay cola durable ni aceptación 202. El estado/permiso se comprueba al autorizar
+la operación; una revocación posterior no deshace una transacción ya ejecutada.
+
+Errores: 401/403 de acceso, 422 con mensaje genérico ante un cuerpo inválido,
+409 si el destino está ocupado, 502 por datos/comunicación con el proveedor y
+503 por configuración o resultado no confirmado. Un timeout puede ocurrir
+después del commit: comprobar estado antes de repetir. No hay reintentos de POST
+o redirecciones del cliente del worker.
+
+## Ejecución operativa y periódica
+
+`SyncWorkerRuntime` comparte preflight, servicios y bloqueos entre el worker
+HTTP y `python -m app.cli.run_sync`. Rechaza los roles web como operador y
+requiere destino/base/tienda explícitos. Local admite mitbol_dev y
+mitbol_auth_local; las bases efímeras se limitan a los patrones del laboratorio.
+Cloud mantiene las comprobaciones TLS y de destino existentes. No carga .env.
+
+El comando es preflight por defecto. `--execute` autoriza una operación;
+`--skip-if-busy` permite a un programador externo omitirla con código 0 sin
+descargar datos cuando otra operación tiene el bloqueo. No crea timers, tablas
+o tareas de fondo al iniciar FastAPI. Catálogo y descuentos son operaciones
+independientes; no se ofrece una transacción conjunta para target=all.
+
+Configuración, separación de entornos y límites de publicación:
+[worker y ejecución periódica](../deployment/hu010_worker.md).
+
+## Estado de aceptación
+
+El historial persistente y la revisión de frontend siguen pendientes. No marcar
+HU-010 completamente Hecho mientras el criterio de historial siga sin soporte,
+según las páginas 29–30 del backlog. No se ha desplegado, ejecutado una tarea
+programada real o sincronizado una cuenta Loyverse real durante este trabajo.
+
+## Verificación final del alcance permitido
+
+El 12 de noviembre de 2026 se aprobaron **1,805 pruebas de la suite completa**,
+sin fallos, errores u omisiones, en 654.72 segundos sobre Windows, Python 3.13
+y PostgreSQL 18. Se observaron dos avisos de deprecación de Starlette/TestClient.
+El comando equivalente al usado por CI es:
+
+```text
+python -B scripts/test_auth_phase1.py --with-reader -ra --junitxml=test-results/pytest.xml
+```
+
+La prueba integrada recorre sesión real Admin, rol web limitado, delegación
+HTTP ASGI, worker, pool operativo y proveedor HTTP simulado. Comprueba commit
+real, rechazo de Staff/CSRF/origen/cuerpos inválidos, conservación de datos ante
+fallos, consulta de estado durante la ejecución desde la misma cuenta, rechazo
+de otra solicitud manual y omisión de un disparo periódico ocupado. El worker
+no usa la sesión web para sincronizar y no hay fallback al pool público.
+
+También se verificaron valores de configuración, cuerpos/resultados estrictos,
+errores sin secretos, límites del worker, ausencia de redirecciones/reintentos
+del POST y regresiones del catálogo, descuentos, permisos y autenticación.
+El laboratorio elimina del proceso hijo variables heredadas SYNC_ y LOYVERSE_
+para no utilizar accidentalmente un ejecutor o credenciales reales.
+
+No se probó un worker por TCP en infraestructura real, un proveedor real o una
+pantalla React; esas comprobaciones y el check remoto de CI son independientes
+de esta evidencia local. Los informes XML y guías privadas no se versionan.

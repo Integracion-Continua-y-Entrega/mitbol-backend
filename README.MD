@@ -49,8 +49,10 @@ No incluye aplicar descuentos a pedidos ni activa despliegues automáticamente.
 
 La [HU-010 — Estado de sincronización](docs/features/hu010-sync-management.md)
 añade `GET /api/admin/sync/status` protegido con fechas, conteos y actividad.
-Es un avance parcial: esas observaciones no representan un historial de
-ejecuciones; la solicitud administrativa y la ejecución periódica siguen en desarrollo.
+Incluye solicitud manual solo para Admin y entrada para programación externa,
+con [worker privado separado](docs/deployment/hu010_worker.md), deshabilitados
+sin configuración explícita. Sigue parcial respecto al historial persistente;
+las observaciones de estado no representan un historial completo de ejecuciones.
 
 ## 🚀 Tecnologías Utilizadas
 
