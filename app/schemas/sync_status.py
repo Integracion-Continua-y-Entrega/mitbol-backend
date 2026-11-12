@@ -39,4 +39,5 @@ class SyncStatusResponse(BaseModel):
     """Observaciones de registros almacenados; no es un historial de trabajos."""
 
     entities: list[EntitySyncSummary]
+    execution_active: bool
     history_available: Literal[False] = False

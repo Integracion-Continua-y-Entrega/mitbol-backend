@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.schemas.sync_status import SyncStatusResponse
 from app.services.product_enrichment_service import database_errors
 from app.services.sync_status_service import get_sync_summaries
+from app.services.sync_activity import sync_execution_is_active
 
 
 def create_sync_status_router(*, authenticated: bool = False) -> APIRouter:
@@ -23,6 +24,9 @@ def create_sync_status_router(*, authenticated: bool = False) -> APIRouter:
     @router.get("/status", response_model=SyncStatusResponse)
     def get_sync_status(db: Session = Depends(database_dependency)):
         with database_errors(db):
-            return SyncStatusResponse(entities=get_sync_summaries(db))
+            return SyncStatusResponse(
+                entities=get_sync_summaries(db),
+                execution_active=sync_execution_is_active(db),
+            )
 
     return router

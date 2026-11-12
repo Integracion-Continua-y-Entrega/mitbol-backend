@@ -48,9 +48,9 @@ La migración `20261111_0006` y el SELECT mínimo del rol web se coordinan en el
 No incluye aplicar descuentos a pedidos ni activa despliegues automáticamente.
 
 La [HU-010 — Estado de sincronización](docs/features/hu010-sync-management.md)
-añade `GET /api/admin/sync/status` protegido con fechas y conteos por entidad.
+añade `GET /api/admin/sync/status` protegido con fechas, conteos y actividad.
 Es un avance parcial: esas observaciones no representan un historial de
-ejecuciones; la ejecución administrativa y su coordinación siguen en desarrollo.
+ejecuciones; la solicitud administrativa y la ejecución periódica siguen en desarrollo.
 
 ## 🚀 Tecnologías Utilizadas
 

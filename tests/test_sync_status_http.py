@@ -38,6 +38,8 @@ def backend(monkeypatch):
         entity=entity, total_count=0, synced_count=0, last_synced_at=None,
     ) for entity in SyncEntity])
     monkeypatch.setattr(routes, "get_sync_summaries", state.read)
+    state.active = Mock(return_value=False)
+    monkeypatch.setattr(routes, "sync_execution_is_active", state.active)
     with TestClient(app) as state.client:
         yield state
 
@@ -46,10 +48,19 @@ def test_get_returns_observations_without_claiming_execution_history(backend):
     response = backend.client.get("/api/admin/sync/status")
     assert response.status_code == 200
     assert response.json()["history_available"] is False
+    assert response.json()["execution_active"] is False
     assert len(response.json()["entities"]) == 5
     assert all(row["last_synced_at"] is None for row in response.json()["entities"])
     backend.read.assert_called_once_with(backend.db)
     backend.db.commit.assert_not_called()
+
+
+def test_active_execution_does_not_claim_an_execution_history(backend):
+    backend.active.return_value = True
+    response = backend.client.get("/api/admin/sync/status")
+    assert response.status_code == 200
+    assert response.json()["execution_active"] is True
+    assert response.json()["history_available"] is False
 
 
 @pytest.mark.parametrize("permissions,status", [(None, 401), (set(), 403)])

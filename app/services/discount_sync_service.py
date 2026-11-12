@@ -16,6 +16,7 @@ from app.services.discount_probe import DiscountSnapshot, fetch_discount_snapsho
 from app.services.discount_writer import write_discount_batch
 from app.services.loyverse_client import LoyverseAPIClient
 from app.services.sync_service import CATALOG_SYNC_LOCK_KEY
+from app.services.sync_activity import mark_sync_execution
 
 
 DISCOUNT_SCHEMA_REVISION = "20261111_0006"
@@ -65,6 +66,8 @@ class DiscountSyncService:
             # concurrentes en distinto orden. Se libera al cerrar la transacción.
             if not session.scalar(select(func.pg_try_advisory_xact_lock(CATALOG_SYNC_LOCK_KEY))):
                 raise DiscountSyncError("Ya hay una sincronización comercial en curso.")
+            if not mark_sync_execution(session):
+                raise DiscountSyncError("Ya hay una ejecución de sincronización activa.")
             yield session
 
     def _write(self, session: Session, snapshot: DiscountSnapshot) -> int:

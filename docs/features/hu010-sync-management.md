@@ -1,6 +1,6 @@
 # HU-010 — Administración de sincronizaciones
 
-Estado: consulta administrativa de fechas integrada; ejecución y actividad pendientes. Rama
+Estado: consulta administrativa de fechas y actividad integrada; solicitud manual pendiente. Rama
 `feature/hu-010-sync-management`, creada desde develop `7d9b1c6`, que integra HU-009.
 Se añadió el GET protegido y se prepararon grants mínimos. No hay nuevos
 procesos de sincronización o despliegues activados.
@@ -94,10 +94,10 @@ modificaban ACL o rutas.
 sesión con `catalog:read` (Admin/Staff) o guard local legado. No está disponible
 en la API pública con la administración deshabilitada.
 
-La respuesta contiene `entities`, con cinco resúmenes, y
+La respuesta contiene `entities`, con cinco resúmenes, `execution_active` y
 `history_available=false`. Cada entidad incluye nombre, total_count,
 synced_count y last_synced_at (UTC o null). Incluso una base vacía devuelve
-cinco resúmenes. No expone is_running, éxito, última ejecución o historial.
+cinco resúmenes. No expone éxito, última ejecución o historial.
 No contacta a Loyverse. Errores: 401/403 por acceso, 503 si faltan tablas o
 permisos requeridos, y errores internos sin detalles de infraestructura.
 
@@ -128,3 +128,30 @@ autorizados, aplicación del incremento, error 503 sin permisos y regresiones
 de los perfiles de escritor, descuentos y destacados. Se observaron los dos
 avisos de deprecación existentes de Starlette/TestClient. No se ejecutó la
 suite completa del repositorio en este bloque ni se contactó a Loyverse.
+
+## Actividad de ejecución
+
+`execution_active` observa una marca transaccional exclusiva de los servicios
+actualizados de catálogo y descuentos. Se adquiere después de verificar el
+destino y obtener el bloqueo comercial, antes de leer Loyverse; se libera al
+finalizar la transacción, con commit o rollback. No crea tablas ni conserva
+resultados. Las ediciones locales no emiten esta marca.
+
+La consulta de `pg_locks` se limita a la clave y base actuales, sin adquirir
+bloqueos o ampliar permisos del rol web. Se distingue la clave bigint de la
+variante PostgreSQL de dos enteros, conforme a la
+[referencia de PostgreSQL 18](https://www.postgresql.org/docs/18/view-pg-locks.html).
+
+La actividad es una observación en el momento de consultar. Puede cambiar
+inmediatamente después; no sustituye el bloqueo al ejecutar una solicitud.
+Procesos antiguos que no emitan la marca tampoco pueden identificarse mediante
+ella. Los conteos/fechas y la actividad se consultan por separado: no representan
+un resultado o historial de la misma ejecución.
+
+Verificación de actividad: **167 pruebas aprobadas** en 31.28 segundos sobre
+PostgreSQL 18 temporal, sin fallos u omisiones. Se comprobaron emisión antes
+del proveedor, commit/rollback, concurrencia entre ambos servicios, marca
+ocupada sin liberar bloqueos ajenos, aislamiento por base y tipo de clave,
+lectura web con operador independiente y regresiones de catálogo/descuentos.
+Los dos avisos de deprecación existentes de Starlette/TestClient continúan.
+No se habilitó una solicitud manual o un planificador periódico.

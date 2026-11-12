@@ -24,6 +24,7 @@ def test_login_reads_five_entities_with_minimal_web_permissions(backend, role):
     assert response.status_code == 200
     body = response.json()
     assert body["history_available"] is False and len(body["entities"]) == 5
+    assert body["execution_active"] is False
     rows = {row["entity"]: row for row in body["entities"]}
     # La fixture de catálogo incluye el producto principal y otro inactivo.
     assert rows["Products"]["total_count"] == 2
@@ -68,3 +69,18 @@ def test_old_schema_returns_503_without_partial_entities(writer_backend):
     response = b.client.get("/api/admin/sync/status")
     assert response.status_code == 503
     assert "entities" not in response.json()
+
+
+def test_web_role_observes_marker_held_by_an_independent_operator(backend):
+    from sqlalchemy.orm import sessionmaker
+    from app.services.sync_activity import mark_sync_execution
+
+    b = backend
+    assert login(b).status_code == 200
+    with sessionmaker(bind=b.roles.owner).begin() as operator:
+        assert mark_sync_execution(operator) is True
+        response = b.client.get("/api/admin/sync/status")
+        assert response.status_code == 200
+        assert response.json()["execution_active"] is True
+        assert response.json()["history_available"] is False
+    assert b.client.get("/api/admin/sync/status").json()["execution_active"] is False

@@ -23,6 +23,7 @@ from app.services.catalog_errors import (
 from app.services.catalog_probe import CatalogSnapshot, fetch_catalog
 from app.services.catalog_transform import CatalogPlan, transform_catalog
 from app.services.loyverse_client import LoyverseAPIClient
+from app.services.sync_activity import mark_sync_execution
 
 # Un catálogo por base: todas las instancias del servicio usan la misma clave.
 CATALOG_SYNC_LOCK_KEY = 0x4D4954424F4C
@@ -76,6 +77,8 @@ class SyncService:
                     raise CatalogTargetError("La conexión real no coincide con la base autorizada.")
                 if not session.scalar(select(func.pg_try_advisory_xact_lock(CATALOG_SYNC_LOCK_KEY))):
                     raise CatalogSyncBusyError("Ya hay una sincronización comercial en ejecución.")
+                if not mark_sync_execution(session):
+                    raise CatalogSyncBusyError("Ya hay una ejecución de sincronización activa.")
                 yield session
         except DatabaseTargetError as error:
             raise CatalogTargetError(str(error)) from None
