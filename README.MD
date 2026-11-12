@@ -41,6 +41,12 @@ consulta/edición administrativa de `is_featured` e `is_new` y los publica en me
 y detalle. Su [procedimiento de publicación](docs/deployment/hu006_rollout.md)
 coordina la actualización del escritor SQL existente con el backend en Render.
 
+La [HU-009 — Descuentos comerciales](docs/features/hu009-discount-sync.md) añade
+sincronización manual transaccional y `GET /api/admin/discounts` protegido.
+La migración `20261111_0006` y el SELECT mínimo del rol web se coordinan en el
+[procedimiento de publicación HU-009](docs/deployment/hu009_rollout.md).
+No incluye aplicar descuentos a pedidos ni activa despliegues automáticamente.
+
 ## 🚀 Tecnologías Utilizadas
 
 - **Framework:** [FastAPI](https://fastapi.tiangolo.com/)
@@ -97,7 +103,7 @@ migraciones, las transacciones y los savepoints; no hace falta ejecutar Alembic
 aparte ni crear bases manualmente.
 
 Las pruebas de autenticación crean además su propia base temporal
-`mitbol_test_auth_<identificador>`, aplican allí el head `20261106_0005` (incluye identidad de 0004) y
+`mitbol_test_auth_<identificador>`, aplican allí la revisión histórica `20261106_0005` (incluye identidad de 0004) y
 comprueban sesiones, permisos y auditoría con cuentas sintéticas. Nunca aplican
 esa migración en Neon o mitbol_dev. JUnit registra `auth_control_target` y
 `auth_isolated_target`: versión, base, current_user, session_user, dirección y
@@ -105,6 +111,9 @@ puerto vistos por PostgreSQL, sin URLs ni secretos. El guard SQL del escritor
 conserva sus restricciones de PostgreSQL 18, nombre temporal, operador y TCP
 loopback. El ejecutor detiene ambos clústeres en `finally` y conserva los archivos
 temporales para diagnóstico.
+
+Las pruebas de HU-009 aplican además el head actual `20261111_0006` en bases
+temporales para comprobar descuentos, commits reales y permisos de lectura.
 
 Las pruebas de HU-008, HU-001, HU-003, HU-005 y HU-007 usan estas fixtures.
 Loyverse se simula con RESPX, `httpx.MockTransport` y snapshots existentes. El
@@ -126,19 +135,10 @@ La instalación PGDG y la ejecución en Ubuntu deben confirmarse en la siguiente
 corrida real de Actions. La corrección, evidencia y límites de validación están
 en el [reporte del error de preparación del escritor](docs/security/admin_auth_ci_fix.md).
 
-Para publicar la configuración desde la rama actual, revisa el diff y ejecuta
-manualmente:
-
-```powershell
-git add .github/workflows/backend-ci.yml tests/test_auth_persistence.py tests/test_ci_configuration.py tests/test_admin_writer.py README.MD docs/security/admin_auth_ci_fix.md
-git commit -m "ci: run admin security tests on isolated loopback PostgreSQL 18"
-git push origin design/admin-auth-security
-```
-
-El Pull Request usa base `develop` y comparación `design/admin-auth-security`.
-Actualizar el PR activa el workflow mediante `pull_request.synchronize`.
-Espera el check **Backend tests** antes de
-fusionarlo. No se realizan commits, push ni cambios de protección automáticamente.
+Los cambios se revisan mediante Pull Request hacia `develop`; las ramas
+dependientes deben revisar primero su base. Actualizar el PR activa el workflow
+mediante `pull_request.synchronize`. Esperar el check **Backend tests** antes de
+fusionar. El pipeline no hace merge ni despliegue automáticamente.
 
 Después de comprobar la primera ejecución, un administrador puede ir a
 **Settings → Branches → Add branch protection rule**, indicar `develop`, activar
@@ -338,9 +338,10 @@ ejecutará migraciones ni sincronizaciones.
 
 ### Migraciones: referencia para una base nueva
 
-`mitbol_cloud_dev` ya está en `20261102_0003`. No repetir las migraciones ni el
-verificador de base vacía. Esta sección documenta el procedimiento para otra
-base nueva, con autorización independiente.
+La etapa inicial documentó `mitbol_cloud_dev` en `20261102_0003`; ese registro
+histórico no acredita su revisión actual. No repetir el verificador de base
+vacía en una instalación existente: para HU-009 seguir su procedimiento de
+actualización. Esta sección se aplica a otra base nueva autorizada.
 
 Antes de migrar una base Neon nueva, usar `python -m app.cli.verify_neon --validate-url`
 para validar la configuración sin conectarse. Después, `python -m app.cli.verify_neon`
@@ -349,7 +350,8 @@ READ ONLY y ausencia de revisiones/objetos de aplicación. No carga `.env`, no
 consulta Loyverse, no aplica migraciones y termina con rollback. Devuelve sólo
 metadatos sanitizados; nunca la URL ni la contraseña. `ready_for_migrations` es un
 resultado de inspección: todavía requiere autorización para migrar. El preflight
-de `sync_catalog` se utiliza después, pues exige la revisión `20261102_0003`.
+de `sync_catalog` se utiliza después, pues exige 0003 o una revisión compatible
+hasta `20261111_0006`.
 
 Si falla, repetir `python -m app.cli.verify_neon --diagnose`. Este modo añade
 resolución DNS y apertura/cierre TCP antes de la misma conexión PostgreSQL segura.
@@ -370,13 +372,13 @@ Después de confirmar proyecto/branch/endpoint de Neon y base nueva vacía:
 
 ```text
 python -m alembic current
-python -m alembic upgrade 20261102_0003
+python -m alembic upgrade 20261111_0006
 python -m alembic current
 python -m alembic check
 ```
 
 `current` inicial no tendrá revisión en una base nueva. El resultado final debe
-ser `20261102_0003` y `check` no debe detectar operaciones pendientes. Se validan
+ser `20261111_0006` y `check` no debe detectar operaciones pendientes. Se validan
 destino real y TLS antes de que Alembic escriba. La revisión inicial conserva la
 protección que rechaza objetos de aplicación preexistentes. No usar `stamp` como
 sustituto de migrar. No se modificaron las tres revisiones aprobadas.
@@ -395,7 +397,8 @@ transacción PostgreSQL READ ONLY:
 python -m app.cli.sync_catalog --expected-database mitbol_cloud_dev --expected-host HOST_DIRECTO --preflight
 ```
 
-Verifica destino, TLS y revisión exacta `20261102_0003`. Es una operación de
+Verifica destino, TLS y revisión compatible entre `20261102_0003` y
+`20261111_0006`. Es una operación de
 lectura de la base remota, por lo que sólo se ejecutará con el destino autorizado
 durante la Etapa 3. Omitir `--preflight` mantiene este mismo modo seguro.
 
