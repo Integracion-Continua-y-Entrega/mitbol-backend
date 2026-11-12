@@ -1,8 +1,9 @@
 # HU-010 — Administración de sincronizaciones
 
-Estado: constructor, esquema y servicio del resumen implementados y probados. Rama
+Estado: consulta administrativa de fechas integrada; ejecución y actividad pendientes. Rama
 `feature/hu-010-sync-management`, creada desde develop `7d9b1c6`, que integra HU-009.
-No se han activado nuevos endpoints o procesos ni se han modificado permisos.
+Se añadió el GET protegido y se prepararon grants mínimos. No hay nuevos
+procesos de sincronización o despliegues activados.
 
 ## Alcance y límite de aceptación
 
@@ -84,4 +85,46 @@ faltante produce un error y no se presenta un estado incompleto.
 Verificación conjunta: **33 pruebas aprobadas** en 3.70 segundos sobre
 PostgreSQL 18 temporal. Además de agregaciones y esquema, se comprobaron las
 cinco entidades vacías, lectura en una sola sentencia, conservación de datos
-y sesión y fallo ante una entidad ausente. No se modificaron ACL o rutas.
+y sesión y fallo ante una entidad ausente. En ese primer corte aún no se
+modificaban ACL o rutas.
+
+## Contrato de consulta
+
+`GET /api/admin/sync/status` se monta con el catálogo administrativo existente:
+sesión con `catalog:read` (Admin/Staff) o guard local legado. No está disponible
+en la API pública con la administración deshabilitada.
+
+La respuesta contiene `entities`, con cinco resúmenes, y
+`history_available=false`. Cada entidad incluye nombre, total_count,
+synced_count y last_synced_at (UTC o null). Incluso una base vacía devuelve
+cinco resúmenes. No expone is_running, éxito, última ejecución o historial.
+No contacta a Loyverse. Errores: 401/403 por acceso, 503 si faltan tablas o
+permisos requeridos, y errores internos sin detalles de infraestructura.
+
+## Perfil SQL y actualización operativa
+
+El rol web añade únicamente SELECT(synced_at) de ProductModifiers y
+ProductComplements; los demás datos del resumen ya eran legibles. No se concede
+SELECT de nombres/precios de esas dos tablas, DML comercial o nuevas secuencias.
+El lector público conserva su perfil. No se agrega ninguna migración o tabla.
+
+Los scripts de preparación y los verificadores local/Neon se actualizaron en
+conjunto. Para un rol existente, el incremento está en
+`docs/database/update_admin_writer_sync_status.sql`: requiere revisión 0006,
+operador/destino autorizados y la marca de sesión
+`mitbol.approved_admin_write=hu010-status-reviewed`. En cloud exige también la
+comprobación externa de TLS. No se ha ejecutado en mitbol_dev o Neon.
+
+Para una publicación futura, cerrar los gates administrativos y coordinar
+backend y ACL en una misma ventana: el verificador anterior rechaza los nuevos
+grants y el perfil nuevo exige esas dos columnas. Verificar después desde un
+LOGIN nuevo antes de reactivar. La planificación del despliegue se deja al
+encargado; este bloque solo ejecuta pruebas en PostgreSQL temporal.
+
+Verificación del GET y sus permisos: **201 pruebas aprobadas** en 112.59
+segundos sobre PostgreSQL 18 temporal, sin fallos u omisiones. Incluye consultas,
+esquemas, HTTP aislado, login real Admin/Staff, rechazo de columnas y DML no
+autorizados, aplicación del incremento, error 503 sin permisos y regresiones
+de los perfiles de escritor, descuentos y destacados. Se observaron los dos
+avisos de deprecación existentes de Starlette/TestClient. No se ejecutó la
+suite completa del repositorio en este bloque ni se contactó a Loyverse.

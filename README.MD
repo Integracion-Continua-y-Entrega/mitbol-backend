@@ -47,6 +47,11 @@ La migración `20261111_0006` y el SELECT mínimo del rol web se coordinan en el
 [procedimiento de publicación HU-009](docs/deployment/hu009_rollout.md).
 No incluye aplicar descuentos a pedidos ni activa despliegues automáticamente.
 
+La [HU-010 — Estado de sincronización](docs/features/hu010-sync-management.md)
+añade `GET /api/admin/sync/status` protegido con fechas y conteos por entidad.
+Es un avance parcial: esas observaciones no representan un historial de
+ejecuciones; la ejecución administrativa y su coordinación siguen en desarrollo.
+
 ## 🚀 Tecnologías Utilizadas
 
 - **Framework:** [FastAPI](https://fastapi.tiangolo.com/)

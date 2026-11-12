@@ -87,6 +87,8 @@ def create_app(config: Settings | None = None) -> FastAPI:
         from app.api.admin_discounts import create_discount_router
         from app.models import Discount
         application.include_router(create_discount_router(Discount.__table__, authenticated=config.auth_enabled))
+        from app.api.admin_sync_status import create_sync_status_router
+        application.include_router(create_sync_status_router(authenticated=config.auth_enabled))
 
     @application.get("/")
     def read_root():

@@ -15,6 +15,8 @@ DECLARE
     policy CONSTANT jsonb := '{
       "Products": {"SELECT":["product_id","loyverse_id","name","description","is_available","is_active","is_featured","is_new","synced_at"], "UPDATE":["description","is_available","is_featured","is_new"]},
       "ProductVariants": {"SELECT":["product_variant_id","loyverse_id","name","price","is_available","is_commercially_available","synced_at","product_id"], "UPDATE":["is_available"]},
+      "ProductModifiers": {"SELECT":["synced_at"]},
+      "ProductComplements": {"SELECT":["synced_at"]},
       "ProductImages": {"SELECT":["product_image_id","product_variant_id","image_url","display_order","created_at"], "INSERT":["product_variant_id","image_url","display_order"], "UPDATE":["display_order"], "DELETE":true},
       "Tags": {"SELECT":["tag_id","name","created_at"], "INSERT":["name"]},
       "ProductTags": {"SELECT":["product_variant_id","tag_id"], "INSERT":["product_variant_id","tag_id"], "DELETE":true},
@@ -57,7 +59,7 @@ BEGIN
         RAISE EXCEPTION 'WRITER_OWNER';
     END IF;
     IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind = 'r' AND policy ? c.relname::text) <> 14 THEN
+        WHERE n.nspname = 'public' AND c.relkind = 'r' AND policy ? c.relname::text) <> 16 THEN
         RAISE EXCEPTION 'WRITER_MISSING_RELATIONS';
     END IF;
     IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

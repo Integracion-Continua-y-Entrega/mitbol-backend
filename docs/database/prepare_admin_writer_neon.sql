@@ -50,6 +50,9 @@ GRANT SELECT (product_image_id, product_variant_id, image_url, display_order, cr
 GRANT SELECT (tag_id, name, created_at) ON public."Tags" TO mitbol_admin_writer;
 GRANT SELECT (product_variant_id, tag_id) ON public."ProductTags" TO mitbol_admin_writer;
 
+-- HU-010: agregaciones de fechas, sin nombres, precios o permisos de escritura.
+GRANT SELECT (synced_at) ON public."ProductModifiers", public."ProductComplements" TO mitbol_admin_writer;
+
 -- HU-009: lectura administrativa únicamente, sin secuencia ni DML comercial.
 DO $discounts$
 BEGIN

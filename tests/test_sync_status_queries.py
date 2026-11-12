@@ -4,13 +4,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import Column, Integer, MetaData, Table, event, select
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.models import Base, Discount, Product
 from app.services.sync_status_queries import SYNC_STATUS_TABLES, build_sync_summary
 from app.services.sync_status_service import get_sync_summaries
 from app.schemas.sync_status import EntitySyncSummary, SyncEntity
+from app.services.enrichment_errors import EnrichmentError
 
 
 @pytest.fixture
@@ -117,5 +117,6 @@ def test_missing_entity_fails_instead_of_reporting_partial_state(empty_postgresq
     connection = empty_postgresql_connection
     Base.metadata.create_all(connection, tables=[t for name, t in Base.metadata.tables.items() if name != "Discounts"])
     with Session(bind=connection, join_transaction_mode="create_savepoint") as db:
-        with pytest.raises(ProgrammingError), db.begin():
+        with pytest.raises(EnrichmentError) as error, db.begin():
             get_sync_summaries(db)
+        assert error.value.status_code == 503

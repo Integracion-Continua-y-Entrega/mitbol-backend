@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -32,3 +33,10 @@ class EntitySyncSummary(BaseModel):
                 raise ValueError("La fecha observada requiere zona horaria.")
             self.last_synced_at = self.last_synced_at.astimezone(timezone.utc)
         return self
+
+
+class SyncStatusResponse(BaseModel):
+    """Observaciones de registros almacenados; no es un historial de trabajos."""
+
+    entities: list[EntitySyncSummary]
+    history_available: Literal[False] = False

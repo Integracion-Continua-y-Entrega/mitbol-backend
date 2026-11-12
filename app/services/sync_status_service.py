@@ -2,10 +2,12 @@
 
 from sqlalchemy import MetaData, literal, union_all
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import ProgrammingError
 
 from app.models import Base
 from app.schemas.sync_status import EntitySyncSummary, SyncEntity
 from app.services.sync_status_queries import build_sync_summary
+from app.services.enrichment_errors import EnrichmentError
 
 
 def get_sync_summaries(db: Session) -> list[EntitySyncSummary]:
@@ -21,6 +23,11 @@ def get_sync_summaries(db: Session) -> list[EntitySyncSummary]:
         statements.append(build_sync_summary(table).add_columns(literal(entity.value).label("entity")))
     statement = union_all(*statements).order_by("entity")
 
-    rows = db.execute(statement).mappings().all()
+    try:
+        rows = db.execute(statement).mappings().all()
+    except ProgrammingError as error:
+        if getattr(error.orig, "pgcode", None) in {"42P01", "42501"}:
+            raise EnrichmentError(503, "La consulta de estado requiere esquema y permisos de lectura actualizados.") from None
+        raise
 
     return [EntitySyncSummary.model_validate(row) for row in rows]
