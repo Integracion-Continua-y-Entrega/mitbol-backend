@@ -21,7 +21,7 @@ BEGIN
         RAISE EXCEPTION 'NEON_WRITER_NOT_APPROVED: destino, operador, versión o marcas de ejecución no válidos.';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num = '20261106_0005') THEN
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006')) THEN
         RAISE EXCEPTION 'NEON_WRITER_SCHEMA';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mitbol_admin_writer') THEN

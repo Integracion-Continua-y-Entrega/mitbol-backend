@@ -1,7 +1,4 @@
-"""HU-009: modelo en preparación, todavía fuera del registro de la aplicación.
-
-No importar desde app.models.__init__ hasta preparar migración y verificaciones.
-"""
+"""HU-009: descuento comercial sincronizado; no calcula beneficios."""
 
 from datetime import datetime
 from decimal import Decimal

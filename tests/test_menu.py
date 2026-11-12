@@ -1,5 +1,6 @@
 """Contrato público con PostgreSQL aislado, sin escribir en mitbol_dev."""
 
+from app.models import catalog_metadata
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -474,7 +475,7 @@ def test_repeated_reads_preserve_data_and_stable_identifiers(menu_client, menu_d
             name: [dict(row) for row in menu_db.connection.execute(
                 select(table).order_by(*table.primary_key.columns),
             ).mappings()]
-            for name, table in Base.metadata.tables.items()
+            for name, table in catalog_metadata.tables.items()
         }
 
     before = snapshot()
@@ -920,7 +921,7 @@ def test_detail_repeated_reads_preserve_all_catalog_rows(menu_client, menu_db, d
             name: [dict(row) for row in menu_db.connection.execute(
                 select(table).order_by(*table.primary_key.columns),
             ).mappings()]
-            for name, table in Base.metadata.tables.items()
+            for name, table in catalog_metadata.tables.items()
         }
 
     before = snapshot()

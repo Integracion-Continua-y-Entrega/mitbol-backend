@@ -58,13 +58,13 @@ def test_same_counts_cannot_hide_catalog_changes(commercial_snapshot, change):
 @pytest.mark.parametrize("failure", ["none", "role", "readonly", "isolation", "rows", "revision", "target"])
 def test_initial_gate_checks_actual_session_and_locks_before_last_count(commercial_snapshot, monkeypatch, failure):
     plan = transform_catalog(commercial_snapshot)
-    approved = {"catalog_manifest": catalog_manifest(plan, commercial_snapshot.store), "user": "operator"}
+    approved = {"catalog_manifest": catalog_manifest(plan, commercial_snapshot.store), "user": "operator", "revision": "20261102_0003"}
     session = MagicMock()
     connection = session.connection.return_value
     target = MagicMock(spec=CloudDatabaseTarget)
     if failure == "target":
         target.validate_connection.side_effect = DatabaseTargetError("Destino incorrecto")
-    revision = MagicMock(side_effect=DatabaseTargetError("Revisión incorrecta") if failure == "revision" else None)
+    revision = MagicMock(return_value="20261102_0003", side_effect=DatabaseTargetError("Revisión incorrecta") if failure == "revision" else None)
     monkeypatch.setattr(sync_catalog, "validate_catalog_revision", revision)
     monkeypatch.setattr(sync_catalog, "_inspect_operator", lambda _: {"user": "other" if failure == "role" else "operator"})
     def execute(sql):
@@ -84,7 +84,7 @@ def test_initial_gate_checks_actual_session_and_locks_before_last_count(commerci
         assert sql[0] == "SHOW transaction_read_only"
         assert sql[1] == "SHOW transaction_isolation"
         assert sql[2].startswith('LOCK TABLE public."Products"') and sql[2].endswith("NOWAIT")
-        assert all(f'public."{name}"' in sql[2] for name in sync_catalog.Base.metadata.tables)
+        assert all(f'public."{name}"' in sql[2] for name in sync_catalog.catalog_metadata.tables)
         counts.assert_called_once_with(connection)
     else:
         with pytest.raises(DatabaseTargetError):

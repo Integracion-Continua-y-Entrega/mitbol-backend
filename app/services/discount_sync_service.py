@@ -59,7 +59,7 @@ class DiscountSyncService:
                 self.cloud_target.validate_connection(connection)
             if session.scalar(select(func.current_database())) != self.expected_database:
                 raise DiscountSyncError("La conexión real no coincide con la base autorizada.")
-            if MigrationContext.configure(connection).get_current_heads() != (DISCOUNT_SCHEMA_REVISION,):
+            if MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads() != (DISCOUNT_SCHEMA_REVISION,):
                 raise DiscountSyncError("La sincronización requiere la revisión 20261111_0006.")
             # Compartido con catálogo: impide importar fotografías comerciales
             # concurrentes en distinto orden. Se libera al cerrar la transacción.

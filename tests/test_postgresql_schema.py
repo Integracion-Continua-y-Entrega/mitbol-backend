@@ -4,6 +4,7 @@ Activar con MITBOL_POSTGRES_TESTS=1. En CI inspecciona la base aislada migrada.
 Las consultas de esta fixture son de lectura.
 """
 
+from app.models import catalog_metadata
 import os
 
 import pytest
@@ -50,18 +51,18 @@ def postgres_connection(request):
 def test_development_is_at_authorized_hu007_revision(postgres_connection):
     inspector = inspect(postgres_connection)
     assert set(inspector.get_table_names(schema="public")) == {
-        *Base.metadata.tables, "alembic_version",
+        *catalog_metadata.tables, "alembic_version",
     }
     assert MigrationContext.configure(postgres_connection).get_current_heads() == (
         "20261102_0003",
     )
 
 
-@pytest.mark.parametrize("table_name", sorted(Base.metadata.tables))
+@pytest.mark.parametrize("table_name", sorted(catalog_metadata.tables))
 def test_postgresql_table_matches_orm(postgres_connection, table_name):
     """Compara las columnas y restricciones reales con el modelo SQLAlchemy."""
     inspector = inspect(postgres_connection)
-    expected = Base.metadata.tables[table_name]
+    expected = catalog_metadata.tables[table_name]
     # HU-007 ya está instalada mediante la autorización expresa de esta etapa.
     expected_columns = list(expected.columns)
     actual = {

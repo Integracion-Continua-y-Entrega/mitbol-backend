@@ -1,8 +1,4 @@
-"""HU-009: revisión preparada, pendiente de activación coordinada del esquema.
-
-Fuera de migrations/versions deliberadamente: las pruebas copian esta revisión
-a una cadena temporal. No se descubre con alembic upgrade head habitual.
-"""
+"""HU-009: añade Discounts sin modificar datos o tablas anteriores."""
 
 from alembic import op
 import sqlalchemy as sa

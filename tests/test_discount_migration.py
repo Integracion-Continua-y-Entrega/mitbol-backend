@@ -1,4 +1,4 @@
-"""HU-009: cadena Alembic copiada y PostgreSQL temporal; sin activar head real."""
+"""HU-009: revisión integrada sobre cadena copiada y PostgreSQL temporal."""
 
 import importlib.util
 from io import StringIO
@@ -26,7 +26,7 @@ from sqlalchemy.orm import sessionmaker
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PENDING = ROOT / "migrations/pending/20261111_0006_hu009_discounts.py"
+PENDING = ROOT / "migrations/versions/20261111_0006_hu009_discounts.py"
 PREVIOUS = "20261106_0005"
 REVISION = "20261111_0006"
 
@@ -312,7 +312,6 @@ def test_upsert_preserves_identity_scope_and_handles_variable_and_deleted(
 def staged_config(tmp_path):
     directory = tmp_path / "migrations"
     shutil.copytree(ROOT / "migrations", directory, ignore=shutil.ignore_patterns("__pycache__"))
-    shutil.copy2(PENDING, directory / "versions" / PENDING.name)
     config = Config(str(ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(directory))
     config.attributes["database_url"] = "postgresql+psycopg2://offline.invalid/mitbol_unused"
@@ -370,7 +369,7 @@ def test_staged_upgrade_sql_only_creates_discounts_and_never_connects(staged_con
     assert 'value NUMERIC,' in sql
     assert all(operation not in sql for operation in ["DROP TABLE", "ALTER TABLE", "CREATE ROLE", "GRANT ", "TRUNCATE"])
     assert ScriptDirectory.from_config(staged_config).get_heads() == [REVISION]
-    assert ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini"))).get_heads() == [PREVIOUS]
+    assert ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini"))).get_heads() == [REVISION]
 
 
 def test_staged_migration_preserves_catalog_and_roundtrips_schema(empty_postgresql_connection, staged_config):

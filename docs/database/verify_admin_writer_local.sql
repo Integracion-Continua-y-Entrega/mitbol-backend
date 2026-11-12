@@ -69,6 +69,9 @@ BEGIN
         WHERE n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
     LOOP
         allowed := CASE WHEN rel.nspname = 'public' AND rel.relkind = 'r' THEN policy -> rel.relname::text ELSE NULL END;
+        IF rel.nspname = 'public' AND rel.relkind = 'r' AND rel.relname = 'Discounts' THEN
+            allowed := '{"SELECT":["discount_id","loyverse_id","name","discount_type","value","scope","is_active","synced_at","created_at"]}'::jsonb;
+        END IF;
         IF rel.relkind IN ('r','p','v','m','f') THEN
             FOR col IN SELECT attnum, attname FROM pg_attribute
                 WHERE attrelid = rel.oid AND attnum > 0 AND NOT attisdropped

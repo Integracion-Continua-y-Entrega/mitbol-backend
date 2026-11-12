@@ -1,4 +1,4 @@
-"""Router HU-009 en preparación; todavía no montado en la aplicación."""
+"""Consulta administrativa de HU-009 con la seguridad del catálogo existente."""
 
 from typing import Annotated
 

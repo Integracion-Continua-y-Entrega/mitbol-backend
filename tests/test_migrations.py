@@ -45,7 +45,7 @@ def test_only_approved_models_are_in_current_metadata():
     # Registrar el prototipo explícitamente evita depender del orden de pytest.
     importlib.import_module("app.models.item")
     importlib.import_module("app.models.category")
-    assert set(Base.metadata.tables) == CATALOG_TABLES | ENRICHMENT_TABLES
+    assert set(Base.metadata.tables) == CATALOG_TABLES | ENRICHMENT_TABLES | {"Discounts"}
     assert {"items", "categories"}.isdisjoint(Base.metadata.tables)
     assert {"items", "categories"} == set(LegacyBase.metadata.tables)
 
@@ -108,7 +108,7 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
     output = StringIO()
     command.upgrade(alembic_config(output), "head", sql=True)
     sql = output.getvalue()
-    assert sql.count("CREATE TABLE") == 18  # Catálogo, identidad, límites y versión.
+    assert sql.count("CREATE TABLE") == 19  # Catálogo, descuentos, identidad, límites y versión.
     for name in CATALOG_TABLES | ENRICHMENT_TABLES:
         assert f'CREATE TABLE "{name}"' in sql
     assert "CREATE TABLE alembic_version" in sql
@@ -123,7 +123,8 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
 
 def test_hu007_extends_hu005_without_changing_its_ancestry():
     scripts = ScriptDirectory.from_config(alembic_config())
-    assert scripts.get_heads() == ["20261106_0005"]
+    assert scripts.get_heads() == ["20261111_0006"]
+    assert scripts.get_revision("20261111_0006").down_revision == "20261106_0005"
     assert scripts.get_revision("20261106_0005").down_revision == AUTH_REVISION
     assert scripts.get_revision(AUTH_REVISION).down_revision == AVAILABILITY_REVISION
     assert scripts.get_revision(AVAILABILITY_REVISION).down_revision == ENRICHMENT_REVISION

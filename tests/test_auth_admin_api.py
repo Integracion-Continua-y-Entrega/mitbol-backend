@@ -1,5 +1,6 @@
 """HU-005/HU-007 reales con sesiones, PostgreSQL y archivos temporales."""
 
+from app.models import catalog_metadata
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import timedelta
@@ -55,7 +56,7 @@ def backend(auth_backend, tmp_path):
     b.storage.root = (tmp_path / "images").resolve()
     yield b
     with b.sessions.begin() as db:
-        for table in reversed(Base.metadata.sorted_tables):
+        for table in reversed(catalog_metadata.sorted_tables):
             db.execute(delete(table))
 
 
@@ -141,7 +142,7 @@ def variant_path(b, suffix="availability"):
 def catalog_state(b):
     with b.sessions() as db:
         return {name: [dict(row) for row in db.execute(select(table).order_by(*table.primary_key.columns)).mappings()]
-                for name, table in Base.metadata.tables.items()}
+                for name, table in catalog_metadata.tables.items()}
 
 
 def audit_rows(b):

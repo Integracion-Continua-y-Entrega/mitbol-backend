@@ -1,5 +1,6 @@
 """Migración incremental real con cinco variantes históricas en PostgreSQL aislado."""
 
+from app.models import catalog_metadata
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
@@ -89,7 +90,7 @@ def test_historical_values_keys_sequences_and_enrichment_survive_upgrade(empty_p
     assert connection.execute(select(ProductVariant.is_commercially_available)).scalars().all() == [False] * 5
     context = MigrationContext.configure(connection, opts={"compare_type": True, "compare_server_default": True})
     assert context.get_current_heads() == (REVISION,)
-    assert compare_metadata(context, Base.metadata) == []
+    assert compare_metadata(context, catalog_metadata) == []
     sessions = sessionmaker(bind=connection, join_transaction_mode="create_savepoint")
     with sessions() as db:
         menu = get_menu(db)

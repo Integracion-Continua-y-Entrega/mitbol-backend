@@ -1,5 +1,6 @@
 """Preflight/0003->0004->0005 con datos sinteticos y lector anterior a las migraciones."""
 
+from app.models import catalog_metadata
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -55,7 +56,7 @@ def migration_lab(request, tmp_path):
         with owner.begin() as db:
             command.upgrade(config_for(db), PREVIOUS)
             now = datetime(2026, 11, 6, tzinfo=timezone.utc)
-            tables = Base.metadata.tables
+            tables = catalog_metadata.tables
             product = db.scalar(tables["Products"].insert().values(loyverse_id="synthetic-product", name="Catalogo sintetico", description="Conservar", synced_at=now).returning(tables["Products"].c.product_id))
             variant = db.scalar(tables["ProductVariants"].insert().values(loyverse_id="synthetic-variant", product_id=product, name="Presentacion", price="129.50", synced_at=now, is_commercially_available=True).returning(tables["ProductVariants"].c.product_variant_id))
             modifier = db.scalar(tables["ProductModifiers"].insert().values(loyverse_id="synthetic-modifier", name="Extras", display_order=1).returning(tables["ProductModifiers"].c.product_modifier_id))
@@ -105,15 +106,15 @@ def migration_lab(request, tmp_path):
 def catalog_snapshot(engine):
     with engine.connect() as db:
         inspector = inspect(db)
-        rows = {name: db.execute(select(table).order_by(*table.primary_key.columns)).all() for name, table in Base.metadata.tables.items()}
-        schema = {name: (inspector.get_columns(name), inspector.get_pk_constraint(name), inspector.get_foreign_keys(name), inspector.get_unique_constraints(name), inspector.get_check_constraints(name), inspector.get_indexes(name)) for name in Base.metadata.tables}
+        rows = {name: db.execute(select(table).order_by(*table.primary_key.columns)).all() for name, table in catalog_metadata.tables.items()}
+        schema = {name: (inspector.get_columns(name), inspector.get_pk_constraint(name), inspector.get_foreign_keys(name), inspector.get_unique_constraints(name), inspector.get_check_constraints(name), inspector.get_indexes(name)) for name in catalog_metadata.tables}
         # Reflected SQL type objects compare by identity: canonicalize their strings.
         for columns, *_ in schema.values():
             for column in columns:
                 column["type"] = str(column["type"])
         sequences = {}
-        for name in Base.metadata.tables:
-            for column in Base.metadata.tables[name].primary_key:
+        for name in catalog_metadata.tables:
+            for column in catalog_metadata.tables[name].primary_key:
                 sequence = db.scalar(text("SELECT pg_get_serial_sequence(:table_name,:column_name)"), {"table_name": f'public."{name}"', "column_name": column.name})
                 if sequence:
                     sequences[sequence] = tuple(db.exec_driver_sql(f"SELECT last_value,is_called FROM {sequence}").one())
@@ -150,7 +151,7 @@ def test_preexisting_reader_catalog_and_models_survive_each_migration(migration_
         result = lab.preflight(revision)
         assert result.returncode == 0, result.stderr
         with lab.owner.connect() as db:
-            assert set(inspect(db).get_table_names()) == set(Base.metadata.tables) | tables | {"alembic_version"}
+            assert set(inspect(db).get_table_names()) == set(catalog_metadata.tables) | tables | {"alembic_version"}
             assert db.exec_driver_sql('SELECT code FROM "Roles" ORDER BY code').scalars().all() == ["admin", "staff"]
         for table in tables:
             denied(lab.reader, f'SELECT * FROM "{table}"')
@@ -158,7 +159,7 @@ def test_preexisting_reader_catalog_and_models_survive_each_migration(migration_
         execute_script(lab.reader, "\n".join(line for line in verify.replace("mitbol_cloud_dev", lab.owner.url.database).splitlines() if not line.startswith("\\")))
     with lab.owner.connect() as db:
         context = MigrationContext.configure(db, opts={"compare_type": True, "compare_server_default": True})
-        assert compare_metadata(context, [Base.metadata, AuthBase.metadata]) == []
+        assert compare_metadata(context, [catalog_metadata, AuthBase.metadata]) == []
     execute_script(lab.owner, (ROOT / "docs/database/prepare_admin_writer_local.sql").read_text(encoding="utf-8"))
     lab.created_roles.append("mitbol_admin_writer")
     if lab.owner.url.password:
@@ -190,7 +191,7 @@ def test_partial_migration_failure_rolls_back_ddl_and_version(migration_lab, mon
             command.upgrade(config_for(db), revision)
     with lab.owner.connect() as db:
         assert MigrationContext.configure(db).get_current_heads() == (previous,)
-        assert set(inspect(db).get_table_names()) == set(Base.metadata.tables) | (AUTH_TABLES if previous == CORE else set()) | {"alembic_version"}
+        assert set(inspect(db).get_table_names()) == set(catalog_metadata.tables) | (AUTH_TABLES if previous == CORE else set()) | {"alembic_version"}
     assert catalog_snapshot(lab.owner) == baseline
 
 

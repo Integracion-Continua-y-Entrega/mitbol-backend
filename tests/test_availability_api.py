@@ -1,5 +1,6 @@
 """HU-007: API, menú y concurrencia sobre PostgreSQL aislado."""
 
+from app.models import catalog_metadata
 from copy import deepcopy
 from itertools import product
 from secrets import token_urlsafe
@@ -53,7 +54,7 @@ def backend(sync_db, commercial_snapshot, tmp_path):
 def state(backend):
     return {name: [dict(row) for row in backend.db.connection.execute(
         select(table).order_by(*table.primary_key.columns),
-    ).mappings()] for name, table in Base.metadata.tables.items()}
+    ).mappings()] for name, table in catalog_metadata.tables.items()}
 
 
 def path(backend, resource):

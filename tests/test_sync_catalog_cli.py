@@ -40,7 +40,7 @@ def cli(monkeypatch, commercial_snapshot):
     approved = {"status": "ready_for_initial_sync", "writes": False, "database": NAME,
                 "host": HOST, "user": "operator", "revision": "20261102_0003",
                 "catalog_manifest": manifest, "catalog_sha256": manifest_sha256(manifest),
-                "table_counts": {name: 0 for name in sync_catalog.Base.metadata.tables}}
+                "table_counts": {name: 0 for name in sync_catalog.catalog_metadata.tables}}
     monkeypatch.setenv("MITBOL_SYNC_APPROVED_PREFLIGHT", json.dumps(approved))
     engine = MagicMock()
     factory = MagicMock(return_value=engine)

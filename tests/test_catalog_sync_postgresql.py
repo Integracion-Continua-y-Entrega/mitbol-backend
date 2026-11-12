@@ -1,5 +1,6 @@
 """Criterios de HU-008 en PostgreSQL aislado; todos los datos son simulados."""
 
+from app.models import catalog_metadata
 from copy import deepcopy
 from dataclasses import replace
 from datetime import timedelta
@@ -34,7 +35,7 @@ def rows(db, model):
 def all_rows(db):
     return {name: [dict(row) for row in db.connection.execute(
         select(table).order_by(*table.primary_key.columns),
-    ).mappings()] for name, table in Base.metadata.tables.items()}
+    ).mappings()] for name, table in catalog_metadata.tables.items()}
 
 
 def by_external_id(db, model):
@@ -89,7 +90,7 @@ def test_commercial_updates_preserve_local_fields_and_primary_keys(sync_db, comm
     assert by_external_id(sync_db, ProductVariant)["single"]["price"] == Decimal("90.1234567890123456789")
     assert by_external_id(sync_db, ProductComplement)["cheese"]["price"] == Decimal("16.25")
     for name in ("Products", "ProductVariants", "ProductModifiers", "ProductComplements"):
-        table = Base.metadata.tables[name]
+        table = catalog_metadata.tables[name]
         primary_key = next(iter(table.primary_key.columns)).name
         assert {(row["loyverse_id"], row[primary_key]) for row in before[name]} == {
             (row["loyverse_id"], row[primary_key]) for row in all_rows(sync_db)[name]

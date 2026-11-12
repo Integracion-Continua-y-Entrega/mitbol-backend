@@ -1,5 +1,6 @@
 """PostgreSQL aislado; en GitHub Actions nunca se consulta mitbol_dev ni .env."""
 
+from app.models import catalog_metadata
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -171,7 +172,7 @@ def sync_test_database(record_testsuite_property):
     finally:
         with engine.connect() as connection:
             remaining = {table_name: connection.scalar(select(func.count()).select_from(table))
-                         for table_name, table in Base.metadata.tables.items()}
+                         for table_name, table in catalog_metadata.tables.items()}
         engine.dispose()
         # La evidencia puede incluirse en JUnit sin sobrescribir informes históricos.
         record_testsuite_property("isolated_postgresql_database", name)
@@ -204,7 +205,7 @@ def _metadata_test_database(record_testsuite_property):
     engine = create_engine(url.set(database=name), hide_parameters=True)
     try:
         with engine.begin() as connection:
-            Base.metadata.create_all(connection)
+            catalog_metadata.create_all(connection)
             connection.exec_driver_sql("CREATE TABLE public.alembic_version (version_num varchar(32) PRIMARY KEY)")
             connection.exec_driver_sql("INSERT INTO public.alembic_version VALUES ('20261102_0003')")
         record_testsuite_property("isolated_postgresql_database", name)

@@ -1,4 +1,4 @@
-"""Contrato administrativo en preparación; todavía no conectado a una ruta."""
+"""Contrato administrativo de descuentos comerciales almacenados."""
 
 from datetime import datetime
 from decimal import Decimal
