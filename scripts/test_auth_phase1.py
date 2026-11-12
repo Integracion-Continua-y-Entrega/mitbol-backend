@@ -30,7 +30,7 @@ def main() -> int:
     root.mkdir()
     data = root / "data"
     child_env = {key: value for key, value in os.environ.items()
-                 if not key.startswith(("PG", "MITBOL_", "AUTH_")) and key not in {
+                 if not key.startswith(("PG", "MITBOL_", "AUTH_", "SYNC_", "LOYVERSE_")) and key not in {
                      "DATABASE_URL", "PUBLIC_MENU_URL", "ADMIN_API_KEY", "LOYVERSE_ACCESS_TOKEN",
                      "EXPECTED_DATABASE", "EXPECTED_DATABASE_HOST", "RENDER", "GITHUB_ACTIONS",
                  }}

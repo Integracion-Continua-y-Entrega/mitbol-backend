@@ -23,7 +23,7 @@ BEGIN
          AND current_user = 'neondb_owner' AND session_user = 'neondb_owner'
          AND coalesce(current_setting('mitbol.external_tls_verified', true), '') = 'verify-full-channel-binding')
         OR
-        (current_database() = 'mitbol_dev' AND current_user = session_user
+        (current_database() IN ('mitbol_dev', 'mitbol_auth_local') AND current_user = session_user
          AND coalesce(inet_server_addr() IN ('127.0.0.1'::inet, '::1'::inet), false)
          AND EXISTS (SELECT 1 FROM pg_class WHERE oid = 'public."Products"'::regclass
                      AND pg_has_role(current_user, relowner, 'USAGE')))

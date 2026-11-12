@@ -26,6 +26,10 @@ class DiscountSyncError(ValueError):
     """Error de coordinación seguro para mostrar sin URL, payload ni SQL."""
 
 
+class DiscountSyncBusyError(DiscountSyncError):
+    """El destino está ocupado; no se inició otra importación."""
+
+
 class DiscountSyncService:
     def __init__(
         self, session_factory: Callable[[], Session], *, expected_database: str,
@@ -36,10 +40,10 @@ class DiscountSyncService:
                 raise DiscountSyncError("El destino no coincide con la autorización cloud.")
         elif environment_mode() == "cloud":
             raise DiscountSyncError("La sincronización cloud requiere un destino autorizado.")
-        elif expected_database != "mitbol_dev" and not re.fullmatch(
-            r"mitbol_test_hu008_[0-9a-f]{12}", expected_database,
+        elif expected_database not in {"mitbol_dev", "mitbol_auth_local"} and not re.fullmatch(
+            r"mitbol_test_(?:hu008_[0-9a-f]{12}|auth_[0-9a-f]{32})", expected_database,
         ):
-            raise DiscountSyncError("Se requiere mitbol_dev o una base aislada de pruebas.")
+            raise DiscountSyncError("Se requiere mitbol_dev, mitbol_auth_local o una base aislada de pruebas.")
         try:
             self.store_id = str(UUID(store_id))
         except (ValueError, TypeError, AttributeError):
@@ -65,9 +69,9 @@ class DiscountSyncService:
             # Compartido con catálogo: impide importar fotografías comerciales
             # concurrentes en distinto orden. Se libera al cerrar la transacción.
             if not session.scalar(select(func.pg_try_advisory_xact_lock(CATALOG_SYNC_LOCK_KEY))):
-                raise DiscountSyncError("Ya hay una sincronización comercial en curso.")
+                raise DiscountSyncBusyError("Ya hay una sincronización comercial en curso.")
             if not mark_sync_execution(session):
-                raise DiscountSyncError("Ya hay una ejecución de sincronización activa.")
+                raise DiscountSyncBusyError("Ya hay una ejecución de sincronización activa.")
             yield session
 
     def _write(self, session: Session, snapshot: DiscountSnapshot) -> int:

@@ -49,10 +49,10 @@ class SyncService:
                 raise CatalogTargetError("La base de sincronización no coincide con la autorización cloud.")
         elif environment_mode() == "cloud":
             raise CatalogTargetError("La sincronización cloud requiere autorización explícita de host y base.")
-        elif expected_database != "mitbol_dev" and not re.fullmatch(
-            r"mitbol_test_hu008_[0-9a-f]{12}", expected_database,
+        elif expected_database not in {"mitbol_dev", "mitbol_auth_local"} and not re.fullmatch(
+            r"mitbol_test_(?:hu008_[0-9a-f]{12}|auth_[0-9a-f]{32})", expected_database,
         ):
-            raise CatalogTargetError("El destino no es mitbol_dev ni una base aislada de pruebas.")
+            raise CatalogTargetError("El destino no es mitbol_dev, mitbol_auth_local o una base aislada de pruebas.")
         if not store_id or not store_id.strip():
             raise CatalogValidationError("Se requiere una tienda explícita para sincronizar.")
         self.session_factory = session_factory

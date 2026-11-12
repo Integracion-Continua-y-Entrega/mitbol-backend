@@ -42,10 +42,23 @@ class Settings(BaseSettings):
     auth_hash_concurrency: int = Field(default=2, ge=1, le=4)
     auth_limit_backend: Literal["memory", "postgresql"] = "memory"
     auth_limit_secret: SecretStr | None = None
+    sync_worker_url: str | None = None
+    sync_worker_token: SecretStr | None = None
+    sync_worker_timeout_seconds: int = Field(default=120, ge=1, le=300)
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", hide_input_in_errors=True,
     )
+
+    @model_validator(mode="after")
+    def validate_sync_worker(self):
+        if (self.sync_worker_url is None) != (self.sync_worker_token is None):
+            raise ValueError("SYNC_WORKER_URL y SYNC_WORKER_TOKEN deben configurarse juntos.")
+        if self.sync_worker_url is not None:
+            from app.services.sync_worker_client import validate_worker_token, validate_worker_url
+            self.sync_worker_url = validate_worker_url(self.sync_worker_url)
+            validate_worker_token(self.sync_worker_token.get_secret_value())
+        return self
 
     def __init__(self, **values):
         mode = values.get("app_env", os.getenv("APP_ENV", "local"))

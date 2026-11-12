@@ -40,6 +40,13 @@ def create_app(config: Settings | None = None) -> FastAPI:
     application.state.settings = config
     application.state.session_factory = session_factory_for(config)
     application.state.image_storage = LocalImageStorage(config.image_storage_root)
+    application.state.manual_sync_coordinator = None
+    if config.sync_worker_url is not None:
+        from app.services.sync_worker_client import SyncWorkerClient
+        application.state.manual_sync_coordinator = SyncWorkerClient(
+            config.sync_worker_url, config.sync_worker_token,
+            timeout_seconds=config.sync_worker_timeout_seconds,
+        ).coordinator()
     if not config.auth_enabled:
         application.add_middleware(
             CORSMiddleware, allow_origins=config.cors_origins, allow_credentials=False,
@@ -68,8 +75,9 @@ def create_app(config: Settings | None = None) -> FastAPI:
 
         @application.exception_handler(RequestValidationError)
         async def auth_validation(request, error):
-            if request.url.path.startswith("/api/auth/"):
-                return JSONResponse({"detail": "Solicitud de autenticación inválida."}, status_code=422,
+            if request.url.path.startswith(("/api/auth/", "/api/admin/sync/")):
+                detail = "Solicitud de autenticación inválida." if request.url.path.startswith("/api/auth/") else "Solicitud administrativa inválida."
+                return JSONResponse({"detail": detail}, status_code=422,
                                     headers={"Cache-Control": "no-store"})
             return await request_validation_exception_handler(request, error)
 
@@ -89,6 +97,9 @@ def create_app(config: Settings | None = None) -> FastAPI:
         application.include_router(create_discount_router(Discount.__table__, authenticated=config.auth_enabled))
         from app.api.admin_sync_status import create_sync_status_router
         application.include_router(create_sync_status_router(authenticated=config.auth_enabled))
+        if config.auth_enabled:
+            from app.api.admin_sync_requests import router as manual_sync_router
+            application.include_router(manual_sync_router)
 
     @application.get("/")
     def read_root():
