@@ -22,12 +22,133 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import sessionmaker
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PENDING = ROOT / "migrations/pending/20261111_0006_hu009_discounts.py"
 PREVIOUS = "20261106_0005"
 REVISION = "20261111_0006"
+
+
+@pytest.fixture
+def discount_service(empty_postgresql_connection, staged_config):
+    from app.services.discount_sync_service import DiscountSyncService
+
+    connection = empty_postgresql_connection
+    staged_config.attributes["connection"] = connection
+    command.upgrade(staged_config, REVISION)
+    sessions = sessionmaker(bind=connection, join_transaction_mode="create_savepoint")
+    service = DiscountSyncService(
+        sessions, expected_database=connection.engine.url.database,
+        store_id="a3a56a06-d40c-4c07-931c-41abcbaaba12",
+    )
+    table = Table("Discounts", MetaData(), schema="public", autoload_with=connection)
+    return SimpleNamespace(service=service, table=table, connection=connection)
+
+
+def discount_snapshot(*, name="Puntos", identifier="497f6eca-6276-4993-bfeb-53cbbbba6f08"):
+    from app.services.discount_probe import DiscountSnapshot
+    from app.services.discount_rules import DiscountType
+    from app.services.discount_transform import DiscountRecord
+
+    stamp = datetime(2026, 11, 12, tzinfo=timezone.utc)
+    return DiscountSnapshot((DiscountRecord(
+        loyverse_id=identifier, name=name, discount_type=DiscountType.DISCOUNT_BY_POINTS,
+        value=None, stores=(), restricted_access=False,
+        created_at=stamp, updated_at=stamp, deleted_at=None,
+    ),), True, stamp)
+
+
+def test_coordinator_persists_points_and_empty_does_not_delete(discount_service):
+    from app.services.discount_probe import DiscountSnapshot
+
+    b = discount_service
+    snapshot = discount_snapshot()
+    assert b.service.persist_snapshot(snapshot) == 1
+    before = b.connection.execute(select(b.table)).mappings().all()
+    assert before[0]["discount_type"] == "DISCOUNT_BY_POINTS"
+    assert before[0]["value"] is None
+    assert b.service.persist_snapshot(snapshot) == 1
+    assert b.service.persist_snapshot(DiscountSnapshot((), True, snapshot.fetched_at)) == 0
+    assert b.connection.execute(select(b.table)).mappings().all() == before
+
+
+def test_coordinator_sql_failure_rolls_back_and_sanitizes(discount_service):
+    from app.services.discount_probe import DiscountSnapshot
+    from app.services.discount_sync_service import DiscountSyncError
+
+    b = discount_service
+    original = discount_snapshot()
+    b.service.persist_snapshot(original)
+    before = b.connection.execute(select(b.table)).mappings().all()
+    changed = discount_snapshot(name="Cambio que se revierte")
+    invalid = discount_snapshot(name=None, identifier="synthetic-error")
+    batch = DiscountSnapshot(changed.records + invalid.records, True, original.fetched_at)
+    with pytest.raises(DiscountSyncError, match="Falló la persistencia") as error:
+        b.service.persist_snapshot(batch)
+    assert "INSERT" not in str(error.value)
+    assert b.connection.execute(select(b.table)).mappings().all() == before
+
+
+def test_coordinator_rejects_real_database_mismatch(discount_service):
+    from app.services.discount_sync_service import DiscountSyncError
+
+    b = discount_service
+    b.service.expected_database = "mitbol_test_hu008_000000000000"
+    with pytest.raises(DiscountSyncError, match="conexión real"):
+        b.service.persist_snapshot(discount_snapshot())
+    assert b.connection.execute(select(b.table)).all() == []
+
+
+def test_coordinator_rejects_busy_commercial_lock(discount_service):
+    from app.services.discount_sync_service import DiscountSyncError
+    from app.services.sync_service import CATALOG_SYNC_LOCK_KEY
+    from sqlalchemy import func
+
+    b = discount_service
+    with b.connection.engine.connect() as other:
+        other.scalar(select(func.pg_advisory_lock(CATALOG_SYNC_LOCK_KEY)))
+        try:
+            with pytest.raises(DiscountSyncError, match="en curso"):
+                b.service.persist_snapshot(discount_snapshot())
+        finally:
+            other.scalar(select(func.pg_advisory_unlock(CATALOG_SYNC_LOCK_KEY)))
+    assert b.connection.execute(select(b.table)).all() == []
+
+
+def test_coordinator_requires_discount_revision_before_provider(empty_postgresql_connection, staged_config):
+    import asyncio
+    from unittest.mock import AsyncMock
+    from app.services.discount_sync_service import DiscountSyncError, DiscountSyncService
+
+    connection = empty_postgresql_connection
+    staged_config.attributes["connection"] = connection
+    command.upgrade(staged_config, PREVIOUS)
+    service = DiscountSyncService(
+        sessionmaker(bind=connection, join_transaction_mode="create_savepoint"),
+        expected_database=connection.engine.url.database,
+        store_id="a3a56a06-d40c-4c07-931c-41abcbaaba12",
+    )
+    client = SimpleNamespace(get_discounts=AsyncMock())
+    with pytest.raises(DiscountSyncError, match="20261111_0006"):
+        asyncio.run(service.synchronize(client))
+    client.get_discounts.assert_not_awaited()
+
+
+def test_coordinator_invalid_provider_batch_preserves_data(discount_service):
+    import asyncio
+    from unittest.mock import AsyncMock
+    from app.services.discount_transform import DiscountValidationError
+
+    b = discount_service
+    b.service.persist_snapshot(discount_snapshot())
+    before = b.connection.execute(select(b.table)).mappings().all()
+    client = SimpleNamespace(get_discounts=AsyncMock(return_value=[{"id": "invalid"}]))
+    with pytest.raises(DiscountValidationError):
+        asyncio.run(b.service.synchronize(client))
+    client.get_discounts.assert_awaited_once_with(include_deleted=True)
+    assert b.connection.execute(select(b.table)).mappings().all() == before
 
 
 def test_read_service_returns_schemas_and_preserves_transaction(empty_postgresql_connection, staged_config):

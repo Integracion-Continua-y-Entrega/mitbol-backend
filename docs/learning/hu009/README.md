@@ -1,8 +1,9 @@
 # HU-009 — Sincronizar descuentos comerciales
 
-Estado: tipos, lectura HTTP, validación y preparación por tienda implementados
-y probados con datos sintéticos. Sin persistencia, endpoints
-o sincronización operativa conectados. El modelo de Discount está definido y
+Estado: lectura HTTP, validación, persistencia transaccional y consulta
+administrativa implementadas y probadas de forma aislada. El coordinador y
+router todavía no están conectados al arranque o a un comando operativo.
+El modelo de Discount está definido y
 su mapeo fue comprobado sin conexión; todavía no está registrado ni migrado.
 Su revisión preparada está en `migrations/pending` y se probó en una cadena
 temporal de Alembic, sin modificar el head habitual `20261106_0005`.
@@ -33,11 +34,10 @@ en lugar de entregar silenciosamente una colección incompleta. Se reutilizan
 reintentos, control de errores y decodificación Decimal existentes.
 
 Hay tipos de porcentaje/importe fijos y variables, además de descuentos por
-puntos. Reconocer un identificador no significa que esté autorizado para
-aplicarse o importarse como un descuento compatible del MVP. El tratamiento de
-puntos queda pendiente de una decisión explícita; no se convertirá a dinero.
-La capa en memoria los reconoce con valor fijo nulo, conservando su tipo;
-eso no declara elegibilidad para promociones o persistencia definitiva.
+puntos. Decisión aprobada el 12 de noviembre de 2026: conservar los descuentos
+por puntos con su tipo original y valor nulo, solo para consulta. No se
+convierten a dinero ni se aplican a promociones. `is_active` representa su
+estado comercial en la tienda, no elegibilidad para aplicar beneficios.
 
 Al diseñar la transformación se debe distinguir:
 
@@ -149,8 +149,8 @@ $env:ADMIN_ENABLED = 'false'
 
 Esta selección no abre PostgreSQL. Los transportes HTTP se simulan con RESPX.
 El modelo y la migración están preparados y probados de forma aislada; su
-integración global, la persistencia y la consulta administrativa siguen
-pendientes. Estas pruebas no acreditan HU-009 completa.
+integración global y la conexión operativa de los servicios siguen pendientes.
+Estas pruebas no acreditan HU-009 completa.
 
 Última verificación, 11 de noviembre de 2026: **197 pruebas aprobadas** en
 17.86 segundos, sin fallos ni omisiones. Incluye las suites de descuentos
@@ -189,8 +189,7 @@ lote vacío y reversión de un cambio previo cuando la segunda fila viola una
 restricción SQL, conservando los datos originales. También se verificó que un
 error al construir una sentencia evita ejecutar el lote. Estas pruebas usan
 SAVEPOINT dentro de una transacción de aislamiento del laboratorio, sin aplicar
-el esquema en una base de desarrollo. Faltan el servicio con validaciones del
-destino y la integración global de la revisión. El contrato administrativo en
+el esquema en una base de desarrollo. El contrato administrativo en
 `app/schemas/discounts.py` está validado con datos sintéticos, sin ruta activa:
 Decimal se serializa como cadena exacta, los valores nulos se conservan y
 `value`/`synced_at` son obligatorios aunque admitan null. Se admite lectura desde
@@ -209,3 +208,27 @@ Validación del servicio de lectura y del esquema: **34 pruebas aprobadas** en
 `discount_read_service.py` ejecuta el listado y devuelve esquemas DiscountRead,
 conservando Decimal/None, estado inactivo y la transacción del llamador.
 Se comprobaron tabla vacía y paginación. No se ha activado un endpoint.
+
+Verificación del 12 de noviembre de 2026: **51 pruebas aprobadas** en 9.90
+segundos para las suites de migraciones, esquemas y router administrativo de
+descuentos, sobre PostgreSQL 18 temporal. Hubo dos avisos de deprecación de
+Starlette/TestClient; no hubo fallos ni omisiones.
+
+`DiscountSyncService` recibe una fábrica de sesiones explícita, exige destino
+local o cloud autorizado y revisión exacta `20261111_0006`, y usa el bloqueo
+comercial compartido con el catálogo. La descarga y validación del lote ocurren
+antes de escribir, dentro de la transacción que mantiene ese bloqueo. No borra
+por ausencia ni confirma parcialmente. Se verificaron puntos, idempotencia,
+lote vacío, error SQL con rollback, destino incorrecto, revisión anterior,
+bloqueo ocupado y respuesta del proveedor inválida sin pérdida de datos.
+
+El router aislado propone `GET /api/admin/discounts?limit=50&offset=0`, con
+permiso `catalog:read` en modo autenticado y guard local en modo legado. Se
+probaron el modo autenticado con dependencias de identidad/sesión simuladas,
+401/403, 422, JSON exacto y errores seguros. No sustituye pruebas de login real
+o de permisos SQL con el esquema nuevo.
+
+Para la integración global todavía se deben coordinar registro del modelo,
+activación de la migración, fixtures de revisiones históricas, perfiles SQL
+limitados, verificadores y montaje del router. No se han modificado esas piezas
+ni se ha ejecutado una sincronización con Loyverse real.
