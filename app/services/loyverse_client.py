@@ -63,7 +63,7 @@ def _reject_json_constant(value: str):
 class LoyverseAPIClient:
     BASE_URL = "https://api.loyverse.com/v1.0"
     # Compatibilidad del prototipo: el diagnóstico no consulta /categories.
-    READ_ENDPOINTS = {"/stores", "/items", "/modifiers", "/variants", "/categories"}
+    READ_ENDPOINTS = {"/stores", "/items", "/modifiers", "/variants", "/categories", "/discounts"}
 
     def __init__(
         self,
@@ -158,7 +158,8 @@ class LoyverseAPIClient:
             hints = {
                 401: "Revisa la vigencia del token.",
                 402: "Revisa el acceso a la API y la suscripción de Loyverse.",
-                403: "Revisa los permisos ITEMS_READ y STORES_READ.",
+                403: ("Revisa el permiso de lectura de descuentos del token." if endpoint == "/discounts"
+                      else "Revisa los permisos ITEMS_READ y STORES_READ."),
             }
             raise LoyverseAPIError(
                 f"Loyverse respondió HTTP {status} al consultar {endpoint}. {hints.get(status, '')}".strip(),
@@ -223,3 +224,14 @@ class LoyverseAPIClient:
         # Las opciones de cada grupo vienen en modifier_options.
         params = {"show_deleted": "true"} if include_deleted else None
         return await self.get_all_paginated("/modifiers", "modifiers", params)
+
+    async def get_discounts(self, *, include_deleted: bool = False) -> list[dict]:
+        # /discounts no documenta limit/cursor. No reutilizar paginación de /items.
+        params = {"show_deleted": "true"} if include_deleted else None
+        data = await self.get("/discounts", params=params)
+        discounts = self._collection(data, "discounts")
+        cursor = data.get("cursor")
+        if cursor is not None and cursor != "":
+            raise LoyverseResponseError("Los descuentos devolvieron paginación no documentada.")
+        self.page_counts["/discounts"] = 1
+        return discounts

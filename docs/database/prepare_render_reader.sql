@@ -1,5 +1,5 @@
 -- PROPUESTA PARA REVISION. No ejecutar hasta autorizar la Etapa 3 correspondiente.
--- Ejecutar en la conexion directa TLS ya verificada, despues de migrar a 0003.
+-- Ejecutar en la conexion directa TLS ya verificada, despues de migrar a una revision compatible.
 -- No contiene contrasenas. Configurar la del lector despues, con \password
 -- mitbol_render_reader en psql (entrada oculta), nunca en este archivo.
 
@@ -18,8 +18,9 @@ BEGIN
         RAISE EXCEPTION 'Primero deben aplicarse las migraciones autorizadas.';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1
-       OR NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num = '20261102_0003') THEN
-        RAISE EXCEPTION 'La base debe estar exactamente en 20261102_0003.';
+       OR NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN
+            ('20261102_0003', '20261105_0004', '20261106_0005', '20261111_0006')) THEN
+        RAISE EXCEPTION 'La base requiere 20261102_0003 o una revision compatible hasta 20261111_0006.';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'mitbol_render_reader') THEN
         RAISE EXCEPTION 'El rol ya existe; revisar sus permisos antes de modificarlo.';

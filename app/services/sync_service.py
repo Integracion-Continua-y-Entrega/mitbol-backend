@@ -27,11 +27,14 @@ from app.services.loyverse_client import LoyverseAPIClient
 # Un catálogo por base: todas las instancias del servicio usan la misma clave.
 CATALOG_SYNC_LOCK_KEY = 0x4D4954424F4C
 CATALOG_SCHEMA_REVISION = "20261102_0003"
+CATALOG_COMPATIBLE_REVISIONS = frozenset({CATALOG_SCHEMA_REVISION, "20261105_0004", "20261106_0005", "20261111_0006"})
 
 
-def validate_catalog_revision(connection) -> None:
-    if MigrationContext.configure(connection).get_current_heads() != (CATALOG_SCHEMA_REVISION,):
-        raise CatalogTargetError("La sincronización requiere la revisión Alembic 20261102_0003.")
+def validate_catalog_revision(connection) -> str:
+    heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
+    if len(heads) != 1 or heads[0] not in CATALOG_COMPATIBLE_REVISIONS:
+        raise CatalogTargetError("La sincronización requiere 20261102_0003 o una revisión compatible hasta 20261111_0006.")
+    return heads[0]
 
 
 class SyncService:

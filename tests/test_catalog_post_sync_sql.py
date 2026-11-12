@@ -1,5 +1,6 @@
 """SQL posterior sobre fixture sintetica temporal; sin migraciones ni roles nuevos."""
 
+from app.models import catalog_metadata
 import base64
 import json
 import os
@@ -40,7 +41,7 @@ async def test_approved_initial_sync_uses_guard_in_actual_transaction(sync_db, c
     monkeypatch.setattr(sync_catalog, 'sessionmaker', lambda **kwargs: sync_db.sessions)
     target = MagicMock(spec=CloudDatabaseTarget)
     target.expected_database = sync_db.engine.url.database
-    approved = {'user': sync_db.engine.url.username, 'catalog_manifest': catalog_manifest(
+    approved = {'user': sync_db.engine.url.username, 'revision': '20261102_0003', 'catalog_manifest': catalog_manifest(
         transform_catalog(commercial_snapshot), commercial_snapshot.store,
     )}
     result = await sync_catalog.synchronize(sync_db.engine, target, 'test-store', SecretStr('fake-token'), approved)
@@ -123,7 +124,7 @@ def test_post_sql_checks_both_login_branches_and_rejects_price_drift(
             assert 'Peque\u00f1a de lim\u00f3n' in process.stdout
     finally:
         with engine.begin() as connection:
-            for table in reversed(Base.metadata.sorted_tables):
+            for table in reversed(catalog_metadata.sorted_tables):
                 connection.execute(delete(table))
 
 

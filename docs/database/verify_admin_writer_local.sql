@@ -13,7 +13,7 @@ DECLARE
     expected boolean;
     allowed jsonb;
     policy CONSTANT jsonb := '{
-      "Products": {"SELECT":["product_id","loyverse_id","name","description","is_available","is_active","is_featured","is_new","synced_at"], "UPDATE":["description","is_available"]},
+      "Products": {"SELECT":["product_id","loyverse_id","name","description","is_available","is_active","is_featured","is_new","synced_at"], "UPDATE":["description","is_available","is_featured","is_new"]},
       "ProductVariants": {"SELECT":["product_variant_id","loyverse_id","name","price","is_available","is_commercially_available","synced_at","product_id"], "UPDATE":["is_available"]},
       "ProductImages": {"SELECT":["product_image_id","product_variant_id","image_url","display_order","created_at"], "INSERT":["product_variant_id","image_url","display_order"], "UPDATE":["display_order"], "DELETE":true},
       "Tags": {"SELECT":["tag_id","name","created_at"], "INSERT":["name"]},
@@ -69,6 +69,9 @@ BEGIN
         WHERE n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
     LOOP
         allowed := CASE WHEN rel.nspname = 'public' AND rel.relkind = 'r' THEN policy -> rel.relname::text ELSE NULL END;
+        IF rel.nspname = 'public' AND rel.relkind = 'r' AND rel.relname = 'Discounts' THEN
+            allowed := '{"SELECT":["discount_id","loyverse_id","name","discount_type","value","scope","is_active","synced_at","created_at"]}'::jsonb;
+        END IF;
         IF rel.relkind IN ('r','p','v','m','f') THEN
             FOR col IN SELECT attnum, attname FROM pg_attribute
                 WHERE attrelid = rel.oid AND attnum > 0 AND NOT attisdropped

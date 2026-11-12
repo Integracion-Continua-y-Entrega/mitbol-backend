@@ -1,5 +1,6 @@
 """Scripts del lector en PostgreSQL temporal; sin migraciones ni sincronizaciones."""
 
+from app.models import catalog_metadata
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -104,7 +105,7 @@ def reader_database(reader_control, tmp_path):
     try:
         with engine.begin() as connection:
             # Fixture sintetica, NO Alembic, NO llamadas a SyncService/Loyverse.
-            Base.metadata.create_all(connection)
+            catalog_metadata.create_all(connection)
             connection.exec_driver_sql("CREATE TABLE public.alembic_version (version_num varchar(32) PRIMARY KEY)")
             connection.exec_driver_sql("INSERT INTO public.alembic_version VALUES ('20261102_0003')")
         yield SimpleNamespace(engine=engine, name=name, script=sql_file,

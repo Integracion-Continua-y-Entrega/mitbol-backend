@@ -1,5 +1,6 @@
 """Contrato público con PostgreSQL aislado, sin escribir en mitbol_dev."""
 
+from app.models import catalog_metadata
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -42,11 +43,12 @@ def menu_db(request):
 @pytest.fixture
 def add_product(menu_db):
     def add(*, prices=("45.00",), available=True, active=True, flags=None,
-            name="Producto de prueba", description=None):
+            name="Producto de prueba", description=None, featured=False, new=True):
         timestamp = datetime(2026, 11, 2, tzinfo=timezone.utc)
         product = Product(
             loyverse_id="hu001-product-" + uuid4().hex, name=name,
             description=description, is_active=active, is_available=available,
+            is_featured=featured, is_new=new,
             synced_at=timestamp,
         )
         product.variants = [
@@ -239,6 +241,8 @@ def test_menu_is_public_and_preserves_contract(menu_client, add_product):
             "description": "Descripción local MITBOL",
             "image_url": None,
             "is_active": True,
+            "is_featured": False,
+            "is_new": True,
             "is_available": True,
             "can_order": True,
             "price_min": "45.00",
@@ -273,6 +277,26 @@ def test_single_and_multiple_variant_prices(menu_client, add_product, prices, mi
     assert product["price_max"] == maximum
     assert product["has_price_range"] is has_range
     assert [variant["price"] for variant in product["variants"]] == list(prices)
+
+
+@pytest.mark.parametrize("featured,new", [(False, False), (False, True), (True, False), (True, True)])
+@pytest.mark.parametrize("available", [False, True])
+def test_public_menu_and_detail_preserve_highlight_flags(menu_client, add_product, featured, new, available):
+    product = add_product(name="Producto HU006", featured=featured, new=new, available=available)
+    hidden = add_product(name="Producto oculto HU006", featured=True, new=True, active=False)
+
+    listing = menu_client.get("/api/menu", params={"q": "HU006"})
+    detail = menu_client.get(f"/api/menu/{product.product_id}")
+
+    assert listing.status_code == detail.status_code == 200
+    listed, = listing.json()["products"]
+    assert listed["product_id"] == product.product_id
+    for value in [listed, detail.json()["product"]]:
+        assert value["is_featured"] is featured
+        assert value["is_new"] is new
+        assert value["is_available"] is available
+        assert value["can_order"] is available
+    assert menu_client.get(f"/api/menu/{hidden.product_id}").status_code == 404
 
 
 @pytest.mark.parametrize("q,expected_names", [
@@ -451,7 +475,7 @@ def test_repeated_reads_preserve_data_and_stable_identifiers(menu_client, menu_d
             name: [dict(row) for row in menu_db.connection.execute(
                 select(table).order_by(*table.primary_key.columns),
             ).mappings()]
-            for name, table in Base.metadata.tables.items()
+            for name, table in catalog_metadata.tables.items()
         }
 
     before = snapshot()
@@ -588,6 +612,11 @@ def test_openapi_and_swagger_describe_public_contract(api_app):
     assert {item["type"] for item in models["MenuProduct"]["properties"]["price_min"]["anyOf"]} == {"string", "null"}
     assert models["MenuResponse"]["properties"]["currency"]["const"] == "MXN"
     assert "is_active" not in models["MenuVariant"]["properties"]
+    for model in ["MenuProduct", "MenuProductDetail"]:
+        for field in ["is_featured", "is_new"]:
+            assert field in models[model]["required"]
+            assert models[model]["properties"][field]["type"] == "boolean"
+            assert models[model]["properties"][field]["description"]
     assert models["MenuResponse"]["examples"][1] == {"currency": "MXN", "products": []}
     for example in models["MenuResponse"]["examples"]:
         MenuResponse.model_validate_json(json.dumps(example))
@@ -892,7 +921,7 @@ def test_detail_repeated_reads_preserve_all_catalog_rows(menu_client, menu_db, d
             name: [dict(row) for row in menu_db.connection.execute(
                 select(table).order_by(*table.primary_key.columns),
             ).mappings()]
-            for name, table in Base.metadata.tables.items()
+            for name, table in catalog_metadata.tables.items()
         }
 
     before = snapshot()

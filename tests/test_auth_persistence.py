@@ -1,5 +1,6 @@
 """Identidad/migración sólo en PostgreSQL temporal identificado, nunca .env."""
 
+from app.models import catalog_metadata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from io import StringIO
@@ -50,10 +51,12 @@ def config_for(connection=None, output=None):
 
 def test_metadata_is_separate_and_migration_has_one_new_head():
     assert set(AuthBase.metadata.tables) == AUTH_TABLES | RATE_TABLES
-    assert len(Base.metadata.tables) == 8
-    assert not set(Base.metadata.tables) & AUTH_TABLES
+    assert len(catalog_metadata.tables) == 8
+    assert not set(catalog_metadata.tables) & AUTH_TABLES
     scripts = ScriptDirectory.from_config(config_for())
-    assert scripts.get_heads() == [REVISION]
+    assert len(Base.metadata.tables) == 9
+    assert scripts.get_heads() == ["20261111_0006"]
+    assert scripts.get_revision("20261111_0006").down_revision == REVISION
     assert scripts.get_revision(REVISION).down_revision == CORE_REVISION
     assert scripts.get_revision(CORE_REVISION).down_revision == PREVIOUS
 
@@ -69,7 +72,7 @@ def test_incremental_sql_is_reviewable_and_never_connects(monkeypatch):
     for name in AUTH_TABLES:
         assert f'CREATE TABLE "{name}"' in sql
     assert 'INSERT INTO "Roles"' in sql
-    for name in Base.metadata.tables:
+    for name in catalog_metadata.tables:
         assert f'ALTER TABLE "{name}"' not in sql and f'CREATE TABLE "{name}"' not in sql
     for denied in ('INSERT INTO "Persons"', 'INSERT INTO "PersonalAccounts"', 'CREATE ROLE', 'GRANT ', 'CREATE DATABASE'):
         assert denied not in sql
@@ -183,9 +186,9 @@ def violates(db, statement):
 def test_migration_and_orm_match_including_constraints_and_indexes(db):
     connection = db.connection()
     assert MigrationContext.configure(connection).get_current_heads() == (REVISION,)
-    assert set(inspect(connection).get_table_names()) == set(Base.metadata.tables) | AUTH_TABLES | RATE_TABLES | {"alembic_version"}
+    assert set(inspect(connection).get_table_names()) == set(catalog_metadata.tables) | AUTH_TABLES | RATE_TABLES | {"alembic_version"}
     context = MigrationContext.configure(connection, opts={"compare_type": True, "compare_server_default": True})
-    assert compare_metadata(context, [Base.metadata, AuthBase.metadata]) == []
+    assert compare_metadata(context, [catalog_metadata, AuthBase.metadata]) == []
     assert db.scalar(select(func.count()).select_from(Person)) == 0
     assert set(db.scalars(select(Role.code))) == {"admin", "staff"}
     inspector = inspect(connection)
@@ -361,10 +364,10 @@ def test_incremental_downgrade_upgrade_preserves_catalog(auth_database):
         marker = connection.execute(text(
             'INSERT INTO "Products" (loyverse_id, name, synced_at) VALUES (:id, :name, now()) RETURNING product_id'
         ), {"id": "auth-migration-fixture", "name": "Catálogo sintético"}).scalar_one()
-        before = connection.execute(select(Base.metadata.tables["Products"])).all()
+        before = connection.execute(select(catalog_metadata.tables["Products"])).all()
         command.downgrade(config_for(connection), PREVIOUS)
-        assert set(inspect(connection).get_table_names()) == set(Base.metadata.tables) | {"alembic_version"}
-        assert connection.execute(select(Base.metadata.tables["Products"])).all() == before
+        assert set(inspect(connection).get_table_names()) == set(catalog_metadata.tables) | {"alembic_version"}
+        assert connection.execute(select(catalog_metadata.tables["Products"])).all() == before
         command.upgrade(config_for(connection), REVISION)
-        assert connection.execute(select(Base.metadata.tables["Products"])).all() == before
-        connection.execute(delete(Base.metadata.tables["Products"]).where(Base.metadata.tables["Products"].c.product_id == marker))
+        assert connection.execute(select(catalog_metadata.tables["Products"])).all() == before
+        connection.execute(delete(catalog_metadata.tables["Products"]).where(catalog_metadata.tables["Products"].c.product_id == marker))

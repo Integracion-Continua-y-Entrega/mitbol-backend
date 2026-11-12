@@ -15,8 +15,8 @@ BEGIN
         RAISE EXCEPTION 'WRITER_LOCAL_TARGET: sólo PostgreSQL 18 temporal del ejecutor.';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num = '20261106_0005') THEN
-        RAISE EXCEPTION 'WRITER_SCHEMA: se requiere exactamente 20261106_0005.';
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006')) THEN
+        RAISE EXCEPTION 'WRITER_SCHEMA: se requiere 20261106_0005 o 20261111_0006.';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mitbol_admin_writer') THEN
         RAISE EXCEPTION 'WRITER_EXISTS: revisar, no sobrescribir permisos existentes.';
@@ -49,7 +49,18 @@ GRANT SELECT (product_image_id, product_variant_id, image_url, display_order, cr
 GRANT SELECT (tag_id, name, created_at) ON public."Tags" TO mitbol_admin_writer;
 GRANT SELECT (product_variant_id, tag_id) ON public."ProductTags" TO mitbol_admin_writer;
 
-GRANT UPDATE (description, is_available) ON public."Products" TO mitbol_admin_writer;
+-- HU-009: lectura administrativa únicamente, sin secuencia ni DML comercial.
+DO $discounts$
+BEGIN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num = '20261111_0006') THEN
+        GRANT SELECT (discount_id, loyverse_id, name, discount_type, value, scope,
+                      is_active, synced_at, created_at) ON public."Discounts" TO mitbol_admin_writer;
+    END IF;
+END
+$discounts$;
+
+-- HU-006: únicamente indicadores locales adicionales; sin UPDATE de tabla completa.
+GRANT UPDATE (description, is_available, is_featured, is_new) ON public."Products" TO mitbol_admin_writer;
 GRANT UPDATE (is_available) ON public."ProductVariants" TO mitbol_admin_writer;
 GRANT INSERT (name) ON public."Tags" TO mitbol_admin_writer;
 GRANT INSERT (product_variant_id, tag_id), DELETE ON public."ProductTags" TO mitbol_admin_writer;

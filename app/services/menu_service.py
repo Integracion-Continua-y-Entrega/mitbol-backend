@@ -90,6 +90,8 @@ def _build_product(product: Product, images: dict, tags: dict) -> MenuProduct:
         price_max=price_max,
         has_price_range=price_min != price_max,
         variants=variants,
+        is_featured=product.is_featured,
+        is_new=product.is_new,
     )
 
 

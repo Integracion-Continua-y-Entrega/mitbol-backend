@@ -1,10 +1,12 @@
 """HU-005/HU-007 reales con sesiones, PostgreSQL y archivos temporales."""
 
+from app.models import catalog_metadata
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import timedelta
 from io import BytesIO
 from threading import Event
+from turtle import back
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -54,12 +56,83 @@ def backend(auth_backend, tmp_path):
     b.storage.root = (tmp_path / "images").resolve()
     yield b
     with b.sessions.begin() as db:
-        for table in reversed(Base.metadata.sorted_tables):
+        for table in reversed(catalog_metadata.sorted_tables):
             db.execute(delete(table))
 
 
 def product_path(b, field="description"):
     return f"/api/admin/products/{b.product_id}/{field}"
+
+
+def test_admin_updates_highlights_and_public_menu_reflects_it(backend):
+    """La edición autenticada persiste, se publica y genera una auditoría."""
+
+    b = backend
+    path = product_path(b, "highlights")
+    login_response = login(b)
+    assert login_response.status_code == 200
+    response = b.client.put(path,
+                            headers=csrf_headers(login_response),
+                            json={"is_featured": True, "is_new": False})
+    assert response.status_code == 200 and response.json() == {"product_id": b.product_id, "is_featured": True, "is_new": False}
+
+    response = b.client.get(path)
+
+    assert response.status_code == 200
+    public = response.json()
+
+    assert public["product_id"] == b.product_id
+    assert public["is_featured"] is True
+    assert public["is_new"] is False
+
+    response = b.client.get(f"/api/menu/{b.product_id}")
+    assert response.status_code == 200
+    public = response.json()["product"]
+
+    assert public["product_id"] == b.product_id
+    assert public["is_featured"] is True
+    assert public["is_new"] is False
+
+    response = b.client.get("/api/menu")
+    assert response.status_code == 200
+
+    products = response.json()["products"]
+    target_id = b.product_id
+
+    product_from_list = next((p for p in products if p["product_id"] == target_id), None)
+    assert product_from_list is not None, f"El producto con ID: {target_id} no se encontró en el menú"
+    assert product_from_list["is_featured"] is True
+    assert product_from_list["is_new"] is False
+
+    row, = audit_rows(b)
+    assert (row.action, row.actor_account_id, row.resource_type, row.resource_id, row.outcome) == (
+        "catalog.product.highlights",
+        b.ids["admin"][0],
+        "product",
+        str(b.product_id),
+        "success"
+    )
+
+
+    assert row.request_id and row.failure_code is None
+
+
+def test_staff_cannot_update_highlights_and_preserves_catalog(backend):
+    """Staff puede leer, pero un PUT válido no modifica catálogo ni genera éxito."""
+    b = backend
+    before = catalog_state(b)
+    login_response = login(b, "staff")
+    assert login_response.status_code == 200
+    path = product_path(b, "highlights")
+    get_response = b.client.get(path)
+    assert get_response.status_code == 200
+
+    put_response = b.client.put(path,
+                                headers=csrf_headers(login_response), json={"is_featured": True, "is_new": False})
+
+    assert put_response.status_code == 403
+    assert catalog_state(b) == before
+    assert audit_rows(b) == []
 
 
 def variant_path(b, suffix="availability"):
@@ -69,7 +142,7 @@ def variant_path(b, suffix="availability"):
 def catalog_state(b):
     with b.sessions() as db:
         return {name: [dict(row) for row in db.execute(select(table).order_by(*table.primary_key.columns)).mappings()]
-                for name, table in Base.metadata.tables.items()}
+                for name, table in catalog_metadata.tables.items()}
 
 
 def audit_rows(b):
@@ -134,6 +207,7 @@ def test_both_roles_change_only_local_availability_and_public_menu_reflects_it(b
 
 
 OPERATIONS = [
+    ("GET", "/products/{p}/highlights", False), ("PUT", "/products/{p}/highlights", True),
     ("GET", "/products/{p}/availability", False), ("PATCH", "/products/{p}/availability", False),
     ("GET", "/variants/{v}/availability", False), ("PATCH", "/variants/{v}/availability", False),
     ("GET", "/products/{p}/description", False), ("PATCH", "/products/{p}/description", True),
@@ -260,7 +334,7 @@ def test_images_keep_existing_validation_references_media_and_audit(backend):
     assert [r.action for r in audit_rows(b)] == ["catalog.image.create", "catalog.image.order", "catalog.image.delete"]
 
 
-@pytest.mark.parametrize("operation", ["description", "product_availability", "variant_availability", "tag", "attach", "remove", "upload", "order", "delete"])
+@pytest.mark.parametrize("operation", ["highlights", "description", "product_availability", "variant_availability", "tag", "attach", "remove", "upload", "order", "delete"])
 def test_audit_failure_rolls_back_every_real_mutation_and_image_side_effects(backend, operation):
     b = backend
     headers = csrf_headers(login(b))
@@ -281,6 +355,7 @@ def test_audit_failure_rolls_back_every_real_mutation_and_image_side_effects(bac
             response = upload(b, headers)
         else:
             method, path, payload = {
+                "highlights": ("PUT", product_path(b, "highlights"), {"is_featured": True, "is_new": False}),
                 "description": ("PATCH", product_path(b), {"description": "Rollback"}),
                 "product_availability": ("PATCH", product_path(b, "availability"), {"is_available": False}),
                 "variant_availability": ("PATCH", variant_path(b), {"is_available": False}),

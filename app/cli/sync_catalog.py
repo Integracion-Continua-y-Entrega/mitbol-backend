@@ -15,13 +15,13 @@ from sqlalchemy.orm import sessionmaker
 from app.db.connection import (
     CloudDatabaseTarget, DatabaseTargetError, create_database_engine, environment_mode,
 )
-from app.models import Base
+from app.models import catalog_metadata
 from app.services.catalog_errors import CatalogSyncError
 from app.services.catalog_manifest import CatalogPlanChanged, catalog_manifest, manifest_sha256
 from app.services.catalog_probe import fetch_catalog
 from app.services.catalog_transform import transform_catalog
 from app.services.loyverse_client import LoyverseAPIClient, LoyverseAPIError
-from app.services.sync_service import CATALOG_SCHEMA_REVISION, SyncService, validate_catalog_revision
+from app.services.sync_service import CATALOG_SCHEMA_REVISION, CATALOG_COMPATIBLE_REVISIONS, SyncService, validate_catalog_revision
 
 
 WRITE_TABLES = {
@@ -33,7 +33,7 @@ WRITE_TABLES = {
 def _table_counts(connection) -> dict:
     return {name: connection.scalar(select(func.count()).select_from(table.to_metadata(
         MetaData(), schema="public",
-    ))) for name, table in Base.metadata.tables.items()}
+    ))) for name, table in catalog_metadata.tables.items()}
 
 
 def _inspect_operator(connection) -> dict:
@@ -53,7 +53,7 @@ def _inspect_operator(connection) -> dict:
         "AND pg_catalog.has_schema_privilege(current_user, 'public', 'USAGE')"
     )):
         raise DatabaseTargetError("Falta CONNECT o USAGE para el catálogo autorizado.")
-    for name in (*Base.metadata.tables, "alembic_version"):
+    for name in (*catalog_metadata.tables, "alembic_version"):
         relation = f'public."{name}"'
         valid = connection.scalar(text(
             "SELECT c.relkind = 'r' AND NOT c.relrowsecurity "
@@ -87,7 +87,7 @@ def preflight(engine, target: CloudDatabaseTarget, *, require_empty: bool = Fals
         connection.exec_driver_sql("SET TRANSACTION READ ONLY")
         target.validate_connection(connection)
         operator = _inspect_operator(connection)
-        validate_catalog_revision(connection)
+        revision = validate_catalog_revision(connection)
         counts = _table_counts(connection)
         if require_empty and any(counts.values()):
             raise DatabaseTargetError("La preparación inicial requiere las ocho tablas vacías; no se autorizan escrituras.")
@@ -96,7 +96,7 @@ def preflight(engine, target: CloudDatabaseTarget, *, require_empty: bool = Fals
                "sslmode": info.dsn_parameters.get("sslmode"),
                "channel_binding": info.dsn_parameters.get("channel_binding")}
     return {"status": "preflight_ok", "database": target.expected_database,
-            "host": target.expected_host, "revision": CATALOG_SCHEMA_REVISION,
+            "host": target.expected_host, "revision": revision,
             **operator, "tls": tls, "table_counts": counts,
             "writes": False, "loyverse_contacted": False}
 
@@ -132,10 +132,10 @@ def _approved_preflight(target: CloudDatabaseTarget, user: str, store_id: str) -
         valid = (
             report["status"] == "ready_for_initial_sync" and report["writes"] is False
             and report["database"] == target.expected_database and report["host"] == target.expected_host
-            and report["user"] == user and report["revision"] == CATALOG_SCHEMA_REVISION
+            and report["user"] == user and report["revision"] in CATALOG_COMPATIBLE_REVISIONS
             and report["catalog_manifest"]["store"]["id"] == store_id
             and report["catalog_sha256"] == manifest_sha256(report["catalog_manifest"])
-            and set(report["table_counts"]) == set(Base.metadata.tables)
+            and set(report["table_counts"]) == set(catalog_metadata.tables)
             and all(value == 0 for value in report["table_counts"].values())
         )
         if not valid:
@@ -152,7 +152,8 @@ def _initial_write_guard(target, approved):
             raise CatalogPlanChanged(approved["catalog_manifest"], actual)
         connection = session.connection()
         target.validate_connection(connection)
-        validate_catalog_revision(connection)
+        if validate_catalog_revision(connection) != approved["revision"]:
+            raise DatabaseTargetError("La revisión cambió desde el preflight aprobado.")
         operator = _inspect_operator(connection)
         if operator["user"] != approved["user"]:
             raise DatabaseTargetError("La identidad operativa cambió desde el preflight.")
@@ -161,7 +162,7 @@ def _initial_write_guard(target, approved):
         if connection.exec_driver_sql("SHOW transaction_isolation").scalar_one() != "read committed":
             raise DatabaseTargetError("La carga inicial requiere READ COMMITTED para verificar el vaciado tras los locks.")
         # Evita otro DML entre el último vaciado y nuestro commit; SELECT sigue permitido.
-        tables = ", ".join(f'public."{name}"' for name in Base.metadata.tables)
+        tables = ", ".join(f'public."{name}"' for name in catalog_metadata.tables)
         connection.exec_driver_sql(f"LOCK TABLE {tables} IN SHARE ROW EXCLUSIVE MODE NOWAIT")
         if any(_table_counts(connection).values()):
             raise DatabaseTargetError("El catálogo dejó de estar vacío; no se ejecutó DML.")

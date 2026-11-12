@@ -59,7 +59,7 @@ def build_demo():
         config = Config(str(ROOT / "alembic.ini"))
         with owner.begin() as db:
             config.attributes["connection"] = db
-            command.upgrade(config, "20261106_0005")
+            command.upgrade(config, "20261111_0006")
         # Importar sólo después de verificar destino; nunca Settings/.env local.
         from app.models import Product, ProductVariant
         from app.services.account_provisioning import AccountData, create_account
@@ -74,7 +74,7 @@ def build_demo():
                 is_available=True, is_commercially_available=True, synced_at=datetime.now(timezone.utc))]
             db.add(product)
         reader_sql = (ROOT / "docs/database/prepare_render_reader.sql").read_text(encoding="utf-8")
-        reader_sql = reader_sql.replace("mitbol_cloud_dev", name).replace("neondb_owner", "mitbol_ci").replace("20261102_0003", "20261106_0005")
+        reader_sql = reader_sql.replace("mitbol_cloud_dev", name).replace("neondb_owner", "mitbol_ci").replace("20261102_0003", "20261111_0006")
         for sql in (reader_sql, (ROOT / "docs/database/prepare_admin_writer_local.sql").read_text(encoding="utf-8")):
             with owner.connect().execution_options(isolation_level="AUTOCOMMIT") as db:
                 try:

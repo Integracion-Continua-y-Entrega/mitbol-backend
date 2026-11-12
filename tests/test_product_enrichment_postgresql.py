@@ -1,5 +1,6 @@
 """HU-005 sobre PostgreSQL aislado; nunca migra ni escribe en mitbol_dev."""
 
+from app.models import catalog_metadata
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -47,11 +48,11 @@ def test_migrated_postgresql_matches_all_models(sync_db):
     connection = sync_db.connection
     assert MigrationContext.configure(connection).get_current_heads() == ("20261102_0003",)
     inspector = inspect(connection)
-    assert set(inspector.get_table_names()) == {*Base.metadata.tables, "alembic_version"}
+    assert set(inspector.get_table_names()) == {*catalog_metadata.tables, "alembic_version"}
     context = MigrationContext.configure(connection, opts={
         "compare_type": True, "compare_server_default": True,
     })
-    assert compare_metadata(context, Base.metadata) == []
+    assert compare_metadata(context, catalog_metadata) == []
     for name in ("ProductImages", "Tags", "ProductTags"):
         assert inspector.get_check_constraints(name) == []
         assert all(not column["nullable"] for column in inspector.get_columns(name))
@@ -322,6 +323,6 @@ def test_incremental_upgrade_preserves_existing_commercial_schema_and_data(
     assert _commercial_state(database.engine) == before
     with database.engine.connect() as connection:
         assert MigrationContext.configure(connection).get_current_heads() == (ENRICHMENT_REVISION,)
-        assert set(inspect(connection).get_table_names()) == {*Base.metadata.tables, "alembic_version"}
+        assert set(inspect(connection).get_table_names()) == {*catalog_metadata.tables, "alembic_version"}
         for model in (ProductImage, Tag, ProductTag):
             assert connection.scalar(select(func.count()).select_from(model)) == 0
