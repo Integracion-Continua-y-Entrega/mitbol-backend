@@ -152,8 +152,8 @@ El modelo y la migración están preparados y probados de forma aislada; su
 integración global, la persistencia y la consulta administrativa siguen
 pendientes. Estas pruebas no acreditan HU-009 completa.
 
-Última verificación, 11 de noviembre de 2026: **191 pruebas aprobadas** en
-18.13 segundos, sin fallos ni omisiones. Incluye las suites de descuentos
+Última verificación, 11 de noviembre de 2026: **197 pruebas aprobadas** en
+17.86 segundos, sin fallos ni omisiones. Incluye las suites de descuentos
 y regresiones del cliente, diagnóstico y transformación del catálogo existente.
 Incluye la preparación de lotes, el mapeo a columnas y la pertenencia por tienda con
 lista vacía, IDs explícitos y baja del proveedor. No se ejecutó la suite
@@ -181,3 +181,31 @@ La construcción SQL está implementada en `discount_statements.py`; aún no est
 conectada a una sincronización real. La preparación de lotes por tienda en
 `discount_batch.py` devuelve una tupla de filas con una fecha común; conserva
 registros excluidos o borrados como inactivos y admite colecciones vacías.
+
+Validación posterior del escritor: **19 pruebas aprobadas** en 5.90 segundos
+para las suites de migraciones sobre PostgreSQL 18 temporal. El escritor interno
+requiere una transacción activa y no hace commit. Se verificaron repetición,
+lote vacío y reversión de un cambio previo cuando la segunda fila viola una
+restricción SQL, conservando los datos originales. También se verificó que un
+error al construir una sentencia evita ejecutar el lote. Estas pruebas usan
+SAVEPOINT dentro de una transacción de aislamiento del laboratorio, sin aplicar
+el esquema en una base de desarrollo. Faltan el servicio con validaciones del
+destino y la integración global de la revisión. El contrato administrativo en
+`app/schemas/discounts.py` está validado con datos sintéticos, sin ruta activa:
+Decimal se serializa como cadena exacta, los valores nulos se conservan y
+`value`/`synced_at` son obligatorios aunque admitan null. Se admite lectura desde
+atributos y se rechazan tipos de descuento desconocidos.
+
+Validación del listado: **27 pruebas aprobadas** en 6.45 segundos para las
+suites de migraciones sobre PostgreSQL 18 temporal. El constructor en
+`discount_queries.py` selecciona la tabla recibida, ordena por ID ascendente
+y pagina con limit (1–100) y offset no negativo. Se verificaron registros
+inactivos, tabla vacía, página posterior al último registro y rechazo de
+parámetros inválidos.
+
+Validación del servicio de lectura y del esquema: **34 pruebas aprobadas** en
+7.20 segundos para `test_discount_migration.py`, `test_migrations.py` y
+`test_discount_schemas.py`, sobre PostgreSQL 18 temporal. El servicio
+`discount_read_service.py` ejecuta el listado y devuelve esquemas DiscountRead,
+conservando Decimal/None, estado inactivo y la transacción del llamador.
+Se comprobaron tabla vacía y paginación. No se ha activado un endpoint.

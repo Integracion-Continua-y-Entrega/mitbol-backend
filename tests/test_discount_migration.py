@@ -21,12 +21,129 @@ from sqlalchemy import MetaData, Table, inspect, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PENDING = ROOT / "migrations/pending/20261111_0006_hu009_discounts.py"
 PREVIOUS = "20261106_0005"
 REVISION = "20261111_0006"
+
+
+def test_read_service_returns_schemas_and_preserves_transaction(empty_postgresql_connection, staged_config):
+    from app.schemas.discounts import DiscountRead
+    from app.services.discount_read_service import list_discounts
+
+    connection = empty_postgresql_connection
+    staged_config.attributes["connection"] = connection
+    command.upgrade(staged_config, REVISION)
+    table = Table("Discounts", MetaData(), autoload_with=connection)
+    with Session(bind=connection, join_transaction_mode="create_savepoint") as session:
+        with session.begin():
+            assert list_discounts(session, table) == []
+            session.execute(table.insert().values(
+                loyverse_id="read-service-fixed", name="Inactivo",
+                discount_type="FIXED_AMOUNT", value=Decimal("35.1234567890123456789"),
+                scope="unknown", is_active=False,
+            ))
+            session.execute(table.insert().values(
+                loyverse_id="read-service-variable", name="Variable",
+                discount_type="VARIABLE_AMOUNT", value=None, scope="unknown",
+            ))
+            transaction = session.get_transaction()
+            result = list_discounts(session, table, limit=1)
+            assert len(result) == 1 and isinstance(result[0], DiscountRead)
+            assert result[0].is_active is False
+            assert result[0].model_dump(mode="json")["value"] == "35.1234567890123456789"
+            assert list_discounts(session, table, limit=1, offset=1)[0].value is None
+            assert list_discounts(session, table, offset=2) == []
+            assert session.get_transaction() is transaction and transaction.is_active
+        assert len(connection.execute(select(table)).all()) == 2
+
+
+def test_admin_query_orders_pages_and_includes_inactive(empty_postgresql_connection, staged_config):
+    from app.schemas.discounts import DiscountRead
+    from app.services.discount_queries import build_discount_list
+
+    connection = empty_postgresql_connection
+    staged_config.attributes["connection"] = connection
+    command.upgrade(staged_config, REVISION)
+    table = Table("Discounts", MetaData(), autoload_with=connection)
+    assert connection.execute(build_discount_list(table)).mappings().all() == []
+    for identifier, active in [(30, True), (10, False), (20, True)]:
+        connection.execute(table.insert().values(
+            discount_id=identifier, loyverse_id=f"synthetic-{identifier}",
+            name="Consulta", discount_type="VARIABLE_AMOUNT", value=None,
+            scope="unknown", is_active=active,
+        ))
+    first = connection.execute(build_discount_list(table, limit=2)).mappings().all()
+    second = connection.execute(build_discount_list(table, limit=2, offset=2)).mappings().all()
+    assert [row["discount_id"] for row in first] == [10, 20]
+    assert [row["discount_id"] for row in second] == [30]
+    assert first[0]["is_active"] is False
+    assert DiscountRead.model_validate(first[0]).value is None
+    assert connection.execute(build_discount_list(table, offset=3)).all() == []
+
+
+@pytest.mark.parametrize("options", [
+    {"limit": 0}, {"limit": 101}, {"limit": True}, {"limit": "10"},
+    {"offset": -1}, {"offset": False}, {"offset": 1.5},
+])
+def test_admin_query_rejects_invalid_pagination(options):
+    from app.services.discount_queries import build_discount_list
+
+    with pytest.raises(ValueError):
+        build_discount_list(Table("Discounts", MetaData()), **options)
+
+
+def test_writer_requires_explicit_transaction():
+    from app.services.discount_writer import write_discount_batch
+
+    with Session() as session:
+        with pytest.raises(ValueError, match="transacción activa"):
+            write_discount_batch(session, Table("Discounts", MetaData()), ())
+
+
+def test_writer_batch_success_repeat_empty_and_rollback(empty_postgresql_connection, staged_config):
+    from app.services.discount_writer import write_discount_batch
+
+    connection = empty_postgresql_connection
+    staged_config.attributes["connection"] = connection
+    command.upgrade(staged_config, REVISION)
+    table = Table("Discounts", MetaData(), autoload_with=connection)
+    row = dict(
+        loyverse_id="497f6eca-6276-4993-bfeb-53cbbbba6f08", name="Conservar",
+        discount_type="FIXED_AMOUNT", value=Decimal("35.25"), scope="unknown",
+        is_active=True, synced_at=datetime(2026, 11, 11, 12, tzinfo=timezone.utc),
+    )
+    # SAVEPOINT permite probar la transacción del servicio sin confirmar el
+    # esquema temporal que la fixture revierte al terminar cada prueba.
+    with Session(bind=connection, join_transaction_mode="create_savepoint") as session:
+        with session.begin():
+            assert write_discount_batch(session, table, (row,)) == 1
+        before = connection.execute(select(table)).mappings().all()
+        with session.begin():
+            assert write_discount_batch(session, table, (row,)) == 1
+            assert write_discount_batch(session, table, ()) == 0
+        assert connection.execute(select(table)).mappings().all() == before
+
+        # La primera fila cambia datos y la segunda viola NOT NULL. El error
+        # debe escapar de la función para que session.begin() revierta ambas.
+        with pytest.raises(IntegrityError):
+            with session.begin():
+                write_discount_batch(session, table, (
+                    dict(row, name="No conservar este cambio", is_active=False),
+                    dict(row, loyverse_id="other-discount", name=None),
+                ))
+        assert connection.execute(select(table)).mappings().all() == before
+
+        # Un error al construir la última sentencia tampoco debe ejecutar la primera.
+        with pytest.raises(ValueError):
+            with session.begin():
+                write_discount_batch(session, table, (
+                    dict(row, name="Tampoco cambiar"), {"loyverse_id": "incompleto"},
+                ))
+        assert connection.execute(select(table)).mappings().all() == before
 
 
 def test_upsert_preserves_identity_scope_and_handles_variable_and_deleted(
