@@ -1,620 +1,485 @@
-# ⚙️ Backend - API Menú Digital mitbol
+# MITBOL — Backend
 
-Este repositorio contiene la capa de lógica de negocio del sistema de menú digital para el restaurante **mitbol**. Expone una API RESTful que alimenta la interfaz de los comensales y el panel de administración.
+**API para el menú digital y la administración del catálogo de MITBOL.**
 
-La integración local de sesiones individuales y permisos Admin/Staff con HU-005 y
-HU-007 está documentada en [Autenticación administrativa, fase 3](docs/security/admin_auth_phase3.md),
-incluidos contratos para React, auditoría y pruebas aisladas. `AUTH_ENABLED=false`
-por defecto; cloud mantiene autenticación y administración deshabilitadas. La
-clave compartida legada no sustituye una sesión en el modo individual.
+MITBOL busca que los clientes de un restaurante puedan consultar su menú desde el teléfono mediante un código QR, con información clara sobre productos, precios y opciones disponibles. Este repositorio contiene el **backend** de la plataforma: el servicio que obtiene información comercial de Loyverse, la almacena en PostgreSQL y la pone a disposición del frontend a través de una API REST.
 
-La [fase 4](docs/security/admin_auth_phase4.md) documenta y prueba en PostgreSQL
-temporal el escritor con permisos por columna y su separación del lector. Incluye
-la matriz SQL y el procedimiento futuro para Neon/Render; no habilita cloud ni
-crea roles en infraestructura real.
+El proyecto está desarrollado con **Python y FastAPI**. Además de las consultas públicas del menú, incorpora herramientas para administrar contenido del catálogo, controlar su disponibilidad y proteger las operaciones del personal del restaurante.
 
-La [fase 5](docs/security/admin_auth_phase5.md) añade límites persistentes en
-PostgreSQL, aprovisionamiento por operador, CORS separado y gates administrativos
-apagados por defecto. Incluye scripts y guías Neon/Render/React. El perfil
-actual de integración, cookies particionadas y activación cloud opt-in está en
-[Integración administrativa con React](docs/security/admin_frontend_integration.md).
-No se han activado las variables ni creado cuentas definitivas en Render/Neon.
+> **Alcance:** este repositorio contiene únicamente el backend. La interfaz web se desarrolla por separado. Las funciones descritas a continuación reflejan el código revisado en la rama `develop`; no constituyen una verificación del despliegue actual en Render o Neon.
 
-Para desarrollar React en `http://localhost:5173` contra el **Render académico
-actual**, seguir [Frontend local → API Render](docs/security/frontend_remote_dev.md).
-`AUTH_PROFILE=frontend_dev` reutiliza `mitbol-backend.onrender.com` y Neon
-`production / mitbol_cloud_dev`, sin crear servicios ni ramas. Los compañeros
-sólo ejecutan React; no necesitan backend/PostgreSQL ni un frontend publicado.
+## Contenido
 
-La [HU-004 — Código QR del menú](docs/learning/hu004/README.md) publica la URL
-estable del frontend mediante `GET /api/menu/config` y `PUBLIC_MENU_URL`
-opcional. No necesita PostgreSQL ni autenticación. Generación, descarga e
-impresión del QR corresponden al frontend; no se modifican Neon ni Render.
+- [¿Qué permite hacer MITBOL?](#qué-permite-hacer-mitbol)
+- [Tecnologías](#tecnologías)
+- [Cómo está organizado](#cómo-está-organizado)
+- [Primeros pasos](#primeros-pasos)
+- [Configuración](#configuración)
+- [API y documentación interactiva](#api-y-documentación-interactiva)
+- [Autenticación y permisos](#autenticación-y-permisos)
+- [Base de datos y migraciones](#base-de-datos-y-migraciones)
+- [Integración con Loyverse](#integración-con-loyverse)
+- [Pruebas automatizadas](#pruebas-automatizadas)
+- [Integración continua con GitHub Actions](#integración-continua-con-github-actions)
+- [Despliegue](#despliegue)
+- [Colaborar en el proyecto](#colaborar-en-el-proyecto)
+- [Documentación complementaria](#documentación-complementaria)
+- [Equipo y licencia](#equipo-y-licencia)
 
-La [HU-002 — Buscar y filtrar productos](docs/learning/hu002/README.md) añade
-`q` opcional y filtros repetibles `tag_id` a `GET /api/menu`, junto con
-`GET /api/menu/tags`. Conserva las reglas de disponibilidad y las variantes
-completas del producto. Categorías permanece pendiente de soporte relacional.
+## ¿Qué permite hacer MITBOL?
 
-La [HU-006 — Destacados y novedades](docs/learning/hu006/README.md) incorpora
-consulta/edición administrativa de `is_featured` e `is_new` y los publica en menú
-y detalle. Su [procedimiento de publicación](docs/deployment/hu006_rollout.md)
-coordina la actualización del escritor SQL existente con el backend en Render.
+### Consultar el menú digital
 
-La [HU-009 — Descuentos comerciales](docs/features/hu009-discount-sync.md) añade
-sincronización manual transaccional y `GET /api/admin/discounts` protegido.
-La migración `20261111_0006` y el SELECT mínimo del rol web se coordinan en el
-[procedimiento de publicación HU-009](docs/deployment/hu009_rollout.md).
-No incluye aplicar descuentos a pedidos ni activa despliegues automáticamente.
+La API proporciona un catálogo público con productos, precios, variantes, fotografías y disponibilidad. Cada producto puede consultarse individualmente para conocer sus opciones y complementos.
 
-## 🚀 Tecnologías Utilizadas
+Los visitantes pueden **buscar productos por nombre** y **filtrarlos mediante etiquetas**. También se identifican productos destacados y novedades para que el frontend pueda presentarlos de forma especial. Los productos comercialmente activos pueden seguir apareciendo cuando están agotados, pero se informa que no están disponibles para pedir; los productos inactivos en el catálogo comercial se excluyen de las consultas públicas.
 
-- **Framework:** [FastAPI](https://fastapi.tiangolo.com/)
-- **Servidor ASGI:** Uvicorn
-- **Base de Datos:** PostgreSQL
-- **ORM:** SQLAlchemy
-- **Integración:** API de Loyverse POS
+El backend también entrega una **URL configurable del menú** para facilitar su acceso mediante QR. La generación y presentación del código QR corresponden a la aplicación frontend.
 
-## 📁 Estructura del Proyecto
+### Administrar la información del catálogo
 
-El proyecto sigue una arquitectura por capas dentro del directorio `/app`:
+El personal autorizado dispone de operaciones para:
 
-- `api/`: Controladores y definición de endpoints.
-- `schemas/`: Validación de datos para peticiones y respuestas.
-- `models/`: Definición de tablas relacionales.
-- `services/`: Lógica de integración externa.
+- Editar descripciones de productos.
+- Agregar, ordenar y retirar fotografías asociadas a variantes.
+- Crear etiquetas y asociarlas a variantes.
+- Marcar productos o variantes como disponibles o no disponibles.
+- Marcar productos como destacados o novedades.
+- Consultar los descuentos comerciales que se hayan importado.
+
+Los cambios locales —como fotografías, descripciones, etiquetas, destacados y disponibilidad— se mantienen separados de los datos comerciales que llegan desde Loyverse, de modo que una sincronización no los sobrescriba indiscriminadamente.
+
+### Importar información de Loyverse
+
+MITBOL incorpora un cliente para consultar la API de Loyverse y servicios para procesar productos, variantes, modificadores y descuentos. La información se guarda en PostgreSQL para que **cada visita al menú no dependa de una consulta directa a Loyverse**.
+
+La importación cuenta con validaciones, control de duplicados y transacciones. Actualmente existen herramientas de ejecución controlada para la **carga inicial del catálogo en un destino vacío** y la **importación manual de descuentos**. Todavía no hay sincronización periódica ni una interfaz administrativa para iniciar y consultar ejecuciones.
+
+### Funciones aún no disponibles
+
+MITBOL continúa en desarrollo. En el backend revisado todavía no están integrados el carrito de compras, la creación y seguimiento de pedidos de clientes ni el canje de cupones. Los descuentos importados pueden consultarse administrativamente, pero **no se aplican todavía a pedidos**.
+
+La búsqueda no incluye filtrado por categorías. Asimismo, las imágenes se almacenan en el sistema de archivos local: para un despliegue permanente se necesita almacenamiento duradero y una estrategia de respaldo.
+
+## Tecnologías
+
+| Tecnología                         | Uso dentro del proyecto                                                                                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Python**                         | Lenguaje principal del backend. La integración continua utiliza Python 3.13.                           |
+| **FastAPI**                        | Define la API HTTP, las rutas, las dependencias y la documentación OpenAPI.                            |
+| **Uvicorn**                        | Servidor ASGI que ejecuta la aplicación.                                                               |
+| **PostgreSQL**                     | Almacena el catálogo, sus relaciones y los datos de autenticación. Las pruebas utilizan PostgreSQL 18. |
+| **SQLAlchemy 2**                   | Modelos ORM, consultas, sesiones y transacciones con la base de datos.                                 |
+| **psycopg2**                       | Controlador que permite la comunicación entre SQLAlchemy y PostgreSQL.                                 |
+| **Pydantic y pydantic-settings**   | Validación de los datos de entrada y salida, y gestión de la configuración.                            |
+| **Alembic**                        | Mantiene el historial de cambios estructurales de la base de datos.                                    |
+| **HTTPX y Tenacity**               | Consultas HTTP a Loyverse, con tiempos límite y reintentos controlados.                                |
+| **argon2-cffi**                    | Protección de contraseñas mediante hashes Argon2id.                                                    |
+| **Pillow y python-multipart**      | Recepción, validación y procesamiento de imágenes.                                                     |
+| **pytest, pytest-asyncio y RESPX** | Pruebas automatizadas y simulación de respuestas HTTP externas.                                        |
+| **GitHub Actions**                 | Ejecuta comprobaciones y pruebas cuando se proponen o integran cambios.                                |
+| **Render y Neon**                  | Servicios contemplados para alojar la API y PostgreSQL, respectivamente.                               |
+
+Las versiones concretas de las dependencias de Python están declaradas en [`requirements.txt`](requirements.txt).
+
+## Cómo está organizado
+
+MITBOL utiliza una **arquitectura cliente-servidor**. Su backend es una aplicación monolítica organizada por capas: cada módulo tiene una responsabilidad específica, sin necesidad de desplegar varios microservicios.
+
+Una consulta típica sigue este recorrido:
+
+```text
+React (frontend)
+      │  Solicitud HTTP
+      ▼
+Router de FastAPI
+      │  Valida datos y comprueba permisos, si corresponde
+      ▼
+Servicio
+      │  Aplica las reglas de negocio
+      ▼
+SQLAlchemy + psycopg2
+      │  Ejecuta consultas
+      ▼
+PostgreSQL
+```
+
+Los **routers** reciben las solicitudes, los **schemas** de Pydantic describen y validan los datos, los **servicios** aplican las reglas de negocio y los **modelos** de SQLAlchemy representan la información persistida. Las **dependencias** de FastAPI suministran recursos, como una sesión de base de datos, o comprueban permisos antes de ejecutar una operación.
+
+### Estructura principal del repositorio
+
+```text
+mitbol-backend/
+├── app/
+│   ├── main.py         # Creación de la aplicación y registro de rutas
+│   ├── api/            # Endpoints públicos, administrativos y de autenticación
+│   ├── core/           # Configuración y mecanismos de seguridad
+│   ├── schemas/        # Contratos de entrada y salida
+│   ├── models/         # Modelos de datos con SQLAlchemy
+│   ├── services/       # Reglas de negocio e integración con Loyverse
+│   ├── repositories/   # Acceso a datos de autenticación
+│   ├── db/             # Conexiones y sesiones de PostgreSQL
+│   └── cli/            # Herramientas operativas
+├── migrations/         # Versiones de migraciones Alembic
+├── tests/              # Pruebas automatizadas
+├── scripts/            # Ejecución de pruebas y utilidades
+├── docs/               # Documentación técnica y operativa
+└── .github/workflows/  # Integración continua
+```
+
+Algunas rutas administrativas solo se registran cuando se habilita la configuración correspondiente. Por eso, **la API pública puede ejecutarse sin activar la administración**.
+
+## Primeros pasos
+
+Esta guía utiliza **Windows y PowerShell** y prepara una instancia local del backend con una base de datos propia. No modifica Neon ni necesita credenciales de Loyverse para consultar un catálogo ya almacenado.
+
+### 1. Requisitos
+
+- Git.
+- Python **3.13**, con `pip` y `venv`.
+- PostgreSQL; se recomienda la versión **18** para coincidir con las pruebas del proyecto.
+- Acceso a Internet para instalar las dependencias.
+
+Para utilizar los comandos de PostgreSQL, asegúrate de que su carpeta `bin` esté disponible en el `PATH`.
+
+### 2. Descargar el repositorio e instalar las dependencias
+
+```powershell
+git clone https://github.com/Integracion-Continua-y-Entrega/mitbol-backend.git
+cd mitbol-backend
+git switch develop
+
+python --version
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip check
+```
+
+El ejemplo utiliza `develop`, la rama examinada para esta documentación. Si vas a trabajar en otra rama, acuerda con el equipo cuál corresponde. Los comandos llaman directamente al intérprete del entorno virtual, por lo que no necesitas activar el entorno desde PowerShell.
+
+### 3. Crear una base de datos local
+
+Con PostgreSQL iniciado, crea una base vacía para desarrollo. Sustituye `USUARIO_LOCAL` por tu usuario de PostgreSQL:
+
+```powershell
+createdb -h localhost -p 5432 -U USUARIO_LOCAL -W -T template0 -E UTF8 mitbol_dev
+```
+
+Ejecuta este comando **solo si la base aún no existe**. La contraseña se solicita de manera interactiva. No utilices una base compartida ni credenciales de Neon para estos pasos.
+
+### 4. Configurar las variables de entorno
+
+Crea tu archivo `.env` a partir de la plantilla, sin sobrescribir uno existente:
+
+```powershell
+if (-not (Test-Path -LiteralPath .env)) {
+    Copy-Item -LiteralPath .env.example -Destination .env
+}
+```
+
+Edita `.env` para apuntar a tu PostgreSQL local. Estos valores son únicamente ilustrativos:
+
+```dotenv
+APP_ENV=local
+DATABASE_URL=postgresql+psycopg2://USUARIO:CONTRASENA@localhost:5432/mitbol_dev
+CORS_ORIGINS=["http://localhost:5173"]
+PUBLIC_MENU_URL=http://localhost:5173/
+AUTH_ENABLED=false
+AUTH_CATALOG_ENABLED=false
+AUTH_IMAGES_ENABLED=false
+```
+
+Reemplaza los marcadores de usuario y contraseña por tus credenciales **solo en tu archivo privado**. Si la contraseña contiene caracteres reservados de una URL, deberán codificarse. Nunca subas `.env` al repositorio.
+
+### 5. Crear las tablas mediante Alembic
+
+Antes de ejecutar el siguiente comando, comprueba que `DATABASE_URL` apunte exclusivamente a tu base local vacía:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m alembic upgrade head
+```
+
+Este comando crea la estructura de tablas correspondiente a la revisión más reciente. **No importa productos ni crea usuarios automáticamente.** Si trabajas con una base que ya contiene información, revisa primero su historial de migraciones; no la elimines ni fuerces su versión.
+
+### 6. Iniciar FastAPI
+
+```powershell
+.\.venv\Scripts\python.exe -B -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Con el servidor encendido, abre:
+
+- **Documentación interactiva:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **Menú público:** [http://127.0.0.1:8000/api/menu](http://127.0.0.1:8000/api/menu)
+- **Configuración del menú:** [http://127.0.0.1:8000/api/menu/config](http://127.0.0.1:8000/api/menu/config)
+
+También puedes comprobar las respuestas desde PowerShell:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/
+Invoke-RestMethod http://127.0.0.1:8000/api/menu
+```
+
+Es normal que el menú esté **vacío** en una instalación nueva: las migraciones crean las tablas, no cargan el catálogo de Loyverse. La ruta `GET /` solo verifica que la aplicación responde; para comprobar el acceso a PostgreSQL, consulta `/api/menu`.
+
+Detén el servidor con `Ctrl+C`.
+
+### Opcional: entorno de demostración administrativa
+
+El repositorio incluye un laboratorio aislado con cuentas y datos sintéticos, útil para probar endpoints administrativos sin utilizar las cuentas ni la base de datos del restaurante.
+
+```powershell
+$env:MITBOL_TEST_PG_BIN = 'C:\Program Files\PostgreSQL\18\bin'
+.\.venv\Scripts\python.exe -B scripts/test_auth_phase1.py --serve-admin
+```
+
+Ajusta la ruta a tu instalación de PostgreSQL. El laboratorio utiliza el puerto `8000`, así que debes detener antes cualquier otro servidor que lo ocupe. Sigue las indicaciones que aparezcan en la terminal y **no expongas el laboratorio a Internet ni a la red local**.
+
+## Configuración
+
+La configuración se centraliza en [`app/core/config.py`](app/core/config.py) y su plantilla está en [`.env.example`](.env.example). En el entorno local se puede leer `.env`; en pruebas y cloud se utilizan variables del proceso, sin cargar ese archivo. Las variables definidas por el proceso tienen prioridad.
+
+| Variable                | Para qué sirve                                                                                        |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `APP_ENV`               | Selecciona el entorno: `local`, `test` o `cloud`.                                                     |
+| `DATABASE_URL`          | Conexión principal a PostgreSQL; es obligatoria.                                                      |
+| `CORS_ORIGINS`          | Orígenes web autorizados para consultar la API desde un navegador.                                    |
+| `PUBLIC_MENU_URL`       | Dirección del frontend que se expone para el acceso mediante QR.                                      |
+| `LOYVERSE_ACCESS_TOKEN` | Credencial privada para consultar la API de Loyverse.                                                 |
+| `LOYVERSE_STORE_ID`     | Identificador de la tienda de Loyverse.                                                               |
+| `IMAGE_STORAGE_ROOT`    | Carpeta local donde se almacenan fotografías.                                                         |
+| `AUTH_ENABLED`          | Habilita los endpoints de autenticación individual.                                                   |
+| `AUTH_CATALOG_ENABLED`  | Habilita la administración autenticada del catálogo.                                                  |
+| `AUTH_IMAGES_ENABLED`   | Habilita escrituras de imágenes cuando están permitidas.                                              |
+| `AUTH_DATABASE_URL`     | Conexión independiente para operaciones autenticadas que requieren escritura, especialmente en cloud. |
+
+Para sesiones, cookies seguras, límites de acceso y perfiles de permisos hay variables adicionales. Están descritas en la [guía de integración administrativa](docs/security/admin_frontend_integration.md).
+
+> **Seguridad:** el token de Loyverse y las cadenas de conexión pertenecen al backend. No deben incluirse en el código frontend, capturas públicas ni commits.
+
+## API y documentación interactiva
+
+FastAPI genera documentación basada en OpenAPI. Con el servidor local en funcionamiento puedes utilizar:
+
+- [Swagger UI](http://127.0.0.1:8000/docs): permite explorar y probar las operaciones disponibles.
+- [ReDoc](http://127.0.0.1:8000/redoc): presenta la documentación de la API.
+- [OpenAPI JSON](http://127.0.0.1:8000/openapi.json): describe formalmente los endpoints y sus contratos.
+
+### Endpoints públicos
+
+| Método | Ruta                                                            | Descripción                                             |
+| ------ | --------------------------------------------------------------- | ------------------------------------------------------- |
+| `GET`  | `/`                                                             | Comprueba que el proceso HTTP responde.                 |
+| `GET`  | `/api/menu`                                                     | Lista los productos publicados, con búsqueda y filtros. |
+| `GET`  | `/api/menu/{product_id}`                                        | Devuelve el detalle de un producto activo.              |
+| `GET`  | `/api/menu/tags`                                                | Obtiene las etiquetas del catálogo.                     |
+| `GET`  | `/api/menu/config`                                              | Devuelve la URL configurada del menú, si existe.        |
+| `GET`  | `/media/products/{product_id}/variants/{variant_id}/{filename}` | Entrega una fotografía pública de una variante válida.  |
+
+Por ejemplo:
+
+```http
+GET /api/menu?q=hamburguesa&tag_id=1&tag_id=2
+```
+
+`q` busca coincidencias en el nombre del producto. Si se indican varias etiquetas, se aceptan productos que coincidan con **cualquiera** de ellas; la búsqueda por nombre también debe cumplirse. Los precios se devuelven como cadenas decimales para evitar errores de precisión y la moneda indicada por el contrato es **MXN**.
+
+### Operaciones administrativas
+
+Cuando la administración está habilitada, las rutas bajo `/api/admin` permiten consultar o modificar información del catálogo conforme al rol y los permisos de cada usuario.
+
+| Recurso                | Operaciones disponibles                                                 |
+| ---------------------- | ----------------------------------------------------------------------- |
+| Descripciones          | Consultar y actualizar la descripción de un producto.                   |
+| Disponibilidad         | Consultar y modificar la disponibilidad local de productos y variantes. |
+| Fotografías            | Consultar, subir, ordenar y eliminar fotografías de variantes.          |
+| Etiquetas              | Consultar, crear, asociar y retirar etiquetas.                          |
+| Destacados y novedades | Consultar y actualizar los indicadores de productos.                    |
+| Descuentos             | Consultar descuentos importados con paginación.                         |
+
+Los métodos, cuerpos de solicitud y respuestas exactas se pueden consultar en Swagger cuando las rutas están activadas. **No existe actualmente una ruta administrativa registrada para iniciar sincronizaciones**.
+
+## Autenticación y permisos
+
+La administración utiliza un sistema de autenticación con **sesiones individuales**. Las contraseñas se verifican mediante Argon2id; la sesión se identifica con una cookie `HttpOnly` que puede caducar o revocarse. Las operaciones que modifican información están protegidas por permisos y controles CSRF.
+
+El proyecto distingue dos conceptos:
+
+- **Autenticación:** verificar quién intenta utilizar la aplicación.
+- **Autorización:** verificar qué operaciones tiene permitido realizar.
+
+En la configuración administrativa actual, **Admin** puede gestionar descripciones, imágenes, etiquetas, destacados y disponibilidad. **Staff** puede consultar información autorizada y modificar la disponibilidad, pero no dispone de todos los permisos de edición de Admin.
+
+Estos roles pertenecen a la aplicación. Son diferentes de los **usuarios técnicos de PostgreSQL**, que controlan qué conexiones pueden leer o escribir información en la base de datos.
+
+La autenticación está **deshabilitada por defecto** y necesita configuración adicional para ponerse en marcha. No se utilizan JWT: el sistema implementa sesiones opacas persistidas en PostgreSQL. Para integrar un frontend con estas sesiones, consulta la [guía de autenticación y permisos](docs/security/admin_frontend_integration.md).
+
+## Base de datos y migraciones
+
+El catálogo y la información de autenticación se almacenan en PostgreSQL. SQLAlchemy representa las tablas mediante modelos y gestiona las consultas; **Alembic versiona los cambios en la estructura de la base de datos**.
+
+Entre las entidades del catálogo se encuentran productos, variantes, modificadores, complementos, fotografías, etiquetas y descuentos. El esquema de identidad incorpora las estructuras necesarias para cuentas, roles, sesiones, auditoría y controles de acceso.
+
+El historial de migraciones vigente en el código revisado incluye:
+
+| Revisión        | Cambio principal                                     |
+| --------------- | ---------------------------------------------------- |
+| `20261029_0001` | Estructura inicial del catálogo comercial.           |
+| `20261102_0002` | Fotografías y etiquetas locales.                     |
+| `20261102_0003` | Separación de disponibilidad comercial y local.      |
+| `20261105_0004` | Identidad, roles, sesiones y auditoría.              |
+| `20261106_0005` | Controles persistentes de intentos de autenticación. |
+| `20261111_0006` | Descuentos comerciales.                              |
+
+Para **consultar el historial sin modificar una base de datos**:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m alembic history
+.\.venv\Scripts\python.exe -B -m alembic heads
+```
+
+La aplicación **no crea tablas automáticamente al iniciarse**: los cambios del esquema se administran mediante migraciones. Las operaciones sobre una base existente requieren revisar su versión y coordinarse con el responsable de datos.
+
+## Integración con Loyverse
+
+Loyverse suministra información comercial; MITBOL la transforma y mantiene una copia local para servir el menú con rapidez y controlar su presentación.
+
+```text
+Loyverse API
+     │  HTTPX: consulta de productos, variantes, modificadores y descuentos
+     ▼
+Validación y transformación
+     │  Comprobación de relaciones, datos y precios
+     ▼
+Sincronización con SQLAlchemy
+     │  UPSERT y transacciones
+     ▼
+PostgreSQL
+     │
+     ▼
+API pública de MITBOL → Frontend
+```
+
+La sincronización utiliza el identificador externo de Loyverse para **insertar productos nuevos o actualizar los existentes sin duplicarlos**. Los campos locales, como descripciones personalizadas, etiquetas, fotografías, disponibilidad y destacados, se conservan al actualizar los datos comerciales.
+
+Las operaciones de escritura se realizan mediante transacciones; si ocurre un error, pueden revertirse para no dejar una importación a medias. Para ciertos errores temporales de red, el cliente aplica reintentos acotados. Una respuesta incompleta del proveedor no se interpreta automáticamente como una orden para borrar productos.
+
+### Herramientas disponibles
+
+| Herramienta              | Propósito                                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------------------------- |
+| `app.cli.probe_loyverse` | Consultar e inspeccionar información de Loyverse sin importarla a PostgreSQL.                       |
+| `app.cli.sync_catalog`   | Ejecutar una carga inicial controlada en un catálogo vacío, con comprobaciones y aprobación previa. |
+| `app.cli.sync_discounts` | Revisar y ejecutar manualmente la importación de descuentos.                                        |
+
+Puedes ver las opciones de las herramientas de importación **sin ejecutarlas**:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m app.cli.sync_catalog --help
+.\.venv\Scripts\python.exe -B -m app.cli.sync_discounts --help
+```
+
+> **Atención:** las importaciones reales son tareas de operación, no pasos de instalación. Requieren validar tienda, credenciales, permisos, migraciones y destino. No deben ejecutarse contra Neon ni otros servicios compartidos sin autorización.
+
+## Pruebas automatizadas
+
+El proyecto utiliza **pytest** para comprobar endpoints, validaciones, permisos, sincronización, migraciones y comportamiento de la base de datos. Las respuestas externas de Loyverse se simulan para que las pruebas no dependan de su disponibilidad.
+
+Las pruebas de base de datos no usan únicamente objetos simulados: crean **instancias temporales de PostgreSQL 18**. Así se pueden comprobar restricciones, transacciones y operaciones SQL reales sin utilizar Neon ni la base del equipo.
+
+### Ejecutar toda la colección de pruebas
+
+En Windows, desde la raíz del repositorio y con las dependencias instaladas:
+
+```powershell
+$env:MITBOL_TEST_PG_BIN = 'C:\Program Files\PostgreSQL\18\bin'
+.\.venv\Scripts\python.exe -B scripts/test_auth_phase1.py --with-reader tests -q
+```
+
+Ajusta la ruta a la ubicación de PostgreSQL. El script de pruebas prepara un entorno aislado y evita reutilizar la configuración sensible del desarrollo local. **No es necesario proporcionar credenciales reales de Loyverse o Neon.**
+
+El comando anterior solicita toda la colección `tests`. Ejecutar el script sin ese argumento puede seleccionar un conjunto más reducido de pruebas, por lo que conviene distinguir ambos modos.
 
 ## Integración continua con GitHub Actions
 
-[`.github/workflows/backend-ci.yml`](.github/workflows/backend-ci.yml) ejecuta la
-suite completa al hacer push a `develop`, y al abrir, reabrir o
-actualizar un Pull Request hacia `develop` o `main`. CI verifica automáticamente
-que los cambios mantienen las pruebas aprobadas; esta etapa no despliega la API.
+Las pruebas también se ejecutan automáticamente mediante **GitHub Actions**, la herramienta de automatización integrada en GitHub.
 
-El job **Backend tests** usa Ubuntu 24.04, Python 3.13 (la misma serie que el
-entorno local verificado) y binarios PostgreSQL 18 instalados desde el repositorio
-oficial PGDG con firma verificada. Ejecuta el mismo laboratorio temporal que en
-local, sin servicio Docker ni NAT. El PostgreSQL preinstalado en la imagen del
-runner no determina la versión de las pruebas. Se instalan las dependencias
-fijadas en `requirements.txt`.
+El repositorio dispone del workflow [`Backend CI`](.github/workflows/backend-ci.yml), que se activa cuando:
 
-Después de descargar el código y configurar Python, se ejecuta:
+- Se publica un cambio en `develop`.
+- Se abre o actualiza un Pull Request dirigido a `develop` o `main`.
+
+En cada ejecución, GitHub prepara un entorno Ubuntu con Python 3.13 y PostgreSQL 18, instala las dependencias y lanza el ejecutor de pruebas. Al terminar, genera un reporte JUnit que facilita revisar los resultados.
+
+Si las comprobaciones fallan, el job aparece como **fallido**. Para impedir automáticamente que se fusione un Pull Request, GitHub también debe tener configurada una regla de protección de rama que exija aprobar ese check.
+
+El comando configurado en el workflow es:
+
+```text
+python -B scripts/test_auth_phase1.py --with-reader -ra --junitxml=test-results/pytest.xml
+```
+
+**Este workflow implementa integración continua (CI), no despliegue continuo.** No publica versiones en Render. El conjunto exacto de pruebas que ejecuta se determina por los argumentos y valores predeterminados del ejecutor; no debe confundirse automáticamente con la invocación local que incluye `tests -q`.
+
+## Despliegue
+
+El backend está preparado para ejecutarse como servicio web en **Render** y conectarse a una base de datos **PostgreSQL de Neon**. La configuración remota debe revisarse de forma independiente de la instalación local.
+
+Como referencia, el servicio utiliza estos comandos:
+
+**Instalación:**
 
 ```bash
 python -m pip install -r requirements.txt
-python -m pip check
-MITBOL_TEST_PG_BIN=/usr/lib/postgresql/18/bin python -B scripts/test_auth_phase1.py --with-reader -ra --junitxml=test-results/pytest.xml
 ```
 
-El ejecutor activa `MITBOL_SYNC_POSTGRES_TESTS=1` y `MITBOL_POSTGRES_TESTS=1`,
-crea dos clústeres con `initdb -U mitbol_ci` y escucha sólo en `127.0.0.1`, en
-puertos aleatorios. El segundo clúster separa los roles de las pruebas del lector.
-Sanea el entorno heredado, incluyendo `GITHUB_ACTIONS` en el proceso pytest para
-seleccionar las fixtures de clúster temporal, y establece `APP_ENV=test`.
-Las fixtures contrastan el directorio real con `SHOW data_directory`, la versión
-18 y el operador antes de crear bases. No leen `.env` ni consultan `mitbol_dev`.
-Las validaciones de la ruta alternativa de servicio CI siguen cubiertas por tests.
-
-Las fixtures crean bases `mitbol_test_hu008_<identificador>` con catálogo
-sintético equivalente a `20261102_0003` y otras bases vacías para comprobar las
-migraciones reales de HU-005/HU-007. Las verificaciones de esquema reutilizan el
-catálogo temporal en modo de sólo lectura. Se conservan las comprobaciones de
-migraciones, las transacciones y los savepoints; no hace falta ejecutar Alembic
-aparte ni crear bases manualmente.
-
-Las pruebas de autenticación crean además su propia base temporal
-`mitbol_test_auth_<identificador>`, aplican allí la revisión histórica `20261106_0005` (incluye identidad de 0004) y
-comprueban sesiones, permisos y auditoría con cuentas sintéticas. Nunca aplican
-esa migración en Neon o mitbol_dev. JUnit registra `auth_control_target` y
-`auth_isolated_target`: versión, base, current_user, session_user, dirección y
-puerto vistos por PostgreSQL, sin URLs ni secretos. El guard SQL del escritor
-conserva sus restricciones de PostgreSQL 18, nombre temporal, operador y TCP
-loopback. El ejecutor detiene ambos clústeres en `finally` y conserva los archivos
-temporales para diagnóstico.
-
-Las pruebas de HU-009 aplican además el head actual `20261111_0006` en bases
-temporales para comprobar descuentos, commits reales y permisos de lectura.
-
-Las pruebas de HU-008, HU-001, HU-003, HU-005 y HU-007 usan estas fixtures.
-Loyverse se simula con RESPX, `httpx.MockTransport` y snapshots existentes. El
-ejecutor excluye los tokens heredados, mantiene `ADMIN_ENABLED=false` y
-`AUTH_ENABLED=false` y no configura una clave administrativa global.
-Las pruebas administrativas crean aplicaciones aisladas
-con claves temporales. No se inicia un servidor HTTP ni una sincronización real.
-
-Las acciones oficiales están fijadas a commits de sus versiones publicadas.
-El token de GitHub sólo tiene `contents: read` y checkout no conserva sus
-credenciales. No se usan secretos del repositorio ni `pull_request_target`.
-El reporte JUnit se conserva siete días como artefacto **backend-pytest-results**,
-incluso si pytest falla; el código de salida de pytest determina el fallo del job.
-
-Para revisar una ejecución, abre **Actions → Backend CI → ejecución → Backend
-tests → Run complete test suite**. Allí aparecen las pruebas aprobadas, fallidas,
-errores y omisiones. El resumen de la ejecución permite descargar el artefacto.
-La instalación PGDG y la ejecución en Ubuntu deben confirmarse en la siguiente
-corrida real de Actions. La corrección, evidencia y límites de validación están
-en el [reporte del error de preparación del escritor](docs/security/admin_auth_ci_fix.md).
-
-Los cambios se revisan mediante Pull Request hacia `develop`; las ramas
-dependientes deben revisar primero su base. Actualizar el PR activa el workflow
-mediante `pull_request.synchronize`. Esperar el check **Backend tests** antes de
-fusionar. El pipeline no hace merge ni despliegue automáticamente.
-
-Después de comprobar la primera ejecución, un administrador puede ir a
-**Settings → Branches → Add branch protection rule**, indicar `develop`, activar
-**Require a pull request before merging** y **Require status checks to pass
-before merging**, y seleccionar **Backend tests** (workflow **Backend CI**).
-Puede activar también **Require branches to be up to date before merging** y
-restringir los bypass. La disponibilidad depende de la visibilidad y el plan del
-repositorio. Usa el nombre del check que aparezca en el PR.
-
-## Preparación de Render + Neon (Etapa 2)
-
-El código está preparado para una API pública de consulta. Esta etapa no crea
-servicios, no aplica migraciones a `mitbol_dev`/Neon y no sincroniza datos reales.
-La administración temporal de HU-005/HU-007 sigue siendo exclusivamente local.
-
-### Entornos y secretos
-
-`APP_ENV` admite `local` (predeterminado), `test` y `cloud`. `local` conserva la
-carga de `.env`; `test` y `cloud` sólo usan variables del proceso o argumentos
-explícitos de `Settings`. No completan valores desde `.env` ni archivos de
-secretos. `APP_ENV=cloud` debe declararse en el proceso; no se activa desde `.env`.
-En Render, `RENDER=true` también obliga a declarar `APP_ENV=cloud`.
-
-`LOYVERSE_ACCESS_TOKEN` es opcional para iniciar y consultar la API. El cliente
-Loyverse y el comando de sincronización lo exigen antes de contactar el proveedor.
-No se debe configurar ese token en el Web Service público.
-
-Variables del Web Service:
-
-| Variable | Valor o propósito |
-| --- | --- |
-| `APP_ENV` | `cloud` |
-| `ADMIN_ENABLED` | `false`; `true` provoca rechazo de arranque en cloud |
-| `DATABASE_URL` | Secreto: URL PostgreSQL pooled con usuario exclusivamente lector |
-| `EXPECTED_DATABASE` | Nombre exacto de la base compartida, por ejemplo `mitbol_cloud_dev` |
-| `EXPECTED_DATABASE_HOST` | Host exacto del endpoint pooled de esa base |
-| `CORS_ORIGINS` | JSON explícito, por ejemplo `["http://localhost:5173"]` |
-| `PYTHON_VERSION` | `3.13.13`, compatible con la serie 3.13 de CI |
-| `PORT` | Lo proporciona Render; no fijarlo en el código |
-
-Para añadir el frontend desplegado se agrega su origen HTTPS exacto a la lista
-JSON. No se admiten comodines, rutas, credenciales ni orígenes remotos HTTP.
-HTTP sólo se permite para React en localhost/loopback. La API pública permite
-CORS para GET y Content-Type, sin cookies ni credenciales CORS. CORS controla
-navegadores: no es autenticación ni evita que otros clientes lean una API pública.
-
-No configurar en Render `ADMIN_API_KEY`, `LOYVERSE_ACCESS_TOKEN`, ni credenciales
-de migración o sincronización. No introducir secretos en React, Git, argumentos
-CLI, logs o capturas. `.env` y `.env.*` están ignorados, salvo `.env.example`.
-
-### PostgreSQL y verificación del destino
-
-Ejemplo de formato (los valores son ficticios; no pegar secretos en este archivo):
-
-```text
-postgresql+psycopg2://USUARIO:CONTRASENA_CODIFICADA@HOST/BASE?sslmode=verify-full&channel_binding=require
-```
-
-Se conservan los caracteres especiales de usuario/contraseña codificados en la
-URL. `EXPECTED_DATABASE` y `EXPECTED_DATABASE_HOST` son una autorización
-independiente: no se derivan automáticamente de `DATABASE_URL`.
-
-Cloud rechaza `mitbol_dev`, bases `mitbol_test*`, bases de mantenimiento, hosts
-locales/IP y parámetros que puedan redirigir la conexión (`host`, `hostaddr`,
-`dbname`, `service`, `options`, duplicados, etc.). También rechaza los overrides
-de entorno `PGHOSTADDR`, `PGSERVICE`, `PGSERVICEFILE` y `PGOPTIONS`.
-Las migraciones online y la sincronización fuera de modo cloud admiten sólo
-conexiones loopback: omitir APP_ENV no permite operar una base remota sin su
-autorización. La generación SQL offline conserva los destinos ficticios de pruebas.
-
-El controlador verifica el certificado y hostname con `sslmode=verify-full`,
-channel binding obligatorio y TLS mínimo 1.2. La CA predeterminada es el bundle
-de `certifi` ya incluido en requirements; `sslrootcert` permite seleccionar un
-archivo CA explícito accesible en el entorno operador. No se admite degradar a
-`require`, `prefer` o `disable`.
-
-Al abrir una conexión cloud se contrastan host, puerto, usuario, base y TLS
-efectivos del controlador, además de `SELECT current_database()`. No se compara
-la IP de PostgreSQL con el DNS público: Neon puede utilizar proxies. La identidad
-del servidor se acredita con la verificación TLS del hostname autorizado.
-
-El pool tiene tres conexiones, hasta dos adicionales, espera máxima de diez
-segundos y connect timeout de diez segundos. `pool_pre_ping=True` descarta
-conexiones cerradas por una suspensión antes de reutilizarlas. No reintenta una
-transacción ya iniciada ni repite escrituras automáticamente.
-
-La API cloud exige una cuenta sin permisos de escritura: comprueba los privilegios
-del rol y de tablas/columnas/secuencias públicas, y configura sus sesiones como
-read only. El rol requiere CONNECT, USAGE sobre public y SELECT sobre las tablas
-del catálogo; no debe ser owner, superusuario ni miembro de roles privilegiados.
-En la Etapa 3 se crearán y verificarán los grants; el código no los concede.
-El chequeo se hace al abrir una conexión física. No cambiar permisos del lector
-durante la operación; si se cambian, hay que reiniciar el servicio para revalidarlos.
-
-### Primer despliegue manual desde Render Dashboard
-
-El cierre confirmado de 3E y la preparación actual de 3F están en
-[`docs/deployment/render_stage3f.md`](docs/deployment/render_stage3f.md), con la
-configuración concreta de Neon, CI y las pruebas posteriores. Crear/desplegar el
-servicio sigue pendiente de autorización.
-
-Neon ya está migrado y el catálogo y el lector están auditados. Los siguientes
-pasos preparan el primer servicio; su creación/despliegue requiere autorización:
-
-1. Integrar mediante PR hacia `develop` los cambios revisados y esperar el check
-   **Backend tests**. Render utilizará ese código de `develop`.
-2. En Render Dashboard elegir **New > Web Service** y conectar GitHub únicamente
-   al repositorio `mitbol-backend`. Seleccionar la rama `develop`.
-3. Elegir Python y el plan Free de desarrollo. Elegir una región cercana a la
-   región de Neon. Dejar Root Directory vacío: `requirements.txt` y `app/` están
-   en la raíz del repositorio, no dentro de `app/` como raíz de ejecución.
-4. Completar build/start y las variables de la tabla anterior antes del primer
-   build. Fijar `PYTHON_VERSION=3.13.13`; no depender del Python predeterminado de
-   Render. El start debe apuntar a `app.main:app` y utilizar el PORT de Render.
-5. Usar la conexión **pooled del lector** en DATABASE_URL. EXPECTED_DATABASE_HOST
-   debe ser el mismo host pooled exacto, con `-pooler`, no el host directo del
-   operador. Mantener `sslmode=verify-full&channel_binding=require`. No copiar
-   rutas sslrootcert de Windows: el bundle certifi del servidor es el default.
-6. Pegar CORS_ORIGINS como JSON literal en el campo de Render, por ejemplo
-   `["http://localhost:5173"]`, sin comillas exteriores de PowerShell. No añadir
-   otros orígenes hasta autorizarlos. No configurar credenciales de owner,
-   sincronización, ADMIN_API_KEY ni token Loyverse en el Web Service.
-7. Fijar Health Check Path `/` y Auto-Deploy **Off**. Revisar también Settings
-   después de la creación para confirmar que permanece Off. No configurar
-   comandos de migración en build/start ni agregar CD o deploy hooks.
-8. Revisar todos los valores y solicitar autorización antes de pulsar el botón
-   que crea/despliega el servicio: la creación puede iniciar el primer build.
-   Auto-Deploy Off evita despliegues posteriores por commit; no es una pausa
-   garantizada del despliegue inicial. Si hace falta dispararlo manualmente,
-   usar **Manual Deploy > Deploy latest commit** sólo con autorización.
-
-| Opción | Configuración |
-| --- | --- |
-| Tipo / runtime | Web Service / Python |
-| Rama | `develop` |
-| Directorio raíz | Raíz de este backend |
-| Build | `pip install -r requirements.txt` |
-| Start | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
-| Health Check Path | `/` |
-| Auto-Deploy | `Off` para el primer despliegue |
-
-No hace falta `render.yaml`. `/` comprueba que responde el proceso HTTP; no
-certifica el estado de PostgreSQL. Las conexiones siguen siendo perezosas: antes
-de compartir la URL hay que verificar `/api/menu` y un detalle con datos reales,
-además de CORS, HTTPS y 404 en administración/sincronización.
-
-El plan gratuito puede suspenderse tras 15 minutos sin tráfico, tarda en despertar
-y pierde archivos locales al reiniciar/desplegar/suspenderse. No ofrece shell,
-disco persistente ni pre-deploy command gratuito. Las migraciones y la carga
-inicial se ejecutarán desde un entorno operador controlado, nunca en el build o
-start de Render. La API requiere HTTPS; Render termina TLS en su proxy.
-
-Las auditorías posteriores de 3E ya confirmaron esquema, catálogo, lectura y TLS
-para el operador y el lector; no repetirlas. Para Render quedan la revisión y
-publicación autorizada del código elegido, su CI verde y la configuración pooled
-del lector. La preparación local no sustituye la comprobación de instalación y
-conectividad del primer build autorizado de Render. El estado concreto se
-mantiene en la guía de 3F enlazada arriba.
-
-### Lector de Render: Etapa 3D completada
-
-El SQL exacto está en
-[`docs/database/prepare_render_reader.sql`](docs/database/prepare_render_reader.sql).
-El rol ya se creó y verificó en `mitbol_cloud_dev`; no repetir el script ni la
-asignación de contraseña. Se conserva como referencia del procedimiento aprobado.
-Para otra base requerirá autorización independiente y una conexión directa TLS
-verificada; el script comprueba base, operador y revisión y rechaza un rol existente.
-
-El rol `mitbol_render_reader` tiene LOGIN y PASSWORD NULL inicialmente. Después
-de aprobar/aplicar el SQL, establecer su contraseña con el comando
-`\password mitbol_render_reader` desde psql (entrada oculta), sin guardarla en Git ni en el
-historial. Crear el rol mediante SQL evita asignarle los privilegios elevados
-que reciben los roles creados por las herramientas de administración de Neon.
-
-Se concede únicamente CONNECT, USAGE sobre public y SELECT sobre Products,
-ProductVariants, ProductModifiers, ProductComplements, ProductModifierAssignments,
-ProductImages, Tags y ProductTags. No se concede SELECT sobre alembic_version,
-ni acceso a secuencias, escritura, DDL, ownership o membresías. El default read
-only del rol es una defensa adicional; los permisos reales impiden el DML sobre
-el catálogo incluso si un cliente desactiva ese default. Esto no certifica ausencia
-absoluta de efectos persistentes por funciones internas: se conserva el riesgo
-residual documentado y aceptado en la Etapa 3D.
-
-El script retira CREATE/TEMPORARY de PUBLIC en **esta base** y CREATE de PUBLIC
-en public: PostgreSQL no permite negar individualmente permisos que un usuario
-recibe de PUBLIC. Estos cambios también afectan a otros usuarios que dependan de
-esos grants; el owner conserva sus derechos y los operadores legítimos podrán
-recibir grants explícitos. La verificación final aborta si persisten permisos
-de escritura o creación heredados.
-
-No se concede SELECT automático a todas las tablas futuras, que podrían contener
-datos privados de otras historias. Los defaults del owner de migraciones no
-otorgan permisos al lector. Cuando una tabla nueva sea necesaria para un endpoint
-público, se revisará y concederá su SELECT explícitamente. Si cambia el rol que
-ejecuta Alembic, habrá que revisar también sus default privileges. El lector nunca
-ejecutará migraciones ni sincronizaciones.
-
-### Migraciones: referencia para una base nueva
-
-La etapa inicial documentó `mitbol_cloud_dev` en `20261102_0003`; ese registro
-histórico no acredita su revisión actual. No repetir el verificador de base
-vacía en una instalación existente: para HU-009 seguir su procedimiento de
-actualización. Esta sección se aplica a otra base nueva autorizada.
-
-Antes de migrar una base Neon nueva, usar `python -m app.cli.verify_neon --validate-url`
-para validar la configuración sin conectarse. Después, `python -m app.cli.verify_neon`
-comprueba host, base, usuario (por defecto `neondb_owner`), TLS efectivo, transacción
-READ ONLY y ausencia de revisiones/objetos de aplicación. No carga `.env`, no
-consulta Loyverse, no aplica migraciones y termina con rollback. Devuelve sólo
-metadatos sanitizados; nunca la URL ni la contraseña. `ready_for_migrations` es un
-resultado de inspección: todavía requiere autorización para migrar. El preflight
-de `sync_catalog` se utiliza después, pues exige 0003 o una revisión compatible
-hasta `20261111_0006`.
-
-Si falla, repetir `python -m app.cli.verify_neon --diagnose`. Este modo añade
-resolución DNS y apertura/cierre TCP antes de la misma conexión PostgreSQL segura.
-Devuelve etapa, categoría, código fijo, SQLSTATE cuando existe, comprobaciones
-completadas y versiones de Python/psycopg2/libpq/SQLAlchemy. No devuelve mensajes
-del controlador, SQL, contraseñas, DSN ni traceback y no altera variables de
-entorno. Un TCP correcto no acredita TLS ni autenticación: esas comprobaciones
-continúan mediante libpq con los mismos controles obligatorios. Un error sigue
-bloqueando cualquier avance a migraciones.
-
-Usar un proceso separado con `APP_ENV=cloud`, `DATABASE_URL` **directa** (sin
-pooler), `EXPECTED_DATABASE` y `EXPECTED_DATABASE_HOST` del destino autorizado.
-La credencial de ese proceso necesita permisos de esquema; no es el lector de
-Render. Cargar los secretos mediante el gestor de secretos o entrada oculta,
-sin guardarlos en el historial del shell ni modificar el `.env` local.
-
-Después de confirmar proyecto/branch/endpoint de Neon y base nueva vacía:
-
-```text
-python -m alembic current
-python -m alembic upgrade 20261111_0006
-python -m alembic current
-python -m alembic check
-```
-
-`current` inicial no tendrá revisión en una base nueva. El resultado final debe
-ser `20261111_0006` y `check` no debe detectar operaciones pendientes. Se validan
-destino real y TLS antes de que Alembic escriba. La revisión inicial conserva la
-protección que rechaza objetos de aplicación preexistentes. No usar `stamp` como
-sustituto de migrar. No se modificaron las tres revisiones aprobadas.
-
-### Sincronización manual y preflight
-
-`python -m app.cli.sync_catalog` no importa FastAPI, no utiliza la sesión global y
-no carga `.env`. Requiere `APP_ENV=cloud`, `ADMIN_ENABLED=false`, URL directa,
-`EXPECTED_DATABASE` y `EXPECTED_DATABASE_HOST`. Los argumentos deben coincidir
-con esa autorización. La carga inicial ya se completó: no repetirla.
-
-Inspección predeterminada, sin token, sin tienda, sin contactar Loyverse y con una
-transacción PostgreSQL READ ONLY:
-
-```text
-python -m app.cli.sync_catalog --expected-database mitbol_cloud_dev --expected-host HOST_DIRECTO --preflight
-```
-
-Verifica destino, TLS y revisión compatible entre `20261102_0003` y
-`20261111_0006`. Es una operación de
-lectura de la base remota, por lo que sólo se ejecutará con el destino autorizado
-durante la Etapa 3. Omitir `--preflight` mantiene este mismo modo seguro.
-
-El procedimiento completo aplicado está en
-[`docs/loyverse/neon_stage3e_execute.md`](docs/loyverse/neon_stage3e_execute.md).
-El CLI de carga inicial exige las ocho tablas vacías, token y tienda explícitos,
-y un `MITBOL_SYNC_APPROVED_PREFLIGHT` válido en memoria para el modo `--execute`.
-Compara el manifiesto aprobado con la descarga real y vuelve a comprobar el
-vaciado bajo locks antes del primer DML. No basta con añadir `--execute` al
-preflight. No se usa este procedimiento para una segunda carga o sincronización
-periódica; ambas requerirían diseño y autorización independientes.
-
-El ID debe coincidir con `LOYVERSE_STORE_ID` y con una tienda activa accesible en
-Loyverse. Destino y revisión se vuelven a comprobar dentro de la transacción de
-SyncService antes de contactar Loyverse. Se conservan el bloqueo, UPSERT,
-idempotencia, rollback, disponibilidad comercial/local y enriquecimientos locales.
-Si falla la tienda, el esquema, TLS o el destino, no se aplican datos.
-No hay cron, tarea al arrancar ni endpoint público de sincronización. El router
-antiguo `app/api/sync.py` permanece desregistrado y no debe habilitarse.
-
-### Fotografías y secuencia pendiente
-
-La base cloud ya contiene el catálogo comercial. `ProductImages`
-permanece vacía: no se copiaron referencias/archivos locales. El contrato actual
-devuelve `image_url=null` y galerías vacías; administración y cargas están apagadas.
-No se modificaron archivos de `storage/` ni el proveedor local de almacenamiento.
-
-Riesgo fuera de ese escenario: el menú anuncia referencias registradas aunque
-falte el archivo; medios devuelve 404. Importar referencias sin archivos volvería
-a producir URLs rotas. Antes de hacerlo habrá que adaptar almacenamiento externo
-persistente y/o filtrar referencias inexistentes, conservando el contrato público.
-
-Neon ya está sincronizado y auditado. Quedan la integración del código y el
-primer despliegue autorizado de Render con su conexión pooled del lector.
-Auto-Deploy permanece Off. Una futura habilitación de `After CI Checks Pass`
-requerirá autorización aparte, conservando PR y el check Backend tests.
-No se añadieron CD ni secretos a GitHub.
-
-### Integrar el código y preparar el primer despliegue
-
-1. Revisar el diff y los archivos nuevos de `chore/neon-sync-preflight`, incluidas
-   pruebas aisladas y ausencia de secretos. No cambiar de rama ni descartar cambios.
-2. Sólo con autorización, seleccionar los archivos revisados, realizar los
-   commits/push y abrir el PR hacia `develop`. Exigir Backend tests aprobado.
-3. Preparar en Render los valores documentados, usando exclusivamente la conexión
-   pooled de `mitbol_render_reader`, sin credenciales del operador o Loyverse.
-4. Autorizar y realizar el primer despliegue manual, con Auto-Deploy Off.
-   No repetir migraciones, creación del lector, carga inicial o auditorías aprobadas.
-5. Comprobar HTTPS, `/`, `/api/menu`, detalle válido, 404 de producto inexistente,
-   CORS desde el origen autorizado y 404 en administración/sincronización. `/`
-   por sí solo no acredita conectividad a PostgreSQL.
-6. Compartir con frontend la URL base HTTPS y el contrato OpenAPI. Frontend no
-    recibe contraseñas, claves administrativas ni token Loyverse.
-
-La rama de trabajo ya existe; no crear otra ni cambiar de rama para integrar
-estos cambios. Revisar también `git diff --cached` después de autorizar el staging.
-El push a `chore/*` no ejecuta este workflow; la apertura/actualización del PR a
-`develop` sí ejecuta Backend tests. No hacen falta secretos de Neon/Render en
-GitHub para estas pruebas. No se ejecutan esos pasos Git automáticamente.
-
-Referencias: [FastAPI en Render](https://render.com/docs/deploy-fastapi),
-[Python en Render](https://render.com/docs/python-version),
-[plan gratuito](https://render.com/docs/free),
-[despliegues condicionados a CI](https://render.com/docs/deploys),
-[TLS de Neon](https://neon.com/docs/connect/connect-securely),
-[SQLAlchemy en Neon](https://neon.com/docs/guides/sqlalchemy).
-
-## 🛠️ Instalación y Uso Local
-
-Sigue estos pasos para correr el proyecto en tu entorno local de Windows:
-
-1. **Clona el repositorio y entra a la carpeta:**
+**Inicio:**
 
 ```bash
-   git clone https://github.com/Integracion-Continua-y-Entrega/mitbol-backend.git
-   cd mitbol-backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
-2. **Crea y activa un entorno virtual:**
+En cloud, la configuración se proporciona mediante variables del entorno del servicio; **no se utiliza el archivo `.env` local**. Las conexiones a la base de datos deben validar su destino, utilizar TLS y contar con permisos mínimos según las operaciones que necesiten realizar.
 
-```
-   python -m venv venv
-   venv\Scripts\activate
-```
+El acceso público puede funcionar con una conexión de lectura, mientras que las operaciones administrativas autenticadas requieren una conexión y permisos de escritura configurados por separado. Las migraciones, la preparación de permisos y las sincronizaciones se ejecutan como tareas controladas, **no durante el arranque habitual del servidor**.
 
-3. **Instala las dependencias:**
+Antes de un despliegue permanente deben revisarse especialmente el almacenamiento duradero de imágenes, la configuración de sesiones y cookies, los orígenes autorizados y la actualización coordinada del esquema.
 
-```bash
-   pip install -r requirements.txt
-```
+Para los detalles de infraestructura, consulta las guías de [Render](docs/deployment/render_stage3f.md), [Neon](docs/database/neon_stage3c.md) y [seguridad administrativa](docs/security/admin_frontend_integration.md).
 
-4. **Configura las variables de entorno:**
-   - En la raíz del proyecto, haz una copia del archivo de ejemplo para crear tu propio archivo de configuración local ejecutando este comando:
+## Colaborar en el proyecto
 
-```
-     copy .env.example .env
-```
+Para mantener un repositorio entendible y fácil de mantener, proponemos este flujo de trabajo:
 
-- Abre el nuevo archivo `.env` y reemplaza los valores de ejemplo con tus credenciales reales.
+1. Crea una rama de trabajo a partir de la rama acordada por el equipo.
+2. Realiza cambios pequeños y con un propósito claro.
+3. Añade o actualiza pruebas cuando cambie el comportamiento.
+4. Ejecuta las comprobaciones pertinentes antes de compartir los cambios.
+5. Abre un Pull Request con una explicación de lo implementado y cualquier requisito de migración o configuración.
+6. Revisa el resultado de GitHub Actions antes de integrar los cambios.
 
-5. **Revisa las migraciones antes de aplicarlas:**
+Se recomiendan mensajes de commit descriptivos, por ejemplo, con prefijos `feat`, `fix`, `docs` o `test`. Estos prefijos son una convención sugerida, no una regla automática del repositorio.
 
-   Los modelos vigentes corresponden a las cinco tablas del catálogo de HU-008.
-   Alembic administra el esquema; iniciar FastAPI ya no crea tablas.
-   En el entorno de desarrollo verificado se creó `mitbol_dev` y se aplicó la
-   revisión `20261029_0001` con autorización. La conexión local apunta a esa base;
-   `mitbol_db` conserva íntegramente las tablas y datos del prototipo.
+Nunca incluyas contraseñas, tokens, archivos `.env` ni datos privados en los commits.
 
-   Consulta la [guía del esquema, pruebas y comandos](docs/database/hu008_preparation.md)
-   y el [SQL de la migración inicial](docs/database/hu008_initial.sql).
+## Documentación complementaria
 
-   Para ver el SQL sin ejecutarlo:
+El README es el punto de entrada al proyecto. Los procedimientos operativos y las decisiones más detalladas se conservan en `docs/`.
 
-   ```powershell
-   .\.venv\Scripts\python.exe -m alembic upgrade head --sql
-   ```
+| Tema                                                   | Documento                                                                          |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| Integración del frontend con sesiones administrativas  | [Guía de autenticación e integración](docs/security/admin_frontend_integration.md) |
+| Desarrollo del frontend local contra un backend remoto | [Guía de desarrollo remoto](docs/security/frontend_remote_dev.md)                  |
+| Configuración de PostgreSQL en Neon                    | [Guía de base de datos](docs/database/neon_stage3c.md)                             |
+| Preparación de la importación de catálogo              | [Guía de sincronización](docs/loyverse/neon_stage3e.md)                            |
+| Despliegue inicial en Render                           | [Guía de despliegue](docs/deployment/render_stage3f.md)                            |
+| Importación de descuentos                              | [Guía de descuentos](docs/deployment/hu009_rollout.md)                             |
 
-   Para comprobar la revisión y la correspondencia con los modelos:
+Algunas guías documentan decisiones y configuraciones de fases anteriores. Si existe una diferencia, consulta primero el código, las migraciones y los workflows vigentes antes de ejecutar un procedimiento.
 
-   ```powershell
-   .\.venv\Scripts\python.exe -m alembic current
-   .\.venv\Scripts\python.exe -m alembic check
-   ```
+## Equipo y licencia
 
-   Las pruebas de PostgreSQL son optativas y sólo consultan `mitbol_dev`:
+**Colaboradores identificados en el repositorio del backend:**
 
-   ```powershell
-   $env:MITBOL_POSTGRES_TESTS = '1'
-   .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
-   ```
-
-6. **Levanta el servidor de desarrollo:**
-
-```bash
-   uvicorn app.main:app --reload
-```
-
-La documentación automática de la API estará disponible en: `http://localhost:8000/docs`.
-
-## Consulta de Loyverse — HU-008, Bloque 1
-
-El diagnóstico local consulta tiendas, artículos con variantes y grupos con sus
-opciones mediante GET. No escribe en PostgreSQL ni utiliza el servicio de
-sincronización del prototipo. Configura `LOYVERSE_ACCESS_TOKEN` y el identificador
-de la tienda en `LOYVERSE_STORE_ID` dentro de `.env`.
-
-```powershell
-.\.venv\Scripts\python.exe -m app.cli.probe_loyverse --page-size 2
-```
-
-La [guía del Bloque 1](docs/loyverse/hu008_block1.md) explica el código, las pruebas,
-la procedencia de los precios y la diferencia observada entre `modifier_ids` y
-`modifiers_ids`. El [informe de lectura real](docs/loyverse/hu008_block1_report.json)
-contiene el catálogo observado, sin credenciales ni cabeceras.
-
-## Persistencia del catálogo — HU-008, Bloque 2
-
-La transformación y los UPSERT están implementados y verificados con PostgreSQL
-aislado y datos simulados. El Bloque 3 aplicó después una primera carga real
-autorizada, documentada en el apartado siguiente. No hay un endpoint de escritura.
-
-```powershell
-$env:MITBOL_POSTGRES_TESTS = '1'
-$env:MITBOL_SYNC_POSTGRES_TESTS = '1'
-.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
-```
-
-Las pruebas de persistencia crean otra base `mitbol_test_hu008_<id>`, aplican la
-migración existente y revierten sus datos mediante transacciones y savepoints.
-No escriben en el catálogo de desarrollo. La base de pruebas se conserva.
-
-Consulta la [guía del Bloque 2](docs/loyverse/hu008_block2.md) y el
-[informe de aislamiento](docs/loyverse/hu008_block2_test_database.json).
-
-## Primera carga real — HU-008, Bloque 3
-
-Se realizó una sola sincronización autorizada en `mitbol_dev`, desde la tienda
-I.C.E: 3 productos, 5 variantes, 2 grupos, 5 complementos y 4 asociaciones.
-La verificación posterior fue de sólo lectura: no encontró duplicados,
-referencias huérfanas ni precios inválidos. La revisión sigue siendo `20261029_0001`.
-
-La [guía del Bloque 3](docs/loyverse/hu008_block3.md) explica la ejecución y los
-resultados. El [informe](docs/loyverse/hu008_block3_report.json) conserva el plan
-previo y las filas confirmadas. Puedes ejecutar las
-[consultas SQL de verificación](docs/loyverse/hu008_block3_verify.sql) en pgAdmin
-conectado a `mitbol_dev`; son de sólo lectura.
-
-La repetición real y la actualización de precios quedan para el Bloque 4.
-
-## Idempotencia real — HU-008, Bloque 4, primera parte
-
-Se repitió una sola sincronización real con el catálogo de I.C.E sin cambios.
-Se conservaron los conteos 3/5/2/5/4, todos los IDs internos y externos,
-precios, relaciones y campos locales. Sólo cambió `synced_at` en las filas
-comerciales; las secuencias avanzaron por los UPSERT sin reasignar los IDs.
-La suite completa dio 124 pruebas aprobadas.
-
-Consulta la [explicación de idempotencia](docs/loyverse/hu008_block4_idempotency.md)
-y el [informe antes/después](docs/loyverse/hu008_block4_idempotency_report.json).
-Después de esta prueba, el usuario confirmó el cambio manual de Doble de 119
-a 129 en Loyverse. Su importación se verificó en la segunda parte siguiente.
-
-## Actualización comercial real — HU-008, Bloque 4, segunda parte
-
-Se confirmó que I.C.E devuelve Doble a 129.00 y se aplicó una sincronización
-controlada en `mitbol_dev`. La variante conservó el ID 5, su UUID de Loyverse,
-el producto padre 3 y sus asociaciones. Los demás precios y campos locales
-permanecieron iguales, sin duplicados y con los conteos 3/5/2/5/4.
-
-La suite dio 125 pruebas aprobadas y las siete comprobaciones posteriores
-también pasaron. Consulta la [explicación de actualización de precios](docs/loyverse/hu008_block4_price_update.md),
-el [informe antes/después](docs/loyverse/hu008_block4_price_update_report.json)
-y las [consultas para pgAdmin](docs/loyverse/hu008_block4_price_update_verify.sql).
-El esquema y las migraciones se conservaron; no hay sincronización periódica.
-
-## 👥 Equipo de Desarrollo
-
-- José Fernando Enríquez Maldonado
-- Pedro Alonso Montes Fabian
+- José Fernando Enríquez Maldonado.
+- Pedro Alonso Montes Fabian.
