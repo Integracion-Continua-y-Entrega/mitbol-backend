@@ -8,8 +8,8 @@ la [documentación funcional](../features/hu010-sync-management.md).
 ## Topología disponible
 
 El backend público conserva su pool lector y el pool limitado de autenticación.
-Para una solicitud manual solo conoce una dirección loopback y un secreto de
-delegación. Un proceso worker independiente posee la URL del operador y el token
+Para una solicitud manual conoce una dirección loopback, un secreto de
+delegación y la identidad del catálogo y tienda autorizados. Un proceso worker independiente posee la URL del operador y el token
 Loyverse. No colocar esas credenciales operativas en React o en el entorno del
 Web Service público para intentar habilitar la operación.
 
@@ -27,11 +27,33 @@ que se apruebe otro canal interno. No se ha instalado un túnel o sidecar.
 | `SYNC_WORKER_URL` | Origen loopback explícito, por ejemplo `http://127.0.0.1:8766`, sin rutas, credenciales, query o fragmento. |
 | `SYNC_WORKER_TOKEN` | Secreto de delegación independiente, URL-safe de 32–128 caracteres. No es el token Loyverse. |
 | `SYNC_WORKER_TIMEOUT_SECONDS` | Espera de respuesta, 1–300 segundos; por defecto 120. No es garantía de duración máxima del trabajo. |
+| `LOYVERSE_STORE_ID` | UUID explícito de la tienda autorizada, igual al del worker. No es una credencial. |
 
 URL y token se configuran juntos; ausentes dejan la ejecución deshabilitada con
 503. Se conservan AUTH_ENABLED, AUTH_CATALOG_ENABLED y las políticas de sesión,
 Origin y CSRF existentes. Staff puede consultar estado pero no solicitar trabajo.
 El JSON no permite sustituir tienda, base, actor o credenciales del servidor.
+
+Al habilitar la delegación, `DATABASE_URL` y `AUTH_DATABASE_URL` deben señalar el
+mismo catálogo: ambiente, host, puerto y base. Los usuarios y contraseñas pueden
+ser distintos, como corresponde a los roles lector y administrativo. Se requiere
+`AUTH_DATABASE_URL` explícita. En local usar el mismo hostname en ambos procesos;
+`localhost` y `127.0.0.1` no se consideran automáticamente equivalentes. Un puerto
+omitido se fija explícitamente en 5432 para evitar defaults distintos de libpq.
+
+El backend obtiene el destino de su configuración y lo incluye en el protocolo
+interno junto al target. El worker lo compara con su configuración y comprueba
+el host, puerto y base de la conexión efectiva antes de contactar Loyverse o
+modificar datos. Una discrepancia se rechaza con 412 interno y 503 en la API web.
+El backend también exige el mismo destino en la respuesta para confirmar el
+resultado. La solicitud pública continúa siendo únicamente `{"target":"catalog"}`
+o `{"target":"discounts"}`; el navegador no elige el destino.
+
+Solo se normaliza el alias Neon `ep-…-pooler.…neon.tech` al endpoint directo
+`ep-….…neon.tech` correspondiente. Otros endpoints, bases, puertos o tiendas no
+son equivalentes aunque usen credenciales válidas. Actualizar backend y worker
+conjuntamente: el protocolo anterior sin destino no permite ejecutar trabajos
+con esta versión; no hay fallback que omita la comprobación.
 
 ## Configuración del proceso worker
 

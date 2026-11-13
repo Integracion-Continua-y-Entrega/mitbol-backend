@@ -5,10 +5,12 @@ from app.services.catalog_errors import CatalogSyncBusyError, CatalogTargetError
 from app.services.discount_sync_service import DiscountSyncBusyError
 from app.services.discount_transform import DiscountValidationError
 from app.services.loyverse_client import LoyverseAPIError
-from app.services.manual_sync_coordinator import ManualSyncUnavailableError
+from app.services.manual_sync_coordinator import ManualSyncUnavailableError, SyncDestinationMismatchError
 
 
 def public_sync_error(error: Exception) -> tuple[int, str]:
+    if isinstance(error, SyncDestinationMismatchError):
+        return 503, "El destino del ejecutor no coincide con el catálogo autorizado; revisa la configuración."
     if isinstance(error, (CatalogSyncBusyError, DiscountSyncBusyError)):
         return 409, "Hay otra operación comercial en curso; espera antes de solicitar una nueva."
     if isinstance(error, (DatabaseTargetError, CatalogTargetError, ManualSyncUnavailableError)):

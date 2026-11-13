@@ -23,6 +23,7 @@ from app.services.loyverse_client import LoyverseAPIClient
 from app.services.sync_worker_runtime import SyncWorkerConfig, SyncWorkerRuntime
 from app.sync_worker import create_worker
 from app.models import catalog_metadata
+from app.services.manual_sync_coordinator import SyncDestinationMismatchError
 
 
 STORE = "a3a56a06-d40c-4c07-931c-41abcbaaba12"
@@ -47,12 +48,15 @@ def backend(owner_backend, database, monkeypatch, commercial_snapshot):
     b = owner_backend
     # El nombre, directorio, operador y PG18 ya fueron validados por la fixture.
     source = (ROOT / "docs/database/prepare_admin_writer_local.sql").read_text(encoding="utf-8")
+    reader_source = (ROOT / "docs/database/prepare_render_reader.sql").read_text(encoding="utf-8")
+    execute_script(database, reader_source.replace("mitbol_cloud_dev", database.url.database).replace("neondb_owner", "mitbol_ci"))
     execute_script(database, source)
     password = None
     if database.url.password:
         password = "synthetic-writer-fixture"
         with database.begin() as db:
             db.exec_driver_sql("ALTER ROLE mitbol_admin_writer PASSWORD 'synthetic-writer-fixture'")
+            db.exec_driver_sql("ALTER ROLE mitbol_render_reader PASSWORD 'synthetic-writer-fixture'")
     worker_config = SyncWorkerConfig(
         database_url=database.url.render_as_string(hide_password=False),
         expected_database=database.url.database, store_id=STORE,
@@ -105,7 +109,9 @@ def backend(owner_backend, database, monkeypatch, commercial_snapshot):
     monkeypatch.setattr(client_module, "SyncWorkerClient", lambda url, token, **kwargs: real_client(
         url, token, **kwargs, transport=httpx.ASGITransport(app=worker)))
     config = b.config.model_copy(update={
+        "database_url": database.url.set(username="mitbol_render_reader", password=password).render_as_string(hide_password=False),
         "auth_database_url": database.url.set(username="mitbol_admin_writer", password=password).render_as_string(hide_password=False),
+        "loyverse_store_id": STORE,
         "sync_worker_url": "http://127.0.0.1:8766", "sync_worker_token": SecretStr(WORKER_TOKEN),
     })
     config.validate_sync_worker()
@@ -125,6 +131,8 @@ def backend(owner_backend, database, monkeypatch, commercial_snapshot):
         with database.begin() as db:
             db.exec_driver_sql("DROP OWNED BY mitbol_admin_writer")
             db.exec_driver_sql("DROP ROLE mitbol_admin_writer")
+            db.exec_driver_sql("DROP OWNED BY mitbol_render_reader")
+            db.exec_driver_sql("DROP ROLE mitbol_render_reader")
 
 
 @pytest.mark.parametrize("target", ["catalog", "discounts"])
@@ -138,6 +146,50 @@ def test_admin_executes_through_worker_and_commits_with_operator_role(backend, t
         table = '"Products"' if target == "catalog" else '"Discounts"'
         assert db.scalar(text("SELECT count(*) FROM public." + table)) > 0
     assert not any('INSERT INTO "Products"' in sql or 'INSERT INTO "Discounts"' in sql for sql in b.observed)
+    if target == "catalog":
+        menu = b.client.get("/api/menu")
+        assert menu.status_code == 200 and menu.json()
+
+
+@pytest.mark.parametrize("target", ["catalog", "discounts"])
+@pytest.mark.parametrize("field,value", [
+    ("database", "other_database"),
+    ("store_id", "497f6eca-6276-4993-bfeb-53cbbbba6f08"),
+])
+def test_misrouted_manual_request_cannot_contact_provider_or_change_catalog(backend, target, field, value):
+    b = backend
+    destination = b.config.sync_destination.model_copy(update={field: value})
+    b.app.state.manual_sync_coordinator = client_module.SyncWorkerClient(
+        b.config.sync_worker_url, b.config.sync_worker_token, destination=destination).coordinator()
+    with b.owner.connect() as db:
+        before = {table.name: db.execute(table.select()).all() for table in catalog_metadata.sorted_tables}
+        before_discounts = db.exec_driver_sql('SELECT * FROM public."Discounts"').all()
+    response = b.client.post("/api/admin/sync/requests", json={"target": target}, headers=csrf_headers(login(b)))
+    assert response.status_code == 503 and b.calls == []
+    assert "destino" in response.json()["detail"]
+    with b.owner.connect() as db:
+        assert {table.name: db.execute(table.select()).all() for table in catalog_metadata.sorted_tables} == before
+        assert db.exec_driver_sql('SELECT * FROM public."Discounts"').all() == before_discounts
+
+
+@pytest.mark.parametrize("target", ["catalog", "discounts"])
+def test_actual_connection_must_match_worker_configuration_before_provider(backend, target):
+    b = backend
+    # Configuración válida por separado, pero engine de una base distinta.
+    config = replace(b.worker_config, database_url="postgresql://operator@127.0.0.1/mitbol_dev",
+                     expected_database="mitbol_dev")
+    runtime = SyncWorkerRuntime(config, engine=b.owner)
+    with pytest.raises(SyncDestinationMismatchError):
+        asyncio.run(runtime.execute(target))
+    assert b.calls == []
+
+
+def test_browser_cannot_override_server_destination(backend):
+    b = backend
+    response = b.client.post("/api/admin/sync/requests", json={
+        "target": "discounts", "destination": b.config.sync_destination.model_dump(),
+    }, headers=csrf_headers(login(b)))
+    assert response.status_code == 422 and b.calls == []
 
 
 def test_staff_is_denied_before_body_validation_or_provider(backend):

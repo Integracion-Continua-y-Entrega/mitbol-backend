@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.enrichment import AdminInput
+from app.schemas.sync_destination import SyncDestination
 
 
 class ManualSyncRequest(AdminInput):
@@ -52,6 +53,17 @@ class ManualSyncResponse(BaseModel):
         if not isinstance(self.result, expected):
             raise ValueError("El resultado no corresponde al proceso solicitado.")
         return self
+
+
+class InternalSyncRequest(BaseModel):
+    """Solo el backend construye este cuerpo; no es el contrato de React."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    target: Literal["catalog", "discounts"]
+    destination: SyncDestination
+
+
+class InternalSyncResponse(ManualSyncResponse):
+    destination: SyncDestination
 
 
 def completed_response(target: Literal["catalog", "discounts"], raw: dict | int) -> ManualSyncResponse:

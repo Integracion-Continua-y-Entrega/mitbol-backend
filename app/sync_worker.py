@@ -9,7 +9,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.schemas.sync_requests import ManualSyncRequest, ManualSyncResponse
+from app.schemas.sync_requests import InternalSyncRequest, InternalSyncResponse
+from app.services.manual_sync_coordinator import SyncDestinationMismatchError
 from app.services.sync_execution_errors import public_sync_error
 from app.services.sync_worker_runtime import SyncWorkerConfig, SyncWorkerRuntime
 
@@ -54,10 +55,14 @@ def create_worker(*, runtime=None):
     async def invalid(request, error):
         return JSONResponse({"detail": "Solicitud operativa inválida."}, status_code=422)
 
-    @app.post("/internal/sync/execute", response_model=ManualSyncResponse)
-    async def execute(payload: ManualSyncRequest):
+    @app.post("/internal/sync/execute", response_model=InternalSyncResponse)
+    async def execute(payload: InternalSyncRequest):
         try:
-            return await runtime.execute(payload.target)
+            runtime.require_destination(payload.destination)
+            result = await runtime.execute(payload.target)
+            return InternalSyncResponse(**result.model_dump(), destination=runtime.config.destination)
+        except SyncDestinationMismatchError:
+            return JSONResponse({"detail": "El destino solicitado no corresponde a este worker."}, status_code=412)
         except Exception as error:
             status, detail = public_sync_error(error)
             return JSONResponse({"detail": detail}, status_code=status)

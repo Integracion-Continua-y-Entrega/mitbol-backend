@@ -20,6 +20,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     config.validate_database_configuration()
     config.validate_admin_configuration()
     config.validate_auth_configuration()
+    config.validate_sync_worker()
 
     @asynccontextmanager
     async def lifespan(application):
@@ -45,6 +46,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
         from app.services.sync_worker_client import SyncWorkerClient
         application.state.manual_sync_coordinator = SyncWorkerClient(
             config.sync_worker_url, config.sync_worker_token,
+            destination=config.sync_destination,
             timeout_seconds=config.sync_worker_timeout_seconds,
         ).coordinator()
     if not config.auth_enabled:

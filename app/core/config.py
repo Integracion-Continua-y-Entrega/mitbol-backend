@@ -58,7 +58,23 @@ class Settings(BaseSettings):
             from app.services.sync_worker_client import validate_worker_token, validate_worker_url
             self.sync_worker_url = validate_worker_url(self.sync_worker_url)
             validate_worker_token(self.sync_worker_token.get_secret_value())
+            # Credenciales distintas sí; catálogos distintos no. Fijar el puerto
+            # evita que defaults libpq diferentes desvíen uno de los procesos.
+            destination = self.sync_destination
+            self.database_url = postgresql_url(self.database_url).set(port=destination.port).render_as_string(hide_password=False)
+            self.auth_database_url = postgresql_url(self.auth_database_url).set(port=destination.port).render_as_string(hide_password=False)
         return self
+
+    @property
+    def sync_destination(self):
+        from app.schemas.sync_destination import SyncDestination
+        if not self.auth_database_url or not self.loyverse_store_id:
+            raise ValueError("La delegación requiere AUTH_DATABASE_URL y LOYVERSE_STORE_ID explícitos.")
+        public = SyncDestination.from_url(self.database_url, environment=self.app_env, store_id=self.loyverse_store_id)
+        admin = SyncDestination.from_url(self.auth_database_url, environment=self.app_env, store_id=self.loyverse_store_id)
+        if public != admin:
+            raise ValueError("El menú y la administración deben consultar el mismo destino de catálogo para sincronizar.")
+        return public
 
     def __init__(self, **values):
         mode = values.get("app_env", os.getenv("APP_ENV", "local"))

@@ -49,6 +49,13 @@ No se concede DML comercial al rol web ni se exponen credenciales de Loyverse a
 React. El worker tiene configuración, pool y proceso operativos propios. Sin
 URL/token de delegación, el POST devuelve 503. El router legado sigue deshabilitado.
 
+Con delegación habilitada, menú y administración deben apuntar al mismo catálogo.
+El protocolo interno vincula ambiente, host, puerto, base y UUID de tienda con el
+worker antes de ejecutar; este verifica también su conexión efectiva. La respuesta
+debe confirmar el mismo destino. Credenciales distintas por rol siguen permitidas.
+Una discrepancia devuelve 503 sin ejecutar la sincronización solicitada. Este
+contexto lo construye el servidor; no se admite en el JSON público del navegador.
+
 Permisos: `catalog:read` para consultar estado y `settings:write` para solicitar
 ejecuciones (Admin, no Staff), además de Origin y CSRF. Reutiliza los
 códigos existentes; no requiere nuevas tablas de permisos.
@@ -215,8 +222,8 @@ programada real o sincronizado una cuenta Loyverse real durante este trabajo.
 
 ## Verificación final del alcance permitido
 
-El 12 de noviembre de 2026 se aprobaron **1,805 pruebas de la suite completa**,
-sin fallos, errores u omisiones, en 654.72 segundos sobre Windows, Python 3.13
+El 12 de noviembre de 2026 se aprobaron **1,835 pruebas de la suite completa**,
+sin fallos, errores u omisiones, en 794.73 segundos sobre Windows, Python 3.13
 y PostgreSQL 18. Se observaron dos avisos de deprecación de Starlette/TestClient.
 El comando equivalente al usado por CI es:
 
@@ -230,6 +237,13 @@ real, rechazo de Staff/CSRF/origen/cuerpos inválidos, conservación de datos an
 fallos, consulta de estado durante la ejecución desde la misma cuenta, rechazo
 de otra solicitud manual y omisión de un disparo periódico ocupado. El worker
 no usa la sesión web para sincronizar y no hay fallback al pool público.
+
+Las regresiones de destino comprueban el rechazo de base o tienda distintas sin
+llamadas al proveedor ni cambios comerciales, la conexión efectiva del worker y
+la imposibilidad de sustituir el destino desde el navegador. El contrato interno
+rechaza solicitudes antiguas sin contexto y respuestas sin destino o con otro
+destino. También se comprueba la equivalencia limitada del alias Neon y que
+distintos usuarios puedan operar sobre el mismo catálogo.
 
 También se verificaron valores de configuración, cuerpos/resultados estrictos,
 errores sin secretos, límites del worker, ausencia de redirecciones/reintentos

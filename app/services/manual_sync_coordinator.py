@@ -11,6 +11,10 @@ class ManualSyncUnavailableError(RuntimeError):
     """No hay un ejecutor configurado; no se intenta una alternativa insegura."""
 
 
+class SyncDestinationMismatchError(ManualSyncUnavailableError):
+    """El destino autorizado y el del ejecutor no coinciden."""
+
+
 class ManualSyncCoordinator:
     """Selecciona callbacks configurados por el servidor, no por el JSON.
 

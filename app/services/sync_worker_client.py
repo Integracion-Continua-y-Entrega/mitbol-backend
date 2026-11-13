@@ -6,9 +6,10 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import SecretStr
 
-from app.schemas.sync_requests import ManualSyncResponse
+from app.schemas.sync_requests import InternalSyncRequest, InternalSyncResponse
+from app.schemas.sync_destination import SyncDestination
 from app.services.catalog_errors import CatalogSyncBusyError
-from app.services.manual_sync_coordinator import ManualSyncCoordinator, ManualSyncUnavailableError
+from app.services.manual_sync_coordinator import ManualSyncCoordinator, ManualSyncUnavailableError, SyncDestinationMismatchError
 from app.services.loyverse_client import LoyverseAPIError
 
 
@@ -34,10 +35,11 @@ def validate_worker_token(value: str) -> str:
 
 
 class SyncWorkerClient:
-    def __init__(self, url: str, token: SecretStr, *, timeout_seconds=120, transport=None):
+    def __init__(self, url: str, token: SecretStr, *, destination: SyncDestination, timeout_seconds=120, transport=None):
         self.url = validate_worker_url(url)
         validate_worker_token(token.get_secret_value())
         self.token, self.timeout, self.transport = token, timeout_seconds, transport
+        self.destination = SyncDestination.model_validate(destination)
 
     async def execute(self, target):
         try:
@@ -45,15 +47,20 @@ class SyncWorkerClient:
                 timeout=httpx.Timeout(self.timeout, connect=5), transport=self.transport,
                 follow_redirects=False, trust_env=False,
             ) as client:
+                payload = InternalSyncRequest(target=target, destination=self.destination)
                 response = await client.post(self.url + "/internal/sync/execute",
-                    headers={"Authorization": "Bearer " + self.token.get_secret_value()}, json={"target": target})
+                    headers={"Authorization": "Bearer " + self.token.get_secret_value()}, json=payload.model_dump(mode="json"))
+            if response.status_code == 412:
+                raise SyncDestinationMismatchError("El worker rechazó el destino solicitado.")
             if response.status_code == 409:
                 raise CatalogSyncBusyError("Ejecución ocupada.")
             if response.status_code == 502:
                 raise LoyverseAPIError("El worker no obtuvo datos válidos del proveedor.")
             if response.status_code != 200:
                 raise ManualSyncUnavailableError("El worker no confirmó la operación.")
-            result = ManualSyncResponse.model_validate(response.json())
+            result = InternalSyncResponse.model_validate(response.json())
+            if result.destination != self.destination:
+                raise SyncDestinationMismatchError("No se pudo confirmar un resultado del destino autorizado.")
             if result.target != target:
                 raise ManualSyncUnavailableError("El worker devolvió otro proceso.")
             return result.result.model_dump() if target == "catalog" else result.result.discounts_processed
