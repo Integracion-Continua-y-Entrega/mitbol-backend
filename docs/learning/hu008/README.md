@@ -1,6 +1,211 @@
 # Guía técnica de estudio — MITBOL v2.1, HU-008
 
-**Corte de verificación: 2 de noviembre de 2026.** Este material se basa en los
+## Sincronización recurrente — actualización del 14 de noviembre de 2026
+
+El catálogo existente se puede actualizar con
+`python -m app.cli.sync_catalog_recurrent`. La implementación reutiliza los
+UPSERT, la transformación, el cliente paginado, la transacción y las políticas
+de bajas de `SyncService`. No añade modelos, migraciones, categorías, historial
+persistente, endpoints administrativos ni tareas programadas.
+
+En esta actualización solo se ejecutaron pruebas sobre PostgreSQL temporal con
+respuestas HTTP simuladas de Loyverse. No se conectó a Neon, Render o Loyverse
+real. La integración de imágenes local/R2 y sus cambios pendientes se conservan.
+
+### Carga inicial y actualización recurrente
+
+| Operación | Comando | Autorización y comportamiento |
+| --- | --- | --- |
+| Carga inicial cloud | `python -m app.cli.sync_catalog` | Mantiene catálogo vacío, preflight aprobado, huella exacta del catálogo y bloqueos existentes. |
+| Recurrente | `python -m app.cli.sync_catalog_recurrent` | Acepta catálogo poblado; simula por defecto; exige autorización propia para ejecutar. También admite el primer ingreso en una base temporal vacía. |
+
+El comando recurrente exige siempre `--expected-database`, `--expected-host` y
+`--store-id`. No usa `Settings`, no carga `.env` y no importa la aplicación web.
+Las variables deben existir en el **proceso operativo**, separadas del entorno
+publicado. Nunca se deben copiar credenciales a scripts, argumentos, informes o
+al repositorio. Para esta validación no se utiliza el `.env` privado real.
+
+Variables obligatorias:
+
+- `APP_ENV=local`, `test` o `cloud`, explícito; `ADMIN_ENABLED=false` explícito.
+- `DATABASE_URL`, `EXPECTED_DATABASE`, `EXPECTED_DATABASE_HOST`: URL y destino
+  coincidentes con los argumentos. Local/test solo acepta loopback y las bases
+  admitidas por `SyncService`: `mitbol_dev` o `mitbol_test_hu008_<12 hex>`.
+- `LOYVERSE_STORE_ID`: debe coincidir con `--store-id` y una tienda activa
+  accesible para el token.
+- `LOYVERSE_ACCESS_TOKEN`: token de lectura comercial, necesario incluso para
+  simular porque la simulación descarga el catálogo. No se usa para escribir
+  en Loyverse.
+- Solo para `--execute`: `MITBOL_RECURRENT_SYNC_APPROVAL`, JSON aprobado para la
+  operación, host, base, usuario, tienda y revisión efectivos.
+
+Plantilla de invocación, únicamente después de preparar un proceso aislado y
+autorizar su destino (sustituir los marcadores; no apunta a un servicio real):
+
+```powershell
+python -m app.cli.sync_catalog_recurrent --expected-database <base_autorizada> --expected-host <host_autorizado> --store-id <tienda_autorizada> --dry-run
+```
+
+La salida JSON incluye `approval_template` con `approved: false`. Se revisan su
+destino, usuario, revisión y tienda; la autorización explícita se configura como
+ese mismo objeto, con `approved: true`, en `MITBOL_RECURRENT_SYNC_APPROVAL` del
+proceso operativo. Después se sustituye `--dry-run` por `--execute`.
+`MITBOL_SYNC_APPROVED_PREFLIGHT`, propio de carga inicial, **no autoriza** una
+actualización recurrente. Se rechazan autorizaciones con campos diferentes,
+sobrantes, incompletos o una revisión que ya no coincide.
+
+Esta autorización recurrente permite nuevos cambios comerciales en ejecuciones
+posteriores dentro del alcance aprobado; no fija el contenido a la huella de una
+simulación pasada. Cada ejecución vuelve a descargar y validar el catálogo bajo
+bloqueo. `catalog_sha256` identifica el contenido observado, sin incluir fechas,
+campos locales ni credenciales.
+
+### Preflight, simulación y transacción
+
+`RecurringCatalogSync.run(client, dry_run=True, approval=None)` es la entrada
+reutilizable de servicio. Recibe sesiones, destino y cliente explícitos; CLI y
+un futuro ejecutor periódico o endpoint HU-010 podrán invocar la misma lógica.
+El servicio no depende de FastAPI, variables de entorno ni del planificador.
+
+Antes de consultar Loyverse comprueba la base real, host, identidad, revisión
+Alembic compatible, tablas, permisos y autorización de escritura. Reutiliza el
+preflight comercial de `catalog_safety`, también utilizado por carga inicial,
+sin alterar sus restricciones. Los roles web `mitbol_render_reader` y
+`mitbol_admin_writer` no son operadores de sincronización recurrente.
+
+- La simulación abre `SET TRANSACTION READ ONLY` y compara mediante SELECT.
+  No llama al escritor, no simula mediante UPSERT/rollback y no consume secuencias.
+  Verifica los permisos de escritura del operador para detectar problemas antes
+  de autorizar la ejecución.
+- El bloqueo `pg_try_advisory_xact_lock(CATALOG_SYNC_LOCK_KEY)` se mantiene desde
+  antes de la descarga hasta finalizar la transacción, tanto al simular como al
+  ejecutar. Es el mismo bloqueo del catálogo y de sus operaciones comerciales
+  existentes; una segunda operación incompatible termina con código 3.
+- El cliente HTTP existente recorre todas las páginas, detecta cursores inválidos
+  o repetidos y aplica reintentos limitados a errores temporales. Se valida el
+  snapshot completo antes de aplicar cambios. Los errores de forma, referencias,
+  tienda o precios no se convierten en un catálogo vacío.
+- La escritura utiliza una única transacción. Una excepción revierte los cambios
+  de esa ejecución y libera el bloqueo. Como PostgreSQL no revierte secuencias,
+  una escritura fallida puede dejar huecos en identificadores; no deja filas
+  comerciales parciales. Ante una pérdida de conexión durante commit, el CLI
+  pide verificar el estado real antes de repetir.
+- En cloud se exigen el destino directo explícito y TLS `verify-full` con
+  `channel_binding=require`; se rechazan parámetros que desvíen la conexión.
+  No se ejecutan migraciones ni se conceden permisos automáticamente.
+
+El operador PostgreSQL requiere CONNECT, USAGE de `public`, SELECT sobre las ocho
+tablas del catálogo y `alembic_version`, INSERT/UPDATE y acceso a las secuencias
+de las cuatro entidades comerciales, e INSERT/DELETE de asociaciones de
+modificadores. No requiere DDL ni escritura sobre fotos o etiquetas. La revisión
+debe ser una de las compatibles con `SyncService`, actualmente desde
+`20261102_0003` hasta `20261114_0007` en la lista explícita del servicio.
+
+### UPSERT, conservación local y resultados
+
+`INSERT ... ON CONFLICT (loyverse_id) DO UPDATE` conserva las claves internas y
+actualiza solo columnas comerciales permitidas: nombres, precios, estado
+comercial, orden y `synced_at`. Las variantes y opciones existentes no pueden
+cambiar de producto/grupo padre. Las asociaciones se concilian con claves
+compuestas únicas, insertando las nuevas y retirando las comerciales que ya no
+corresponden a las variantes recibidas.
+
+Se mantienen descripciones de producto, disponibilidad local de producto y
+variante, destacados, novedades, fotografías, orden de galería, URLs de medios,
+etiquetas y sus asociaciones. La sincronización no invoca almacenamiento local
+ni R2. El modelo actual no tiene descripción local por variante; la lista
+explícita de columnas actualizables tampoco sobrescribiría ese campo al añadirlo
+posteriormente.
+
+Solo se aplican las bajas explícitas ya definidas: producto inactivo, variante
+comercialmente no disponible, opción inactiva y retirada de asociaciones
+comerciales afectadas. Las identidades y el enriquecimiento local se conservan.
+La ausencia de un registro en una respuesta no provoca bajas. Una API que termine
+prematuramente sin cursor ni señal de error no permite demostrar completitud:
+se conservan los registros ausentes y no se inventan eliminaciones.
+
+Cada salida JSON informa `run_id`, estado, duración, destino sin credenciales,
+huella comercial y contadores por entidad: `new`, `updated`, `unchanged`,
+`retired` y `not_returned`; además informa asociaciones insertadas/retiradas.
+`unchanged` compara el contenido comercial, excluyendo `synced_at` y los campos
+locales: una ejecución exitosa puede renovar fechas aunque no cambien los precios.
+`retired` cuenta identidades existentes afectadas por bajas explícitas, incluso
+si ya tenían ese estado. `not_returned` informa registros conservados por ausencia.
+Los errores abortan el lote completo y producen un código sin publicar cuerpos
+HTTP, URLs privadas, tokens, excepciones del controlador ni trazas.
+
+| Código | Resultado para automatización |
+| ---: | --- |
+| 0 | Simulación válida o actualización confirmada. |
+| 2 | Configuración/autorización, esquema o respuesta inválida. |
+| 3 | Operación incompatible ya en curso. |
+| 4 | Fallo de proveedor: `provider_temporary` o `provider_rejected`. |
+| 5 | Fallo de persistencia; comprobar estado si se intentó ejecutar. |
+| 6 | Fallo inesperado; comprobar estado si se intentó ejecutar. |
+
+### Reproducción aislada y pruebas
+
+Usar el mecanismo seguro existente desde la raíz del backend:
+
+```powershell
+.\.venv\Scripts\python.exe -B scripts/test_auth_phase1.py tests/test_recurring_catalog_sync.py tests/test_sync_catalog_cli.py tests/test_catalog_approval.py tests/test_catalog_sync_postgresql.py tests/test_catalog_tombstones.py tests/test_catalog_transform.py tests/test_catalog_probe.py tests/test_catalog_models.py tests/test_loyverse_client.py tests/test_r2_image_storage.py tests/test_r2_images_api.py tests/test_image_inventory.py -q
+```
+
+El ejecutor crea un clúster PostgreSQL 18 temporal en loopback, sanea el entorno
+del hijo, no carga `.env` y usa una base `mitbol_test_hu008_<12 hex>`. Las pruebas
+recurrentes utilizan sesiones reales y el cliente HTTP real con `MockTransport`;
+las rutas CLI también ejecutan simulación, autorización y escrituras completas.
+Las tablas se crean solo en esa base temporal; no se migran bases compartidas.
+La base se elimina y el clúster se detiene al terminar. El ejecutor conserva
+archivos temporales de diagnóstico según su política existente.
+
+Se verifican los doce escenarios solicitados: primera importación; repetición;
+precio; producto nuevo; variantes nuevas; modificadores/opciones/asociaciones;
+conservación de fotos/etiquetas/descripciones; disponibilidad/destacados/novedades;
+respuestas incompletas o fallidas; concurrencia; rollback después de escribir;
+y rechazo de destinos, permisos, revisiones o autorizaciones inválidos. Se
+comprueban también secuencias intactas en simulación, IDs estables, integridad
+de relaciones, ausencia de bajas implícitas y códigos/salidas sin secretos.
+
+Resultado de la ejecución final: **324 pruebas aprobadas, cero fallos**, con dos
+avisos de deprecación de dependencias del TestClient. Incluye las regresiones de
+R2 y del inventario de imágenes con almacenamiento simulado. Se verificó mediante
+SHA-256 que los 15 archivos con cambios locales anteriores a HU-008 permanecen
+idénticos. `pip check` no encontró dependencias incompatibles.
+
+### Preparación futura para Render y HU-010
+
+No se creó ni modificó ningún servicio Render. Tras autorizar el despliegue:
+
+1. Desplegar esta versión y provisionar por separado un operador PostgreSQL de
+   sincronización con los permisos descritos; no usar el lector público ni el
+   escritor administrativo. Confirmar revisión compatible, host directo y TLS.
+2. Configurar en el proceso del futuro Cron Job las variables anteriores, incluida
+   una autorización recurrente del alcance revisado, `APP_ENV=cloud` y
+   `ADMIN_ENABLED=false`. Usar un token Loyverse con lectura de artículos y
+   tiendas (`ITEMS_READ`, `STORES_READ`); R2 no se necesita para sincronizar.
+3. Ejecutar primero `python -m app.cli.sync_catalog_recurrent --expected-database
+   <base_autorizada> --expected-host <host_autorizado> --store-id
+   <tienda_autorizada> --dry-run` y revisar el informe en ese entorno.
+4. Tras una autorización posterior, programar el mismo comando con `--execute`.
+   Elegir frecuencia y tratamiento de código 3/errores temporales; revisar los
+   costes y límites vigentes del servicio antes de activarlo.
+5. Recoger stdout JSON y códigos de salida para alertas y diagnóstico; no añadir
+   secretos o trazas HTTP. Esto no crea un historial de sincronizaciones en la DB.
+6. HU-010 deberá autenticar y autorizar su petición administrativa y llamar a
+   `RecurringCatalogSync.run` con el mismo destino, alcance y bloqueo; no crear
+   otro escritor ni ejecutar la descarga fuera del bloqueo. El CLI, el cron y ese
+   futuro endpoint deben coincidir en su política de autorización comercial.
+
+Render documenta cron en UTC y una ejecución activa como máximo por servicio;
+el bloqueo PostgreSQL sigue siendo necesario para coordinar otros ejecutores y
+operaciones manuales. Véase [documentación oficial de Render Cron Jobs](https://render.com/docs/cronjobs).
+Quedan pendientes la autorización, configuración y verificación del entorno
+publicado y la elección de frecuencia/alertas. No se implementó HU-010.
+
+## Corte histórico de la guía original
+
+**Corte de verificación: 2 de noviembre de 2026.** Este material histórico se basa en los
 archivos del repositorio, los informes de ejecución guardados y una nueva
 inspección de PostgreSQL en modo de sólo lectura. No se volvió a sincronizar
 Loyverse ni se modificó el código funcional, los endpoints o las migraciones.

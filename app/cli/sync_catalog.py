@@ -19,66 +19,16 @@ from app.models import catalog_metadata
 from app.services.catalog_errors import CatalogSyncError
 from app.services.catalog_manifest import CatalogPlanChanged, catalog_manifest, manifest_sha256
 from app.services.catalog_probe import fetch_catalog
+from app.services.catalog_safety import WRITE_TABLES, inspect_catalog_operator as _inspect_operator
 from app.services.catalog_transform import transform_catalog
 from app.services.loyverse_client import LoyverseAPIClient, LoyverseAPIError
 from app.services.sync_service import CATALOG_SCHEMA_REVISION, CATALOG_COMPATIBLE_REVISIONS, SyncService, validate_catalog_revision
-
-
-WRITE_TABLES = {
-    "Products": "product_id", "ProductVariants": "product_variant_id",
-    "ProductModifiers": "product_modifier_id", "ProductComplements": "product_complement_id",
-}
 
 
 def _table_counts(connection) -> dict:
     return {name: connection.scalar(select(func.count()).select_from(table.to_metadata(
         MetaData(), schema="public",
     ))) for name, table in catalog_metadata.tables.items()}
-
-
-def _inspect_operator(connection) -> dict:
-    """Comprueba capacidad, sin probar DML ni consumir secuencias."""
-    user, session_user, default_read_only, recovery = connection.execute(text(
-        "SELECT current_user, session_user, current_setting('default_transaction_read_only'), "
-        "pg_catalog.pg_is_in_recovery()"
-    )).one()
-    driver = connection.connection.driver_connection
-    if (user != session_user or user != connection.engine.url.username
-            or user == "mitbol_render_reader"):
-        raise DatabaseTargetError("La sincronización requiere la identidad operativa de la conexión, no el lector.")
-    if default_read_only != "off" or driver.readonly is True or recovery:
-        raise DatabaseTargetError("La conexión operativa hereda solo lectura o apunta a una réplica.")
-    if not connection.scalar(text(
-        "SELECT pg_catalog.has_database_privilege(current_user, current_database(), 'CONNECT') "
-        "AND pg_catalog.has_schema_privilege(current_user, 'public', 'USAGE')"
-    )):
-        raise DatabaseTargetError("Falta CONNECT o USAGE para el catálogo autorizado.")
-    for name in (*catalog_metadata.tables, "alembic_version"):
-        relation = f'public."{name}"'
-        valid = connection.scalar(text(
-            "SELECT c.relkind = 'r' AND NOT c.relrowsecurity "
-            "AND c.oid = pg_catalog.to_regclass(:unqualified) "
-            "AND pg_catalog.has_table_privilege(current_user, c.oid, 'SELECT') "
-            "FROM pg_catalog.pg_class c WHERE c.oid = pg_catalog.to_regclass(:relation)"
-        ), {"relation": relation, "unqualified": f'"{name}"'})
-        if not valid:
-            raise DatabaseTargetError("Falta una tabla legible en public, hay RLS o search_path desvía el catálogo.")
-        privileges = ("INSERT", "UPDATE") if name in WRITE_TABLES else (
-            ("INSERT", "DELETE") if name == "ProductModifierAssignments" else ()
-        )
-        for privilege in privileges:
-            if not connection.scalar(text(
-                "SELECT pg_catalog.has_table_privilege(current_user, :relation, :privilege)"
-            ), {"relation": relation, "privilege": privilege}):
-                raise DatabaseTargetError("Faltan permisos para las operaciones comerciales previstas.")
-        if name in WRITE_TABLES:
-            if not connection.scalar(text(
-                "SELECT pg_catalog.has_sequence_privilege(current_user, "
-                "pg_catalog.pg_get_serial_sequence(:relation, :column), 'USAGE,UPDATE')"
-            ), {"relation": relation, "column": WRITE_TABLES[name]}):
-                raise DatabaseTargetError("Falta acceso a una secuencia comercial; no se consumió ningún valor.")
-    return {"user": user, "default_transaction_read_only": default_read_only,
-            "write_permissions_verified": True}
 
 
 def preflight(engine, target: CloudDatabaseTarget, *, require_empty: bool = False) -> dict:
