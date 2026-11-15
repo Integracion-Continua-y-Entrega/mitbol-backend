@@ -15,13 +15,14 @@ from app.db.connection import (
     local_database_url, postgresql_url,
 )
 from app.models import AuthBase, Base
+from app.models.sync_run import SyncBase
 from migrations.validation import validate_initial_database, validate_migration_target
 
 config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-target_metadata = [Base.metadata, AuthBase.metadata]
+target_metadata = [Base.metadata, AuthBase.metadata, SyncBase.metadata]
 
 
 def get_database_url():

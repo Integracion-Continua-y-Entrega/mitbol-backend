@@ -12,6 +12,13 @@ DECLARE
     operation text;
     expected boolean;
     allowed jsonb;
+    queue_installed boolean := to_regclass('public."SyncRuns"') IS NOT NULL;
+    queue_permissions CONSTANT jsonb := '{
+      "SyncRuns": {"SELECT":["run_id","catalog_key","store_id","source","status","requested_by","created_at","started_at","finished_at","available_at","attempts","attempt_token","result","error_code"], "INSERT":["run_id","store_id","source","requested_by"]},
+      "alembic_version": {"SELECT":["version_num"]},
+      "ProductModifiers": {"SELECT":["synced_at"]},
+      "ProductComplements": {"SELECT":["synced_at"]}
+    }';
     policy CONSTANT jsonb := '{
       "Products": {"SELECT":["product_id","loyverse_id","name","description","is_available","is_active","is_featured","is_new","synced_at"], "UPDATE":["description","is_available","is_featured","is_new"]},
       "ProductVariants": {"SELECT":["product_variant_id","loyverse_id","name","price","is_available","is_commercially_available","synced_at","product_id"], "UPDATE":["is_available"]},
@@ -60,6 +67,19 @@ BEGIN
         WHERE n.nspname = 'public' AND c.relkind = 'r' AND policy ? c.relname::text) <> 14 THEN
         RAISE EXCEPTION 'WRITER_MISSING_RELATIONS';
     END IF;
+    IF queue_installed THEN
+        IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity
+              AND queue_permissions ? c.relname::text) <> 4
+           OR NOT has_table_privilege(writer, 'public."SyncRuns"', 'SELECT')
+           OR NOT has_column_privilege(writer, 'public.alembic_version', 'version_num', 'SELECT') THEN
+            RAISE EXCEPTION 'WRITER_QUEUE_PERMISSIONS';
+        END IF;
+        IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
+           (SELECT 1 FROM public.alembic_version WHERE version_num = '20261114_0007') THEN
+            RAISE EXCEPTION 'WRITER_QUEUE_SCHEMA';
+        END IF;
+    END IF;
     IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relname IN
         ('Tags_tag_id_seq','ProductImages_product_image_id_seq','AuditEvents_audit_event_id_seq')) <> 3 THEN
@@ -69,6 +89,10 @@ BEGIN
         WHERE n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
     LOOP
         allowed := CASE WHEN rel.nspname = 'public' AND rel.relkind = 'r' THEN policy -> rel.relname::text ELSE NULL END;
+        IF queue_installed AND rel.nspname = 'public' AND rel.relkind = 'r'
+           AND queue_permissions ? rel.relname::text THEN
+            allowed := queue_permissions -> rel.relname::text;
+        END IF;
         IF rel.nspname = 'public' AND rel.relkind = 'r' AND rel.relname = 'Discounts' THEN
             allowed := '{"SELECT":["discount_id","loyverse_id","name","discount_type","value","scope","is_active","synced_at","created_at"]}'::jsonb;
         END IF;

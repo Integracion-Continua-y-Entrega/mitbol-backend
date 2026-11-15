@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     auth_profile: Literal["restaurant", "frontend_dev"] = "restaurant"
     auth_catalog_enabled: bool = False
     auth_images_enabled: bool = False
+    auth_sync_enabled: bool = False
     auth_database_url: str | None = Field(default=None, repr=False)
     auth_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     auth_cookie_secure: bool = True
@@ -176,6 +177,25 @@ class Settings(BaseSettings):
                 raise ValueError("La administración local requiere una clave aleatoria de 32 a 128 caracteres URL-safe.")
             if self.loyverse_access_token and key == self.loyverse_access_token.get_secret_value():
                 raise ValueError("La credencial administrativa debe ser independiente de Loyverse.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_sync_configuration(self):
+        if not self.auth_sync_enabled:
+            return self
+        if not self.auth_enabled or not self.auth_catalog_enabled:
+            raise ValueError("HU-010 requiere sesiones individuales y catálogo administrativo habilitados.")
+        if self.app_env == "cloud":
+            if self.auth_profile != "restaurant":
+                raise ValueError("HU-010 cloud requiere el perfil restaurant y sus permisos de cola revisados.")
+            url = self.cloud_target.validate_url(self.auth_database_url or "")
+        else:
+            url = local_database_url(self.auth_database_url or "")
+        if (not self.expected_database or not self.expected_database_host
+                or url.database != self.expected_database or url.host != self.expected_database_host
+                or not self.loyverse_store_id or self.loyverse_store_id != self.loyverse_store_id.strip()
+                or any(char.isspace() for char in self.loyverse_store_id)):
+            raise ValueError("HU-010 requiere host, base de autenticación y tienda explícitos y coincidentes.")
         return self
 
     @model_validator(mode="after")

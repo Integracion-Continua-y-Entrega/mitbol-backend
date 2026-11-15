@@ -15,8 +15,8 @@ BEGIN
         RAISE EXCEPTION 'WRITER_LOCAL_TARGET: sólo PostgreSQL 18 temporal del ejecutor.';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006')) THEN
-        RAISE EXCEPTION 'WRITER_SCHEMA: se requiere 20261106_0005 o 20261111_0006.';
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006', '20261114_0007')) THEN
+        RAISE EXCEPTION 'WRITER_SCHEMA: se requiere una revisión entre 0005 y 0007.';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mitbol_admin_writer') THEN
         RAISE EXCEPTION 'WRITER_EXISTS: revisar, no sobrescribir permisos existentes.';
@@ -52,12 +52,24 @@ GRANT SELECT (product_variant_id, tag_id) ON public."ProductTags" TO mitbol_admi
 -- HU-009: lectura administrativa únicamente, sin secuencia ni DML comercial.
 DO $discounts$
 BEGIN
-    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num = '20261111_0006') THEN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261111_0006', '20261114_0007')) THEN
         GRANT SELECT (discount_id, loyverse_id, name, discount_type, value, scope,
                       is_active, synced_at, created_at) ON public."Discounts" TO mitbol_admin_writer;
     END IF;
 END
 $discounts$;
+
+-- HU-010: únicamente consulta y encolado, nunca consumo ni DML comercial.
+DO $sync$
+BEGIN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num = '20261114_0007') THEN
+        GRANT SELECT ON public."SyncRuns" TO mitbol_admin_writer;
+        GRANT INSERT (run_id, store_id, source, requested_by) ON public."SyncRuns" TO mitbol_admin_writer;
+        GRANT SELECT (version_num) ON public.alembic_version TO mitbol_admin_writer;
+        GRANT SELECT (synced_at) ON public."ProductModifiers", public."ProductComplements" TO mitbol_admin_writer;
+    END IF;
+END
+$sync$;
 
 -- HU-006: únicamente indicadores locales adicionales; sin UPDATE de tabla completa.
 GRANT UPDATE (description, is_available, is_featured, is_new) ON public."Products" TO mitbol_admin_writer;

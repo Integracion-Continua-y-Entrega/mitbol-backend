@@ -66,7 +66,7 @@ def test_email_invalid(value):
 
 @pytest.mark.parametrize("roles,active,expected", [
     (["staff"], True, {"catalog:read", "availability:write"}),
-    (["admin"], True, {"catalog:read", "description:write", "availability:write", "images:write", "tags:write", "settings:write"}),
+    (["admin"], True, {"catalog:read", "description:write", "availability:write", "images:write", "tags:write", "settings:write", "sync:read", "sync:execute"}),
     (["admin", "staff"], False, set()), ([], True, set()),
     (["neondb_owner", "mitbol_render_reader", "ADMIN", "unknown"], True, set()),
 ])
