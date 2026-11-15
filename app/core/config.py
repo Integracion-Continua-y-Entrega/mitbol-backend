@@ -22,10 +22,17 @@ class Settings(BaseSettings):
     admin_enabled: bool = False
     admin_api_key: SecretStr | None = None
     image_storage_root: Path = Path("storage/product-images")
+    image_storage_provider: Literal["local", "r2"] = "local"
+    r2_endpoint_url: str | None = None
+    r2_bucket: str | None = None
+    r2_access_key_id: SecretStr | None = None
+    r2_secret_access_key: SecretStr | None = None
+    r2_key_prefix: str = "mitbol/product-images"
     auth_enabled: bool = False
     auth_profile: Literal["restaurant", "frontend_dev"] = "restaurant"
     auth_catalog_enabled: bool = False
     auth_images_enabled: bool = False
+    auth_sync_enabled: bool = False
     auth_database_url: str | None = Field(default=None, repr=False)
     auth_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     auth_cookie_secure: bool = True
@@ -143,6 +150,24 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def validate_image_storage_configuration(self):
+        if self.image_storage_provider not in {"local", "r2"}:
+            raise ValueError("IMAGE_STORAGE_PROVIDER requiere local o r2.")
+        if self.image_storage_provider == "local":
+            return self
+        if not re.fullmatch(r"https://[0-9a-f]{32}(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com/?", self.r2_endpoint_url or ""):
+            raise ValueError("R2_ENDPOINT_URL requiere un endpoint HTTPS de cuenta Cloudflare R2, sin credenciales ni rutas.")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", self.r2_bucket or ""):
+            raise ValueError("R2_BUCKET requiere un nombre de bucket válido de 3 a 63 caracteres.")
+        for secret in (self.r2_access_key_id, self.r2_secret_access_key):
+            value = secret.get_secret_value() if secret else ""
+            if not value or any(char.isspace() or ord(char) < 32 for char in value):
+                raise ValueError("R2 requiere R2_ACCESS_KEY_ID y R2_SECRET_ACCESS_KEY explícitas y sin espacios.")
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*", self.r2_key_prefix):
+            raise ValueError("R2_KEY_PREFIX requiere segmentos explícitos sin puntos ni barras exteriores.")
+        return self
+
+    @model_validator(mode="after")
     def validate_admin_configuration(self):
         if self.app_env == "cloud" and self.admin_enabled:
             raise ValueError("Cloud requiere ADMIN_ENABLED=false; la clave local no autoriza acceso remoto.")
@@ -152,6 +177,25 @@ class Settings(BaseSettings):
                 raise ValueError("La administración local requiere una clave aleatoria de 32 a 128 caracteres URL-safe.")
             if self.loyverse_access_token and key == self.loyverse_access_token.get_secret_value():
                 raise ValueError("La credencial administrativa debe ser independiente de Loyverse.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_sync_configuration(self):
+        if not self.auth_sync_enabled:
+            return self
+        if not self.auth_enabled or not self.auth_catalog_enabled:
+            raise ValueError("HU-010 requiere sesiones individuales y catálogo administrativo habilitados.")
+        if self.app_env == "cloud":
+            if self.auth_profile != "restaurant":
+                raise ValueError("HU-010 cloud requiere el perfil restaurant y sus permisos de cola revisados.")
+            url = self.cloud_target.validate_url(self.auth_database_url or "")
+        else:
+            url = local_database_url(self.auth_database_url or "")
+        if (not self.expected_database or not self.expected_database_host
+                or url.database != self.expected_database or url.host != self.expected_database_host
+                or not self.loyverse_store_id or self.loyverse_store_id != self.loyverse_store_id.strip()
+                or any(char.isspace() for char in self.loyverse_store_id)):
+            raise ValueError("HU-010 requiere host, base de autenticación y tienda explícitos y coincidentes.")
         return self
 
     @model_validator(mode="after")
@@ -169,8 +213,10 @@ class Settings(BaseSettings):
                     if self.auth_origins != ["http://localhost:5173"]:
                         raise ValueError("frontend_dev sólo admite el origen http://localhost:5173.")
                 elif (self.auth_public_origin != "https://mitbol-backend.onrender.com"
-                        or self.auth_origins != ["https://mitbol-frontend.onrender.com"] or self.auth_images_enabled):
-                    raise ValueError("AUTH_ENABLED bloqueado: el perfil del restaurante no admite localhost ni escrituras de imágenes.")
+                        or self.auth_origins != ["https://mitbol-frontend.onrender.com"]):
+                    raise ValueError("AUTH_ENABLED bloqueado: el perfil del restaurante requiere sus orígenes HTTPS aprobados.")
+                elif self.auth_images_enabled and self.image_storage_provider != "r2":
+                    raise ValueError("AUTH_ENABLED bloqueado: las escrituras de imágenes del restaurante requieren Cloudflare R2 privado.")
         if not self.auth_enabled:
             return self
         if self.auth_images_enabled and not self.auth_catalog_enabled:

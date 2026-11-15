@@ -31,7 +31,7 @@ BEGIN
         RAISE EXCEPTION 'HU009_WRONG_TARGET_OR_OPERATOR';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS (
-        SELECT 1 FROM public.alembic_version WHERE version_num = '20261111_0006'
+        SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261111_0006', '20261114_0007')
     ) THEN
         RAISE EXCEPTION 'HU009_WRONG_SCHEMA';
     END IF;

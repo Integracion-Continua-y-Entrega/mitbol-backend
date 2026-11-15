@@ -34,7 +34,7 @@ def audit_success(db, action, resource_type, resource_id):
 
 def track_image_storage(db, storage):
     if managed(db):
-        db.info.setdefault("admin_image_storages", {})[storage.root] = storage
+        db.info.setdefault("admin_image_storages", {})[storage.identity] = storage
 
 
 def recover_image_storages(db, transaction):

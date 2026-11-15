@@ -27,13 +27,13 @@ from app.services.loyverse_client import LoyverseAPIClient
 # Un catálogo por base: todas las instancias del servicio usan la misma clave.
 CATALOG_SYNC_LOCK_KEY = 0x4D4954424F4C
 CATALOG_SCHEMA_REVISION = "20261102_0003"
-CATALOG_COMPATIBLE_REVISIONS = frozenset({CATALOG_SCHEMA_REVISION, "20261105_0004", "20261106_0005", "20261111_0006"})
+CATALOG_COMPATIBLE_REVISIONS = frozenset({CATALOG_SCHEMA_REVISION, "20261105_0004", "20261106_0005", "20261111_0006", "20261114_0007"})
 
 
 def validate_catalog_revision(connection) -> str:
     heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
     if len(heads) != 1 or heads[0] not in CATALOG_COMPATIBLE_REVISIONS:
-        raise CatalogTargetError("La sincronización requiere 20261102_0003 o una revisión compatible hasta 20261111_0006.")
+        raise CatalogTargetError("La sincronización requiere 20261102_0003 o una revisión compatible hasta 20261114_0007.")
     return heads[0]
 
 
@@ -42,13 +42,18 @@ class SyncService:
         self, session_factory: Callable[[], Session], *, expected_database: str, store_id: str,
         cloud_target: CloudDatabaseTarget | None = None,
         before_write: Callable[[Session, CatalogSnapshot, CatalogPlan], None] | None = None,
+        before_fetch: Callable[[Session], None] | None = None,
+        after_write: Callable[[Session, dict], None] | None = None,
+        auth_catalog: bool = False,
     ):
         if cloud_target is not None:
             if expected_database != cloud_target.expected_database:
                 raise CatalogTargetError("La base de sincronización no coincide con la autorización cloud.")
         elif environment_mode() == "cloud":
             raise CatalogTargetError("La sincronización cloud requiere autorización explícita de host y base.")
-        elif expected_database != "mitbol_dev" and not re.fullmatch(
+        elif not (auth_catalog and (expected_database == "mitbol_auth_local" or re.fullmatch(
+            r"mitbol_test_auth_[0-9a-f]{32}", expected_database,
+        ))) and expected_database != "mitbol_dev" and not re.fullmatch(
             r"mitbol_test_hu008_[0-9a-f]{12}", expected_database,
         ):
             raise CatalogTargetError("El destino no es mitbol_dev ni una base aislada de pruebas.")
@@ -59,13 +64,17 @@ class SyncService:
         self.store_id = store_id
         self.cloud_target = cloud_target
         self.before_write = before_write
+        self.before_fetch = before_fetch
+        self.after_write = after_write
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, *, read_only: bool = False):
         try:
             with self.session_factory() as session, session.begin():
                 if session.get_bind().dialect.name != "postgresql":
                     raise CatalogTargetError("La sincronización requiere PostgreSQL.")
+                if read_only:
+                    session.connection().exec_driver_sql("SET TRANSACTION READ ONLY")
                 if self.cloud_target is not None:
                     self.cloud_target.validate_connection(session.connection())
                     validate_catalog_revision(session.connection())
@@ -76,6 +85,8 @@ class SyncService:
                     raise CatalogTargetError("La conexión real no coincide con la base autorizada.")
                 if not session.scalar(select(func.pg_try_advisory_xact_lock(CATALOG_SYNC_LOCK_KEY))):
                     raise CatalogSyncBusyError("Ya hay una sincronización comercial en ejecución.")
+                if self.before_fetch is not None:
+                    self.before_fetch(session)
                 yield session
         except DatabaseTargetError as error:
             raise CatalogTargetError(str(error)) from None
@@ -104,11 +115,24 @@ class SyncService:
             result = self._validated_write(session, snapshot)
         return result
 
+    async def preview(self, client: LoyverseAPIClient, inspect_plan: Callable) -> dict:
+        """Misma descarga/validación y bloqueo, con transacción READ ONLY.
+
+        No invoca _write ni before_write: un UPSERT seguido de rollback también
+        consumiría secuencias. El inspector debe resolver el informe con SELECT.
+        """
+        with self._transaction(read_only=True) as session:
+            snapshot = await fetch_catalog(client, self.store_id, include_deleted=True)
+            return inspect_plan(session, snapshot, self._plan(snapshot))
+
     def _validated_write(self, session: Session, snapshot: CatalogSnapshot) -> dict:
         plan = self._plan(snapshot)
         if self.before_write is not None:
             self.before_write(session, snapshot, plan)
-        return self._write(session, plan)
+        result = self._write(session, plan)
+        if self.after_write is not None:
+            self.after_write(session, result)
+        return result
 
     @staticmethod
     def _upsert(session: Session, model, values: dict, fields: tuple[str, ...], *, parent=None) -> int:

@@ -19,6 +19,7 @@ from app.services.sync_service import CATALOG_SYNC_LOCK_KEY
 
 
 DISCOUNT_SCHEMA_REVISION = "20261111_0006"
+DISCOUNT_COMPATIBLE_REVISIONS = frozenset({DISCOUNT_SCHEMA_REVISION, "20261114_0007"})
 
 
 class DiscountSyncError(ValueError):
@@ -59,8 +60,9 @@ class DiscountSyncService:
                 self.cloud_target.validate_connection(connection)
             if session.scalar(select(func.current_database())) != self.expected_database:
                 raise DiscountSyncError("La conexión real no coincide con la base autorizada.")
-            if MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads() != (DISCOUNT_SCHEMA_REVISION,):
-                raise DiscountSyncError("La sincronización requiere la revisión 20261111_0006.")
+            heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
+            if len(heads) != 1 or heads[0] not in DISCOUNT_COMPATIBLE_REVISIONS:
+                raise DiscountSyncError("La sincronización requiere 20261111_0006 o su extensión compatible 20261114_0007.")
             # Compartido con catálogo: impide importar fotografías comerciales
             # concurrentes en distinto orden. Se libera al cerrar la transacción.
             if not session.scalar(select(func.pg_try_advisory_xact_lock(CATALOG_SYNC_LOCK_KEY))):

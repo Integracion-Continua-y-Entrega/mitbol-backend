@@ -15,7 +15,7 @@ from app.db.connection import (
     CloudDatabaseTarget, DatabaseTargetError, create_database_engine, environment_mode,
     local_database_url, validate_local_connection,
 )
-from app.services.discount_sync_service import DISCOUNT_SCHEMA_REVISION, DiscountSyncError, DiscountSyncService
+from app.services.discount_sync_service import DISCOUNT_COMPATIBLE_REVISIONS, DiscountSyncError, DiscountSyncService
 from app.services.discount_transform import DiscountValidationError
 from app.services.loyverse_client import LoyverseAPIClient, LoyverseAPIError
 
@@ -41,8 +41,9 @@ def preflight(engine, *, expected_database: str, cloud_target=None) -> dict:
         if int(connection.exec_driver_sql("SHOW server_version_num").scalar_one()) // 10000 != 18:
             raise DiscountSyncError("La operación requiere PostgreSQL 18.")
         context = MigrationContext.configure(connection, opts={"version_table_schema": "public"})
-        if context.get_current_heads() != (DISCOUNT_SCHEMA_REVISION,):
-            raise DiscountSyncError("La sincronización requiere la revisión 20261111_0006.")
+        heads = context.get_current_heads()
+        if len(heads) != 1 or heads[0] not in DISCOUNT_COMPATIBLE_REVISIONS:
+            raise DiscountSyncError("La sincronización requiere 20261111_0006 o su extensión compatible 20261114_0007.")
         valid = connection.scalar(text("""
             SELECT relkind = 'r' AND NOT relrowsecurity FROM pg_catalog.pg_class
             WHERE oid = pg_catalog.to_regclass('public."Discounts"')
@@ -65,7 +66,7 @@ def preflight(engine, *, expected_database: str, cloud_target=None) -> dict:
         """)):
             raise DiscountSyncError("Falta USAGE en la secuencia de descuentos.")
         count = connection.scalar(text('SELECT count(*) FROM public."Discounts"'))
-    return dict(status="preflight_ok", revision=DISCOUNT_SCHEMA_REVISION,
+    return dict(status="preflight_ok", revision=heads[0],
                 database=expected_database, discount_count=count, writes=False, loyverse_contacted=False)
 
 

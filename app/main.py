@@ -13,19 +13,21 @@ from app.core.security import ADMIN_SECURITY_DESCRIPTION, AdminRequestGuard
 from app.db.database import session_factory_for
 from app.schemas.menu import MenuProductDetailResponse, MenuResponse
 from app.services.enrichment_errors import EnrichmentError
-from app.services.image_storage import LocalImageStorage
+from app.services.image_storage import create_image_storage
 
 def create_app(config: Settings | None = None) -> FastAPI:
     config = config or settings
     config.validate_database_configuration()
     config.validate_admin_configuration()
     config.validate_auth_configuration()
+    config.validate_sync_configuration()
 
     @asynccontextmanager
     async def lifespan(application):
         try:
             yield
         finally:
+            application.state.image_storage.close()
             application.state.session_factory.kw["bind"].dispose()
             if config.auth_enabled:
                 application.state.auth_session_factory.kw["bind"].dispose()
@@ -39,7 +41,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     )
     application.state.settings = config
     application.state.session_factory = session_factory_for(config)
-    application.state.image_storage = LocalImageStorage(config.image_storage_root)
+    application.state.image_storage = create_image_storage(config)
     if not config.auth_enabled:
         application.add_middleware(
             CORSMiddleware, allow_origins=config.cors_origins, allow_credentials=False,
@@ -68,8 +70,10 @@ def create_app(config: Settings | None = None) -> FastAPI:
 
         @application.exception_handler(RequestValidationError)
         async def auth_validation(request, error):
-            if request.url.path.startswith("/api/auth/"):
-                return JSONResponse({"detail": "Solicitud de autenticación inválida."}, status_code=422,
+            if request.url.path.startswith(("/api/auth/", "/api/admin/sync/")):
+                message = ("Solicitud de sincronización inválida." if request.url.path.startswith("/api/admin/sync/")
+                           else "Solicitud de autenticación inválida.")
+                return JSONResponse({"detail": message}, status_code=422,
                                     headers={"Cache-Control": "no-store"})
             return await request_validation_exception_handler(request, error)
 
@@ -77,9 +81,12 @@ def create_app(config: Settings | None = None) -> FastAPI:
     async def enrichment_error(request: Request, error: EnrichmentError):
         return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
 
-    # Alembic administra el esquema. El router de sincronización sigue deshabilitado.
+    # Alembic administra el esquema; el router legado de sincronización no se registra.
     application.include_router(menu_router)
     application.include_router(media_router)
+    if config.auth_sync_enabled:
+        from app.api.admin_sync import router as sync_router
+        application.include_router(sync_router)
     if config.admin_enabled or (config.auth_enabled and config.auth_catalog_enabled):
         from app.api.admin_catalog import create_admin_router
         application.include_router(create_admin_router(authenticated=config.auth_enabled,

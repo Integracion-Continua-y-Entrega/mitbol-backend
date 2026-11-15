@@ -6,7 +6,7 @@ from types import MappingProxyType
 
 ROLE_PERMISSIONS = MappingProxyType({
     "admin": frozenset({"catalog:read", "description:write", "availability:write",
-                        "images:write", "tags:write", "settings:write"}),
+                        "images:write", "tags:write", "settings:write", "sync:read", "sync:execute"}),
     "staff": frozenset({"catalog:read", "availability:write"}),
 })
 
