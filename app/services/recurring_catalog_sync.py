@@ -48,6 +48,9 @@ class RecurringCatalogSync:
         operator = inspect_catalog_operator(connection)
         if operator["user"] in {"mitbol_render_reader", "mitbol_admin_writer"}:
             raise CatalogTargetError("La sincronización requiere un operador comercial independiente de los roles web.")
+        if self.cloud_target is not None:
+            from app.db.worker_policy import validate_worker_connection
+            validate_worker_connection(connection, self.cloud_target)
         scope = {"host": self.expected_host, "database": self.expected_database,
                  "user": operator["user"], "store_id": self.store_id, "revision": revision}
         if not dry_run:

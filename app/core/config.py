@@ -213,8 +213,10 @@ class Settings(BaseSettings):
                     if self.auth_origins != ["http://localhost:5173"]:
                         raise ValueError("frontend_dev sólo admite el origen http://localhost:5173.")
                 elif (self.auth_public_origin != "https://mitbol-backend.onrender.com"
-                        or self.auth_origins != ["https://mitbol-frontend.onrender.com"] or self.auth_images_enabled):
-                    raise ValueError("AUTH_ENABLED bloqueado: el perfil del restaurante no admite localhost ni escrituras de imágenes.")
+                        or self.auth_origins != ["https://mitbol-frontend.onrender.com"]):
+                    raise ValueError("AUTH_ENABLED bloqueado: el perfil del restaurante requiere sus orígenes HTTPS aprobados.")
+                elif self.auth_images_enabled and self.image_storage_provider != "r2":
+                    raise ValueError("AUTH_ENABLED bloqueado: las escrituras de imágenes del restaurante requieren Cloudflare R2 privado.")
         if not self.auth_enabled:
             return self
         if self.auth_images_enabled and not self.auth_catalog_enabled:

@@ -1,5 +1,11 @@
 # Guía técnica de estudio — MITBOL v2.1, HU-008
 
+La extensión local [HU-010: administrar sincronizaciones](../../features/hu010-sync-management.md)
+añade cola e historial sobre este orquestador. Su migración `20261114_0007` es
+compatible con HU-008; el CLI independiente conserva sus reglas y no registra
+historial de cola. HU-010 está preparado para cloud mediante flags explícitos y
+perfiles SQL mínimos; no está activado ni desplegado. Los webhooks siguen cerrados.
+
 ## Sincronización recurrente — actualización del 14 de noviembre de 2026
 
 El catálogo existente se puede actualizar con
@@ -28,6 +34,9 @@ al repositorio. Para esta validación no se utiliza el `.env` privado real.
 Variables obligatorias:
 
 - `APP_ENV=local`, `test` o `cloud`, explícito; `ADMIN_ENABLED=false` explícito.
+- En cloud, usar `mitbol_catalog_worker`, preparado/verificado según el
+  [procedimiento 0007](../../features/hu010-sync-management.md#preparación-neon-0005--0007-sin-ejecución-real).
+  El preflight recurrente rechaza perfiles con permisos adicionales antes de HTTP.
 - `DATABASE_URL`, `EXPECTED_DATABASE`, `EXPECTED_DATABASE_HOST`: URL y destino
   coincidentes con los argumentos. Local/test solo acepta loopback y las bases
   admitidas por `SyncService`: `mitbol_dev` o `mitbol_test_hu008_<12 hex>`.
