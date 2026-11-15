@@ -1,5 +1,100 @@
 # Guía técnica de estudio — MITBOL v2.1, HU-008
 
+## Categorías comerciales: ampliación 0008 (15 de noviembre de 2026)
+
+El modelo del prototipo `app/models/category.py` conserva `categories` en LegacyBase,
+fuera de Alembic. No se importa, renombra ni elimina esa tabla. El catálogo vigente
+incorpora CommercialCategory con tabla `Categories`: category_id INTEGER/SERIAL PK,
+loyverse_id VARCHAR(100) UNIQUE, name VARCHAR(64), color VARCHAR(20) nullable,
+is_active BOOLEAN y synced_at TIMESTAMPTZ. Products.category_id es una FK nullable,
+indexada y con ON DELETE RESTRICT. Los nombres de restricciones siguen MITBOL.
+
+La migración `20261115_0008` desciende de `20261114_0007`: añade una tabla,
+una columna nula y sus restricciones/índices. Conserva las 20 tablas previas,
+registros, índices y secuencias. No asigna categorías históricas ni aplica GRANT.
+El downgrade elimina la clasificación nueva y no se usa como rollback operativo.
+No se ejecutó la migración en Neon ni se modificó ningún servicio publicado.
+
+La [API oficial de Loyverse](https://developer.loyverse.com/docs/#tag/Categories)
+representa categorías globales por ID, nombre (1–64), color y deleted_at; los
+artículos aportan category_id o null. Se reutilizan cliente HTTP, paginación
+limit/cursor y show_deleted=true. En revisión 0008, carga inicial, recurrente y
+trabajador HU-010 descargan categorías bajo los mismos bloqueos/transacción.
+El token necesita ITEMS_READ (incluye categorías, artículos y modificadores) y
+STORES_READ para validar la tienda; no se requieren escrituras en Loyverse.
+Las revisiones anteriores conservan su perfil sin categorías; los metadatos de
+pruebas históricas se mantienen separados del ORM vigente.
+
+Se validan IDs únicos, nombres, colores del enum oficial y referencias antes del
+primer UPSERT. Las categorías se insertan/actualizan antes de Products.category_id.
+Un null explícito retira la asignación; un campo omitido o referencia desconocida/
+eliminada aborta el lote. No se inventa una categoría ni un nombre. La ausencia de
+una categoría en una respuesta no la desactiva. Un deleted_at válido retira sólo
+la categoría conocida, conservando fila, productos y referencias. La API la
+representa como categoría null. Las bajas de categorías no desactivan productos.
+Una categoría que vuelve activa se reactiva con el mismo ID interno.
+
+El UPSERT modifica sólo nombre/color/estado/fecha de categorías y la FK comercial
+del producto. Conserva descripciones, fotografías/R2, etiquetas, disponibilidad
+local, destacados y novedades. La simulación incluye contadores categories sin
+DML ni consumo de secuencias. HU-010 guarda y expone esos contadores con el mismo
+commit del catálogo; admite historial 0007 que no contenía esta propiedad.
+
+| Rol | Delta mínimo 0008 |
+|---|---|
+| mitbol_render_reader | SELECT(category_id,name,color,is_active) de Categories. Sin secuencia ni escritura. |
+| mitbol_admin_writer | SELECT Products.category_id, necesario para el ORM. Sin edición de categorías ni lectura privada de Categories. |
+| mitbol_catalog_worker | SELECT Categories; INSERT(loyverse_id,name,color,is_active,synced_at), UPDATE(name,color,is_active,synced_at); INSERT/UPDATE Products.category_id; USAGE de Categories_category_id_seq. |
+
+`docs/database/update_catalog_categories.sql` actualiza roles existentes con marca
+`mitbol.approved_category_write=hu008-categories-reviewed`, destino/operador/TLS
+verificados y revisión exacta 0008. No crea roles ni cambia contraseñas; si el
+trabajador aún no existe, su preparación posterior instala el perfil 0008.
+Los preparadores y verificadores mantienen perfiles estrictos para revisiones
+anteriores y admiten 0008 sin aceptar privilegios adicionales. El trabajador
+pasa de 118 a 125 columnas y de cuatro a cinco secuencias.
+
+### Ensayo posterior autorizado en Neon
+
+1. Conservar pg_dump -Fc reciente de production, SHA-256, listado de pg_restore,
+   roles/membresías/ACL sin secretos y restauración local validada.
+2. Crear una rama temporal desde production. Verificar en Console/API su ID,
+   parentesco, endpoint directo diferente, base, operador y TLS. No usar production.
+3. Registrar las 20 tablas, conteos/huellas, índices, secuencias, ACL y revisión 0007.
+4. Con autorización separada, ejecutar únicamente `alembic upgrade 20261115_0008`
+   en esa rama mediante la conexión privada validada. Verificar COMMIT desde otra
+   conexión, 21 tablas, FK nulas y datos anteriores idénticos. Usar lock_timeout
+   acotado y ventana de mantenimiento: la FK y el índice adquieren bloqueos.
+5. Aplicar el delta de permisos; verificar los tres LOGINs reales y comparar el
+   esquema con los modelos. No repetir preparadores de roles existentes.
+6. Ensayar Loyverse simulado. Antes de una sincronización real, exigir autorización
+   y renovar MITBOL_RECURRENT_SYNC_APPROVAL con revision=20261115_0008.
+7. Aprobar por separado production y despliegue. Pausar el trabajador/Cron y cerrar
+   temporalmente las operaciones administrativas durante el cambio: los perfiles
+   estrictos anteriores rechazan los privilegios nuevos. Primero esquema/permisos,
+   después código y trabajador del mismo commit. Ante fallo, cerrar flags y conservar el
+   esquema aditivo; no aplicar downgrade ni restaurar production automáticamente.
+
+Pruebas reproducibles:
+
+```powershell
+# Categorías, migración, API, sincronización y ACL.
+python -B scripts/test_auth_phase1.py tests/test_categories.py -q
+# Suite completa, con clúster independiente para el lector.
+python -B scripts/test_auth_phase1.py --with-reader -q
+```
+
+Validación local final del 15 de noviembre de 2026: **1.955 pruebas aprobadas**,
+sin fallos, errores ni omisiones (567,65 segundos). Incluye los 14 casos nuevos de
+categorías y las regresiones de HU-008, HU-010, R2, autenticación y permisos. Se
+comprobaron migración 0007->0008, conservación de filas/índices/secuencias, UPSERT,
+asignaciones/nulos/bajas/reactivación, rollback, filtros y LOGINs reales mínimos.
+Las 121 combinaciones de permisos ausentes comprueban el rechazo previo a HTTP/DML
+en los perfiles 0003 y 0008. Se usa PostgreSQL 18 temporal y Loyverse/R2 simulados;
+nunca `.env` privado ni servicios externos. Los dos clústeres se detuvieron al salir.
+
+## Registro histórico anterior
+
 La extensión local [HU-010: administrar sincronizaciones](../../features/hu010-sync-management.md)
 añade cola e historial sobre este orquestador. Su migración `20261114_0007` es
 compatible con HU-008; el CLI independiente conserva sus reglas y no registra

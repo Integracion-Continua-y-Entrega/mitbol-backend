@@ -30,6 +30,7 @@ class AssignmentChanges(BaseModel):
 
 
 class CatalogChanges(BaseModel):
+    categories: EntityChanges | None = None
     products: EntityChanges
     variants: EntityChanges
     modifiers: EntityChanges

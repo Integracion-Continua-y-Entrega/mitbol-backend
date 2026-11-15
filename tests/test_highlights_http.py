@@ -119,7 +119,7 @@ def test_local_and_cloud_writer_profiles_share_exact_column_policy():
     policies = []
     for filename in ["verify_admin_writer_local.sql", "verify_admin_writer_neon.sql"]:
         source = (root / filename).read_text(encoding="utf-8")
-        policy = source.split("policy CONSTANT jsonb := '", 1)[1].split("';", 1)[0]
+        policy = source.split("    policy jsonb := '", 1)[1].split("';", 1)[0]
         policies.append(json.loads(policy))
     assert policies[0] == policies[1]
     assert set(policies[0]["Products"]["UPDATE"]) == {"description", "is_available", "is_featured", "is_new"}

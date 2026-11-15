@@ -5,17 +5,19 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, false, true
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, false, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.product_variant import ProductVariant
+    from app.models.commercial_category import CommercialCategory
 
 
 class Product(Base):
     __tablename__ = "Products"
+    __table_args__ = (Index("ix_Products_category_id", "category_id"),)
 
     product_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     loyverse_id: Mapped[str] = mapped_column(String(100), unique=True)
@@ -26,6 +28,11 @@ class Product(Base):
     is_featured: Mapped[bool] = mapped_column(Boolean, server_default=false())
     is_new: Mapped[bool] = mapped_column(Boolean, server_default=true())
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("Categories.category_id", ondelete="RESTRICT"),
+    )
+
+    category: Mapped[CommercialCategory | None] = relationship(back_populates="products")
 
     variants: Mapped[list[ProductVariant]] = relationship(
         back_populates="product", passive_deletes="all"

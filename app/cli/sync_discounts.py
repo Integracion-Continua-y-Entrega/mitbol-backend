@@ -43,7 +43,7 @@ def preflight(engine, *, expected_database: str, cloud_target=None) -> dict:
         context = MigrationContext.configure(connection, opts={"version_table_schema": "public"})
         heads = context.get_current_heads()
         if len(heads) != 1 or heads[0] not in DISCOUNT_COMPATIBLE_REVISIONS:
-            raise DiscountSyncError("La sincronización requiere 20261111_0006 o su extensión compatible 20261114_0007.")
+            raise DiscountSyncError("La sincronización requiere 20261111_0006 o una revisión compatible hasta 20261115_0008.")
         valid = connection.scalar(text("""
             SELECT relkind = 'r' AND NOT relrowsecurity FROM pg_catalog.pg_class
             WHERE oid = pg_catalog.to_regclass('public."Discounts"')

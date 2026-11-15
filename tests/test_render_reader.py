@@ -20,7 +20,7 @@ from app.core.config import Settings
 from app.db.connection import READ_ONLY_ROLE_SQL
 from app.db.database import get_db
 from app.main import create_app
-from app.models import AuthBase, Base, Product, ProductVariant, ProductModifier, ProductComplement, ProductModifierAssignment
+from app.models import AuthBase, Base, CommercialCategory, Product, ProductVariant, ProductModifier, ProductComplement, ProductModifierAssignment
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -229,6 +229,11 @@ def test_future_tables_require_explicit_reviewed_read_grants(reader):
 
 def test_public_menu_detail_and_media_need_no_write_privileges(reader):
     connection = reader.connection
+    # Extender sólo esta fixture sintética para el ORM público actual. Los demás
+    # casos conservan el perfil histórico 0003 y sus comprobaciones de seguridad.
+    CommercialCategory.__table__.create(connection)
+    connection.exec_driver_sql('ALTER TABLE public."Products" ADD COLUMN category_id integer REFERENCES public."Categories"(category_id)')
+    connection.exec_driver_sql('GRANT SELECT (category_id,name,color,is_active) ON public."Categories" TO mitbol_render_reader')
     product_id = connection.scalar(select(Product.product_id).order_by(Product.product_id))
     config = Settings(_env_file=None, app_env="cloud", loyverse_access_token=None,
                       database_url="postgresql://reader:fake@ep-reader.example.com/mitbol_cloud_dev?sslmode=verify-full",

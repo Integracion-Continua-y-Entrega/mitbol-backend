@@ -138,7 +138,14 @@ def public_response(lab, tmp_path):
 
 def test_preexisting_reader_catalog_and_models_survive_each_migration(migration_lab, tmp_path):
     lab = migration_lab
-    baseline, response = catalog_snapshot(lab.owner), public_response(lab, tmp_path)
+    def reader_rows():
+        with lab.reader.connect() as db:
+            return {name: db.execute(select(table).order_by(*table.primary_key.columns)).all()
+                    for name, table in catalog_metadata.tables.items()}
+
+    # Proyectar columnas históricas durante 0003->0005; el ORM público nuevo
+    # requiere 0008. Su compatibilidad HTTP se comprueba después de ese upgrade.
+    baseline, response = catalog_snapshot(lab.owner), reader_rows()
     assert all(len(rows) == 1 for rows in baseline[0].values())
     result = lab.preflight(PREVIOUS)
     assert result.returncode == 0, result.stderr
@@ -147,7 +154,7 @@ def test_preexisting_reader_catalog_and_models_survive_each_migration(migration_
         with lab.owner.begin() as db:
             command.upgrade(config_for(db), revision)
         assert catalog_snapshot(lab.owner) == baseline
-        assert public_response(lab, tmp_path) == response
+        assert reader_rows() == response
         result = lab.preflight(revision)
         assert result.returncode == 0, result.stderr
         with lab.owner.connect() as db:
@@ -172,6 +179,12 @@ def test_preexisting_reader_catalog_and_models_survive_each_migration(migration_
     denied(writer, 'UPDATE "Products" SET loyverse_id=\'forbidden\'')
     denied(writer, 'UPDATE "ProductVariants" SET loyverse_id=\'forbidden\'')
     assert catalog_snapshot(lab.owner) == baseline
+    from category_runtime import upgrade_runtime
+    upgrade_runtime(lab.owner)
+    assert reader_rows() == response
+    menu, detail = public_response(lab, tmp_path)
+    assert menu['products'][0]['category'] is None
+    assert detail['product']['category'] is None
 
 
 @pytest.mark.parametrize("revision", [CORE, HEAD])

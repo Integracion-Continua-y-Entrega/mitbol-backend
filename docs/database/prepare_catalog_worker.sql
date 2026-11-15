@@ -1,5 +1,5 @@
 -- PROPUESTA HU-008/HU-010. Identidad nueva, independiente de los roles web.
--- Requiere 0007 y mitbol.approved_worker_write=hu010-worker-reviewed.
+-- Requiere 0007/0008 y mitbol.approved_worker_write=hu010-worker-reviewed.
 -- Neon: validar externamente branch/host/base y TLS ANTES de ejecutar.
 -- PASSWORD NULL: el operador provisiona la credencial por canal privado después.
 BEGIN;
@@ -24,7 +24,7 @@ BEGIN
         RAISE EXCEPTION 'WORKER_WRONG_TARGET_OR_OPERATOR';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num = '20261114_0007') THEN
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007', '20261115_0008')) THEN
         RAISE EXCEPTION 'WORKER_WRONG_SCHEMA';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='mitbol_catalog_worker') THEN
@@ -71,4 +71,15 @@ GRANT USAGE ON SEQUENCE public."Products_product_id_seq", public."ProductVariant
 ALTER ROLE mitbol_catalog_worker SET search_path TO pg_catalog, public;
 ALTER ROLE mitbol_catalog_worker SET lock_timeout TO '5s';
 -- El operador coordina los timeouts del proceso con la duración del catálogo.
+DO $categories$
+BEGIN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
+        GRANT SELECT ON public."Categories" TO mitbol_catalog_worker;
+        GRANT INSERT (loyverse_id,name,color,is_active,synced_at), UPDATE (name,color,is_active,synced_at)
+            ON public."Categories" TO mitbol_catalog_worker;
+        GRANT INSERT (category_id), UPDATE (category_id) ON public."Products" TO mitbol_catalog_worker;
+        GRANT USAGE ON SEQUENCE public."Categories_category_id_seq" TO mitbol_catalog_worker;
+    END IF;
+END
+$categories$;
 COMMIT;

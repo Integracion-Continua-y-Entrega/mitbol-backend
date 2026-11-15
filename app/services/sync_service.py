@@ -14,7 +14,7 @@ from app.db.connection import (
     CloudDatabaseTarget, DatabaseTargetError, environment_mode, validate_local_connection,
 )
 from app.models import (
-    Product, ProductComplement, ProductModifier, ProductModifierAssignment, ProductVariant,
+    CommercialCategory, Product, ProductComplement, ProductModifier, ProductModifierAssignment, ProductVariant,
 )
 from app.services.catalog_errors import (
     CatalogPersistenceError, CatalogReferenceError, CatalogSyncBusyError,
@@ -27,13 +27,14 @@ from app.services.loyverse_client import LoyverseAPIClient
 # Un catálogo por base: todas las instancias del servicio usan la misma clave.
 CATALOG_SYNC_LOCK_KEY = 0x4D4954424F4C
 CATALOG_SCHEMA_REVISION = "20261102_0003"
-CATALOG_COMPATIBLE_REVISIONS = frozenset({CATALOG_SCHEMA_REVISION, "20261105_0004", "20261106_0005", "20261111_0006", "20261114_0007"})
+CATEGORIES_REVISION = "20261115_0008"
+CATALOG_COMPATIBLE_REVISIONS = frozenset({CATALOG_SCHEMA_REVISION, "20261105_0004", "20261106_0005", "20261111_0006", "20261114_0007", CATEGORIES_REVISION})
 
 
 def validate_catalog_revision(connection) -> str:
     heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
     if len(heads) != 1 or heads[0] not in CATALOG_COMPATIBLE_REVISIONS:
-        raise CatalogTargetError("La sincronización requiere 20261102_0003 o una revisión compatible hasta 20261114_0007.")
+        raise CatalogTargetError("La sincronización requiere 20261102_0003 o una revisión compatible hasta 20261115_0008.")
     return heads[0]
 
 
@@ -111,7 +112,8 @@ class SyncService:
         El destino y la tienda se comprueban antes de persistir el catálogo.
         """
         with self._transaction() as session:
-            snapshot = await fetch_catalog(client, self.store_id, include_deleted=True)
+            snapshot = await fetch_catalog(client, self.store_id, include_deleted=True,
+                include_categories=validate_catalog_revision(session.connection()) == CATEGORIES_REVISION)
             result = self._validated_write(session, snapshot)
         return result
 
@@ -122,10 +124,13 @@ class SyncService:
         consumiría secuencias. El inspector debe resolver el informe con SELECT.
         """
         with self._transaction(read_only=True) as session:
-            snapshot = await fetch_catalog(client, self.store_id, include_deleted=True)
+            snapshot = await fetch_catalog(client, self.store_id, include_deleted=True,
+                include_categories=validate_catalog_revision(session.connection()) == CATEGORIES_REVISION)
             return inspect_plan(session, snapshot, self._plan(snapshot))
 
     def _validated_write(self, session: Session, snapshot: CatalogSnapshot) -> dict:
+        if snapshot.categories is not None and validate_catalog_revision(session.connection()) != CATEGORIES_REVISION:
+            raise CatalogTargetError("Las categorías requieren la migración 20261115_0008 antes de escribir.")
         plan = self._plan(snapshot)
         if self.before_write is not None:
             self.before_write(session, snapshot, plan)
@@ -153,14 +158,26 @@ class SyncService:
         return identifier
 
     def _write(self, session: Session, plan: CatalogPlan) -> dict:
+        categories = {}
+        if plan.categories is not None:
+            for category in plan.categories:
+                categories[category.loyverse_id] = self._upsert(session, CommercialCategory, {
+                    "loyverse_id": category.loyverse_id, "name": category.name, "color": category.color,
+                    "is_active": True, "synced_at": plan.synced_at,
+                }, ("name", "color", "is_active", "synced_at"))
         products = {}
         modifiers = {}
         variants = {}
         for product in plan.products:
-            products[product.loyverse_id] = self._upsert(session, Product, {
+            values = {
                 "loyverse_id": product.loyverse_id, "name": product.name,
                 "is_active": True, "synced_at": plan.synced_at,
-            }, ("name", "is_active", "synced_at"))
+            }
+            fields = ("name", "is_active", "synced_at")
+            if plan.categories is not None:
+                values["category_id"] = categories.get(product.category_loyverse_id)
+                fields += ("category_id",)
+            products[product.loyverse_id] = self._upsert(session, Product, values, fields)
         for modifier in plan.modifiers:
             modifiers[modifier.loyverse_id] = self._upsert(session, ProductModifier, {
                 "loyverse_id": modifier.loyverse_id, "name": modifier.name,
@@ -207,10 +224,17 @@ class SyncService:
                 inserted += session.execute(statement).rowcount
 
         retired, retirement_links = self._retire(session, plan)
+        if plan.categories is not None:
+            retired["categories"] = 0
+            for external_id in plan.deleted_categories:
+                retired["categories"] += session.execute(update(CommercialCategory).where(
+                    CommercialCategory.loyverse_id == external_id,
+                ).values(is_active=False, synced_at=plan.synced_at)).rowcount
         return {
             "products_processed": len(plan.products), "variants_processed": len(plan.variants),
             "modifiers_processed": len(plan.modifiers), "complements_processed": len(plan.complements),
             "assignments_inserted": inserted, "assignments_removed": removed + retirement_links,
+            **({"categories_processed": len(plan.categories)} if plan.categories is not None else {}),
             "retired": retired,
         }
 

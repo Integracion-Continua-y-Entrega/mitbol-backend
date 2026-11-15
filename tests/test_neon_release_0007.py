@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.connection import CloudDatabaseTarget, DatabaseTargetError
 from app.main import create_app
-from app.models import AuthBase, Base, Product, AuthRateLimit, AuthRateLimitPolicy, catalog_metadata
+from app.models import AuthBase, Base, Product, AuthRateLimit, AuthRateLimitPolicy, catalog_metadata, pre_categories_metadata
 from app.models.sync_run import SyncBase, SyncRun
 from app.services.recurring_catalog_sync import RecurringCatalogSync
 from app.services import sync_jobs
@@ -34,7 +34,7 @@ from test_r2_image_storage import ENDPOINT, r2
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL = ROOT / "docs/database"
-HEAD = "20261114_0007"
+HEAD = "20261115_0008"
 
 
 def approved(name, marker, value):
@@ -56,27 +56,36 @@ def fingerprint(connection):
     return result
 
 
-def test_0005_to_0007_preserves_rows_and_rolls_back_ddl(writer_backend):
-    b = writer_backend
-    response = login(b)
-    assert upload(b, csrf_headers(response)).status_code == 201
+def test_0005_to_0007_preserves_rows_and_rolls_back_ddl(writer_database):
+    b = SimpleNamespace(roles=writer_database)
+    with b.roles.owner.begin() as db:
+        product_id = db.scalar(text('INSERT INTO "Products" (loyverse_id,name,synced_at) '
+                                   "VALUES ('historic-photo','Anterior',now()) RETURNING product_id"))
+        variant_id = db.scalar(text('INSERT INTO "ProductVariants" (loyverse_id,name,price,product_id,synced_at) '
+                                   "VALUES ('historic-variant','Anterior',10,:product,now()) RETURNING product_variant_id"),
+                               {'product': product_id})
+        db.execute(text('INSERT INTO "ProductImages" (product_variant_id,image_url,display_order) VALUES (:variant,:url,0)'),
+                   {'variant': variant_id, 'url': f'/media/products/{product_id}/variants/{variant_id}/'+'a'*32+'.png'})
     with b.roles.owner.connect() as db:
         before = fingerprint(db)
         assert MigrationContext.configure(db).get_current_heads() == ('20261106_0005',)
         command.upgrade(config_for(db), '20261111_0006')
         assert MigrationContext.configure(db).get_current_heads() == ('20261111_0006',)
-        command.upgrade(config_for(db), HEAD)
+        command.upgrade(config_for(db), "20261114_0007")
         after = fingerprint(db)
         # Sólo Discounts añade una secuencia; las existentes no se consumen.
         assert before['sequences'] == [r for r in after['sequences'] if r[0] != 'Discounts_discount_id_seq']
         assert {k:v for k,v in before.items() if k!='sequences'} == {k:v for k,v in after.items() if k!='sequences'}
-        assert not compare_metadata(MigrationContext.configure(db), [Base.metadata,AuthBase.metadata,SyncBase.metadata])
+        assert not compare_metadata(MigrationContext.configure(db), [pre_categories_metadata,AuthBase.metadata,SyncBase.metadata])
         db.rollback()  # Revierte ambas revisiones, tablas/índices y alembic_version.
     with b.roles.owner.connect() as db:
         assert MigrationContext.configure(db).get_current_heads() == ('20261106_0005',)
         assert 'Discounts' not in inspect(db).get_table_names()
         assert 'SyncRuns' not in inspect(db).get_table_names()
         assert fingerprint(db) == before
+    with b.roles.owner.begin() as db:
+        for table in reversed(catalog_metadata.sorted_tables):
+            db.execute(table.delete())
 
 
 @pytest.fixture

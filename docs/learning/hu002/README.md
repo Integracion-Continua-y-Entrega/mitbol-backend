@@ -1,5 +1,46 @@
 # HU-002 — Buscar y filtrar productos
 
+## Categorías comerciales persistentes (15 de noviembre de 2026)
+
+Esta ampliación completa el filtro comercial pendiente, conservando búsqueda,
+etiquetas, disponibilidad, precios y contratos React. Requiere migrar a
+`20261115_0008` y aplicar el delta SQL de permisos antes de desplegar el código.
+FastAPI no ejecuta migraciones al arrancar. Las secciones posteriores documentan
+la entrega histórica de búsqueda y etiquetas.
+
+- `GET /api/categories` devuelve `{"categories":[{"category_id":1,"name":"Comida","color":"GREEN"}]}`.
+  Incluye categorías activas con al menos un producto comercialmente activo,
+  aunque esté agotado localmente; ordena por nombre e ID. Sin resultados: lista vacía.
+- `GET /api/menu?category_id=1&q=doble&tag_id=7&tag_id=8` combina categoría y
+  nombre mediante AND; las etiquetas conservan su semántica OR. No duplica
+  productos ni recorta variantes. Una categoría desconocida/inactiva devuelve `products: []`.
+- `GET /api/menu?uncategorized=true` selecciona productos sin categoría activa
+  (FK nula o categoría retirada). Se combina con nombre/etiquetas. No puede
+  combinarse con `category_id`: esa contradicción o un ID no positivo devuelve 422.
+- Cada producto del listado y detalle añade `category`, objeto con los tres
+  campos anteriores o `null`. Los campos previos permanecen; clientes React
+  existentes pueden ignorar la propiedad nueva. El color es un token de Loyverse,
+  nunca HTML/CSS arbitrario.
+
+La API lee PostgreSQL y no consulta Loyverse ni R2 para resolver filtros. El lector
+recibe SELECT de las cuatro columnas públicas de Categories (incluye is_active
+para filtrar), sin IDs externos, fechas, secuencias ni escritura.
+
+Pruebas reproducibles:
+
+```powershell
+python -B scripts/test_auth_phase1.py tests/test_categories.py tests/test_menu.py -q
+```
+
+Se usa PostgreSQL 18 desechable y proveedores simulados, sin servicios reales.
+Validación final del 15 de noviembre de 2026: **1.955 pruebas aprobadas**, sin
+fallos, errores ni omisiones. Incluye 14 casos nuevos de categorías, filtros por
+nombre/etiquetas/categoría sin duplicados, productos sin categoría o agotados,
+permisos mínimos y regresiones de R2, HU-008 y HU-010. La migración y el delta de
+permisos sólo se probaron en PostgreSQL 18 temporal; Neon y Render no se tocaron.
+
+## Registro histórico anterior
+
 ## Estado y alcance
 
 Backend de búsqueda por nombre y filtros por etiquetas implementado y verificado.
@@ -176,4 +217,6 @@ mantiene la estructura de HU-001; el listado de etiquetas es un array directo.
 Antes de cerrar la entrega compartida, comprobar desde frontend búsqueda,
 limpieza, selección y retirada de filtros, ausencia de coincidencias y
 disponibilidad. Acordar explícitamente el alcance pendiente de categorías.
+La ampliación del 15 de noviembre descrita al inicio resuelve ese alcance en el
+backend; queda integrar y aceptar los controles de categorías en React.
 El código verificado localmente no acredita despliegue ni activación en Render.

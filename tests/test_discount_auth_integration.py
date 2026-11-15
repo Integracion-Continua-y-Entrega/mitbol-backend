@@ -85,10 +85,18 @@ def test_cli_preflight_is_read_only_and_does_not_consume_sequence(backend):
 
 def test_previous_schema_returns_service_unavailable_without_breaking_login(writer_backend):
     b = writer_backend
-    assert login(b).status_code == 200
-    response = b.client.get("/api/admin/discounts")
-    assert response.status_code == 503
-    assert "actualizar el esquema" in response.json()["detail"]
+    # El backend de las fixtures usa ahora 0008. Recrear explícitamente el
+    # estado anterior sólo en su base temporal y restaurar después sus ACL.
+    from category_runtime import upgrade_runtime
+    with b.roles.owner.begin() as db:
+        command.downgrade(config_for(db), "20261106_0005")
+    try:
+        assert login(b).status_code == 200
+        response = b.client.get("/api/admin/discounts")
+        assert response.status_code == 503
+        assert "actualizar el esquema" in response.json()["detail"]
+    finally:
+        upgrade_runtime(b.roles.owner)
 
 
 def test_new_writer_profile_on_discount_revision_is_read_only_for_discounts(backend):

@@ -18,7 +18,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine
 
-from app.models import Base
+from app.models import Base, pre_categories_metadata
 from app.models.legacy_base import LegacyBase
 from migrations.validation import validate_initial_database
 
@@ -45,7 +45,7 @@ def test_only_approved_models_are_in_current_metadata():
     # Registrar el prototipo explícitamente evita depender del orden de pytest.
     importlib.import_module("app.models.item")
     importlib.import_module("app.models.category")
-    assert set(Base.metadata.tables) == CATALOG_TABLES | ENRICHMENT_TABLES | {"Discounts"}
+    assert set(Base.metadata.tables) == CATALOG_TABLES | ENRICHMENT_TABLES | {"Discounts", "Categories"}
     assert {"items", "categories"}.isdisjoint(Base.metadata.tables)
     assert {"items", "categories"} == set(LegacyBase.metadata.tables)
 
@@ -94,7 +94,7 @@ def test_migration_matches_models(monkeypatch, revision_id, expected_tables):
     revision.module.upgrade()
     assert set(created_tables) == expected_tables
     for name in expected_tables:
-        expected = table_signature(Base.metadata.tables[name])
+        expected = table_signature(pre_categories_metadata.tables[name])
         if name == "ProductVariants":
             expected["columns"].pop("is_commercially_available")
         assert table_signature(created_tables[name]) == expected, name
@@ -108,7 +108,7 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
     output = StringIO()
     command.upgrade(alembic_config(output), "head", sql=True)
     sql = output.getvalue()
-    assert sql.count("CREATE TABLE") == 20  # Catálogo, descuentos, identidad, límites, cola y versión.
+    assert sql.count("CREATE TABLE") == 21  # Catálogo, descuentos, identidad, límites, cola y versión.
     assert 'CREATE TABLE public."SyncRuns"' in sql
     for name in CATALOG_TABLES | ENRICHMENT_TABLES:
         assert f'CREATE TABLE "{name}"' in sql
@@ -116,7 +116,8 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
     assert "TIMESTAMP WITH TIME ZONE" in sql
     assert "NUMERIC NOT NULL" in sql
     assert "DROP TABLE" not in sql
-    assert "categories" not in sql.lower()
+    assert 'CREATE TABLE "categories"' not in sql
+    assert 'CREATE TABLE "Categories"' in sql
     assert "CREATE DATABASE" not in sql
     assert "20261029_0001" in sql
     assert ENRICHMENT_REVISION in sql
@@ -124,7 +125,7 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
 
 def test_hu007_extends_hu005_without_changing_its_ancestry():
     scripts = ScriptDirectory.from_config(alembic_config())
-    assert scripts.get_heads() == ["20261114_0007"]
+    assert scripts.get_heads() == ["20261115_0008"]
     assert scripts.get_revision("20261114_0007").down_revision == "20261111_0006"
     assert scripts.get_revision("20261111_0006").down_revision == "20261106_0005"
     assert scripts.get_revision("20261106_0005").down_revision == AUTH_REVISION
@@ -184,7 +185,8 @@ def test_downgrade_offline_removes_children_before_parents():
     assert sql.index('DROP TABLE "ProductModifierAssignments"') < sql.index('DROP TABLE "ProductVariants"')
     assert sql.index('DROP TABLE "ProductComplements"') < sql.index('DROP TABLE "ProductModifiers"')
     assert sql.index('DROP TABLE "ProductVariants"') < sql.index('DROP TABLE "Products"')
-    assert "categories" not in sql.lower()
+    assert 'CREATE TABLE "categories"' not in sql
+    assert 'CREATE TABLE "Categories"' not in sql
     assert "CASCADE" not in sql
 
 

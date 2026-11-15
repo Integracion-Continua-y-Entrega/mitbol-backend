@@ -30,6 +30,8 @@ def catalog_manifest(plan: CatalogPlan, store: dict) -> dict:
     data.pop("synced_at")
     data.pop("store_id")
     for key, rows in data.items():
+        if rows is None:
+            continue
         data[key] = sorted(rows, key=lambda row: row["loyverse_id"] if isinstance(row, dict) else row)
     data["store"] = {"id": plan.store_id, "name": store["name"]}
     # JSON normaliza tuplas; excluye tiempos de consulta, orden HTTP y escala decimal.

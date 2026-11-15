@@ -19,7 +19,8 @@ from app.services.loyverse_client import (
 )
 from app.services.sync_service import CATALOG_SYNC_LOCK_KEY
 
-SYNC_JOBS_REVISION = "20261114_0007"
+SYNC_JOBS_REVISION = "20261115_0008"
+SYNC_JOBS_COMPATIBLE_REVISIONS = frozenset({"20261114_0007", SYNC_JOBS_REVISION})
 QUEUE_LOCK_KEY = 0x4D4954424F50
 WORKER_LOCK_KEY = 0x4D4954424F51
 ACTIVE = ("queued", "running", "retry_wait")
@@ -47,7 +48,8 @@ def inspect_queue(db, *, expected_database, expected_host, permission="read"):
     if (connection.engine.url.database != expected_database or connection.engine.url.host != expected_host
             or identity != (expected_database, connection.engine.url.username, connection.engine.url.username)):
         raise CatalogTargetError("La cola no coincide con el destino y usuario autorizados.")
-    if MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads() != (SYNC_JOBS_REVISION,):
+    heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
+    if len(heads) != 1 or heads[0] not in SYNC_JOBS_COMPATIBLE_REVISIONS:
         raise CatalogTargetError("HU-010 requiere su migración y revisión verificadas.")
     valid = db.scalar(text("""
         SELECT c.relkind = 'r' AND NOT c.relrowsecurity

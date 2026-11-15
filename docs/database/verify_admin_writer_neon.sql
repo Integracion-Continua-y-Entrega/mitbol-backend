@@ -22,7 +22,7 @@ DECLARE
       "ProductModifiers": {"SELECT":["synced_at"]},
       "ProductComplements": {"SELECT":["synced_at"]}
     }';
-    policy CONSTANT jsonb := '{
+    policy jsonb := '{
       "Products": {"SELECT":["product_id","loyverse_id","name","description","is_available","is_active","is_featured","is_new","synced_at"], "UPDATE":["description","is_available","is_featured","is_new"]},
       "ProductVariants": {"SELECT":["product_variant_id","loyverse_id","name","price","is_available","is_commercially_available","synced_at","product_id"], "UPDATE":["is_available"]},
       "ProductImages": {"SELECT":["product_image_id","product_variant_id","image_url","display_order","created_at"], "INSERT":["product_variant_id","image_url","display_order"], "UPDATE":["display_order"], "DELETE":true},
@@ -44,6 +44,12 @@ BEGIN
        OR coalesce(current_setting('mitbol.external_tls_verified', true), '') <> 'verify-full-channel-binding'
        OR current_setting('server_version_num')::int / 10000 <> 18 THEN
         RAISE EXCEPTION 'WRITER_NEON_IDENTITY';
+    END IF;
+    IF to_regclass('public."Categories"') IS NOT NULL THEN
+        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
+            RAISE EXCEPTION 'WRITER_CATEGORIES_SCHEMA';
+        END IF;
+        policy := jsonb_set(policy, '{Products,SELECT}', (policy->'Products'->'SELECT') || '["category_id"]'::jsonb);
     END IF;
     SELECT oid INTO writer FROM pg_roles WHERE rolname = current_user;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE oid = writer AND
@@ -79,7 +85,7 @@ BEGIN
             RAISE EXCEPTION 'WRITER_QUEUE_PERMISSIONS';
         END IF;
         IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-           (SELECT 1 FROM public.alembic_version WHERE version_num = '20261114_0007') THEN
+           (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007','20261115_0008')) THEN
             RAISE EXCEPTION 'WRITER_QUEUE_SCHEMA';
         END IF;
     END IF;

@@ -55,7 +55,19 @@ class MenuVariant(BaseModel):
     tags: list[MenuTag] = Field(default_factory=list, description="Etiquetas locales de esta variante, ordenadas por ID.")
 
 
+class MenuCategory(BaseModel):
+    category_id: int
+    name: str
+    color: str | None = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MenuCategoriesResponse(BaseModel):
+    categories: list[MenuCategory]
+
+
 class MenuProduct(BaseModel):
+    category: MenuCategory | None = None
     product_id: int = Field(description="ID interno estable del producto.")
     name: str = Field(description="Nombre del producto registrado en PostgreSQL.")
     description: str | None = Field(description="Descripción local; null cuando no existe.")

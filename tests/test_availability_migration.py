@@ -91,6 +91,9 @@ def test_historical_values_keys_sequences_and_enrichment_survive_upgrade(empty_p
     context = MigrationContext.configure(connection, opts={"compare_type": True, "compare_server_default": True})
     assert context.get_current_heads() == (REVISION,)
     assert compare_metadata(context, catalog_metadata) == []
+    # La estructura histórica ya se contrastó. El servicio público vigente
+    # requiere también la ampliación aditiva 0008, con la FK inicialmente nula.
+    command.upgrade(migration_config, "20261115_0008")
     sessions = sessionmaker(bind=connection, join_transaction_mode="create_savepoint")
     with sessions() as db:
         menu = get_menu(db)

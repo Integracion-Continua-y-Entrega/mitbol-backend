@@ -236,6 +236,7 @@ def test_menu_is_public_and_preserves_contract(menu_client, add_product):
     assert response.json() == {
         "currency": "MXN",
         "products": [{
+            "category": None,
             "product_id": product.product_id,
             "name": "Hamburguesa clásica",
             "description": "Descripción local MITBOL",

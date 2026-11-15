@@ -8,7 +8,7 @@ from pydantic import PositiveInt
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.menu import MenuErrorResponse, MenuProductDetailResponse, MenuPublicConfigResponse, MenuResponse, MenuTag
+from app.schemas.menu import MenuCategoriesResponse, MenuErrorResponse, MenuProductDetailResponse, MenuPublicConfigResponse, MenuResponse, MenuTag
 from app.services import menu_service, menu_tags
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,9 @@ router = APIRouter(prefix="/api", tags=["Menú"])
         "Permite buscar por fragmento del nombre mediante q, sin distinguir mayúsculas "
         "e ignorando espacios exteriores; omitirlo o dejarlo vacío devuelve el listado general. "
         "Permite repetir tag_id para filtrar por cualquiera de las etiquetas seleccionadas. "
-        "Si se proporciona q, se aplican ambos filtros; se conservan todas las variantes. "
+        "category_id selecciona una categoría activa; uncategorized=true selecciona productos "
+        "sin categoría activa. Son excluyentes y se combinan con q y etiquetas mediante AND. "
+        "Se conservan todas las variantes. "
         "Excluye productos comercialmente inactivos y mantiene visibles los agotados. "
         "Utiliza can_order para habilitar la selección: is_available conserva el estado almacenado. "
         "can_order incluye la disponibilidad comercial de la variante sincronizada desde Loyverse. "
@@ -74,9 +76,14 @@ def get_menu(
             ),
         ),
     ] = None,
+    category_id: Annotated[PositiveInt | None, Query(description="ID interno de categoría comercial activa.")] = None,
+    uncategorized: Annotated[bool, Query(description="Productos sin categoría comercial activa.")] = False,
 ) -> MenuResponse:
+    if category_id is not None and uncategorized:
+        raise HTTPException(422, "category_id y uncategorized son filtros excluyentes.")
     try:
-        return menu_service.get_menu(db, q=q, tag_ids=tag_ids)
+        return menu_service.get_menu(db, q=q, tag_ids=tag_ids,
+                                     category_id=category_id, uncategorized=uncategorized)
     except menu_service.MenuUnavailableError as error:
         # Sólo se registra el tipo: el mensaje del controlador puede contener SQL o credenciales.
         logger.warning("Menú temporalmente no disponible (%s).", type(error.__cause__).__name__)
@@ -91,6 +98,31 @@ def get_menu(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No fue posible consultar el menú.",
         ) from None
+
+
+@router.get(
+    "/categories",
+    response_model=MenuCategoriesResponse,
+    summary="Categorías activas con productos visibles en el menú",
+    description=(
+        "Consulta pública de PostgreSQL, sin llamadas a Loyverse. Incluye categorías "
+        "con productos comercialmente activos, aunque estén agotados localmente. "
+        "Ordena por nombre e ID. Sin coincidencias devuelve categories: []."
+    ),
+    responses={
+        500: {"model": MenuErrorResponse, "description": "Error interno al consultar categorías."},
+        503: {"model": MenuErrorResponse, "description": "PostgreSQL temporalmente no disponible."},
+    },
+)
+def get_categories(db: Session = Depends(get_db)) -> MenuCategoriesResponse:
+    try:
+        return menu_service.get_categories(db)
+    except menu_service.MenuUnavailableError:
+        raise HTTPException(503, "Las categorías no están disponibles temporalmente.") from None
+    except Exception as error:
+        cause = error.__cause__ if isinstance(error, menu_service.MenuReadError) else error
+        logger.error("Falló la consulta de categorías (%s).", type(cause).__name__)
+        raise HTTPException(500, "No fue posible consultar las categorías.") from None
 
 
 @router.get(

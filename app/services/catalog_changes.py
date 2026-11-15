@@ -2,7 +2,7 @@
 
 from sqlalchemy import select
 
-from app.models import Product, ProductComplement, ProductModifier, ProductModifierAssignment, ProductVariant
+from app.models import CommercialCategory, Product, ProductComplement, ProductModifier, ProductModifierAssignment, ProductVariant
 from app.services.catalog_errors import CatalogReferenceError
 
 
@@ -26,7 +26,13 @@ def _compare(existing, desired, retired):
 
 
 def catalog_changes(db, plan) -> dict:
-    products = _index(db, Product, ("product_id", "name", "is_active"))
+    product_fields = ("product_id", "name", "is_active") + (("category_id",) if plan.categories is not None else ())
+    products = _index(db, Product, product_fields)
+    categories = _index(db, CommercialCategory, ("category_id", "name", "color", "is_active")) if plan.categories is not None else {}
+    category_ids = {row["category_id"]: key for key, row in categories.items()}
+    if plan.categories is not None:
+        for row in products.values():
+            row["category_loyverse_id"] = category_ids.get(row["category_id"])
     variants = _index(db, ProductVariant, ("product_variant_id", "product_id", "name", "price", "is_commercially_available"))
     modifiers = _index(db, ProductModifier, ("product_modifier_id", "name", "display_order"))
     complements = _index(db, ProductComplement, ("product_modifier_id", "name", "price", "display_order", "is_active"))
@@ -40,6 +46,9 @@ def catalog_changes(db, plan) -> dict:
     for row in complements.values():
         row["parent_loyverse_id"] = modifier_ids[row["product_modifier_id"]]
     wanted_products = {row.loyverse_id: {"name": row.name, "is_active": True} for row in plan.products}
+    if plan.categories is not None:
+        for row in plan.products:
+            wanted_products[row.loyverse_id]["category_loyverse_id"] = row.category_loyverse_id
     wanted_variants = {row.loyverse_id: {"name": row.name, "price": row.price,
         "is_commercially_available": row.is_commercially_available, "parent_loyverse_id": row.product_loyverse_id}
         for row in plan.variants}
@@ -68,10 +77,14 @@ def catalog_changes(db, plan) -> dict:
     replaced_variants = set(wanted_variants) | retired_variants
     desired_links = {link for link in current_links if link[0] not in replaced_variants and link[1] not in retired_modifiers}
     desired_links.update(plan.assignments)
-    return {
+    result = {
         "products": _compare(products, wanted_products, retired_products),
         "variants": _compare(variants, wanted_variants, retired_variants),
         "modifiers": _compare(modifiers, wanted_modifiers, retired_modifiers),
         "complements": _compare(complements, wanted_complements, retired_complements),
         "assignments": {"inserted": len(desired_links - current_links), "removed": len(current_links - desired_links)},
     }
+    if plan.categories is not None:
+        desired = {row.loyverse_id: {"name": row.name, "color": row.color, "is_active": True} for row in plan.categories}
+        result["categories"] = _compare(categories, desired, set(plan.deleted_categories) & categories.keys())
+    return result

@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.connection import (
     CloudDatabaseTarget, DatabaseTargetError, create_database_engine, environment_mode,
 )
-from app.models import catalog_metadata
+from app.models import catalog_metadata, runtime_catalog_metadata
 from app.services.catalog_errors import CatalogSyncError
 from app.services.catalog_manifest import CatalogPlanChanged, catalog_manifest, manifest_sha256
 from app.services.catalog_probe import fetch_catalog
@@ -26,9 +26,10 @@ from app.services.sync_service import CATALOG_SCHEMA_REVISION, CATALOG_COMPATIBL
 
 
 def _table_counts(connection) -> dict:
+    metadata = runtime_catalog_metadata if validate_catalog_revision(connection) == "20261115_0008" else catalog_metadata
     return {name: connection.scalar(select(func.count()).select_from(table.to_metadata(
         MetaData(), schema="public",
-    ))) for name, table in catalog_metadata.tables.items()}
+    ))) for name, table in metadata.tables.items()}
 
 
 def preflight(engine, target: CloudDatabaseTarget, *, require_empty: bool = False) -> dict:
@@ -51,10 +52,10 @@ def preflight(engine, target: CloudDatabaseTarget, *, require_empty: bool = Fals
             "writes": False, "loyverse_contacted": False}
 
 
-async def preview_catalog(store_id: str, token: SecretStr) -> dict:
+async def preview_catalog(store_id: str, token: SecretStr, *, include_categories: bool = False) -> dict:
     """Misma lectura y transformación de HU-008, sin servicio de persistencia."""
     async with LoyverseAPIClient(access_token=token, max_attempts=1) as client:
-        snapshot = await fetch_catalog(client, store_id, include_deleted=True)
+        snapshot = await fetch_catalog(client, store_id, include_deleted=True, include_categories=include_categories)
         plan = transform_catalog(snapshot)
         if not plan.products or not plan.variants:
             raise DatabaseTargetError("El catálogo inicial no contiene productos y variantes importables; revisa la tienda.")
@@ -64,6 +65,7 @@ async def preview_catalog(store_id: str, token: SecretStr) -> dict:
             "store": snapshot.store, "snapshot_at": plan.synced_at.isoformat(),
             "http_requests": client.request_count, "pages_received": dict(client.page_counts),
             "planned_initial_inserts": {
+                **({"Categories": len(plan.categories)} if plan.categories is not None else {}),
                 "Products": len(plan.products), "ProductVariants": len(plan.variants),
                 "ProductModifiers": len(plan.modifiers), "ProductComplements": len(plan.complements),
                 "ProductModifierAssignments": len(plan.assignments),
@@ -85,7 +87,7 @@ def _approved_preflight(target: CloudDatabaseTarget, user: str, store_id: str) -
             and report["user"] == user and report["revision"] in CATALOG_COMPATIBLE_REVISIONS
             and report["catalog_manifest"]["store"]["id"] == store_id
             and report["catalog_sha256"] == manifest_sha256(report["catalog_manifest"])
-            and set(report["table_counts"]) == set(catalog_metadata.tables)
+            and set(report["table_counts"]) == set((runtime_catalog_metadata if report["revision"] == "20261115_0008" else catalog_metadata).tables)
             and all(value == 0 for value in report["table_counts"].values())
         )
         if not valid:
@@ -112,7 +114,8 @@ def _initial_write_guard(target, approved):
         if connection.exec_driver_sql("SHOW transaction_isolation").scalar_one() != "read committed":
             raise DatabaseTargetError("La carga inicial requiere READ COMMITTED para verificar el vaciado tras los locks.")
         # Evita otro DML entre el último vaciado y nuestro commit; SELECT sigue permitido.
-        tables = ", ".join(f'public."{name}"' for name in catalog_metadata.tables)
+        metadata = runtime_catalog_metadata if approved["revision"] == "20261115_0008" else catalog_metadata
+        tables = ", ".join(f'public."{name}"' for name in metadata.tables)
         connection.exec_driver_sql(f"LOCK TABLE {tables} IN SHARE ROW EXCLUSIVE MODE NOWAIT")
         if any(_table_counts(connection).values()):
             raise DatabaseTargetError("El catálogo dejó de estar vacío; no se ejecutó DML.")
@@ -177,7 +180,8 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.execute:
             report = asyncio.run(synchronize(engine, target, arguments.store_id, token, approved))
         elif arguments.store_id:
-            report.update(asyncio.run(preview_catalog(arguments.store_id, token)))
+            report.update(asyncio.run(preview_catalog(arguments.store_id, token, include_categories=True)
+                if report["revision"] == "20261115_0008" else preview_catalog(arguments.store_id, token)))
             # Repite destino/permisos/vaciado tras HTTP; sigue sin ejecutar DML.
             after = preflight(engine, target, require_empty=True)
             report.update(table_counts=after["table_counts"], status="ready_for_initial_sync")

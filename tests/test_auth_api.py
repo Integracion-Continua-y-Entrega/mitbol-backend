@@ -37,6 +37,8 @@ def password_hash():
 
 @pytest.fixture
 def backend(auth_database, password_hash):
+    from category_runtime import upgrade_runtime
+    upgrade_runtime(auth_database)
     sessions = sessionmaker(bind=auth_database, expire_on_commit=False)
     suffix = uuid4().hex[:10]
     ids, emails = {}, {}

@@ -45,7 +45,8 @@ def cli(monkeypatch, commercial_snapshot):
     engine = MagicMock()
     factory = MagicMock(return_value=engine)
     monkeypatch.setattr(sync_catalog, "create_database_engine", factory)
-    preflight = MagicMock(return_value={"status": "preflight_ok", "writes": False, "loyverse_contacted": False})
+    preflight = MagicMock(return_value={"status": "preflight_ok", "writes": False,
+                                       "loyverse_contacted": False, "revision": "20261102_0003"})
     monkeypatch.setattr(sync_catalog, "preflight", preflight)
     synchronize = AsyncMock(return_value={"status": "synchronized"})
     monkeypatch.setattr(sync_catalog, "synchronize", synchronize)
@@ -274,14 +275,17 @@ def test_reader_is_rejected_before_connecting(cli, monkeypatch):
     cli.factory.assert_not_called()
 
 
-def test_initial_preflight_never_calls_persistence(cli, monkeypatch, capsys):
+@pytest.mark.parametrize("revision", ["20261102_0003", "20261115_0008"])
+def test_initial_preflight_never_calls_persistence(cli, monkeypatch, capsys, revision):
     monkeypatch.setenv("LOYVERSE_ACCESS_TOKEN", "PRIVATE_TOKEN")
     monkeypatch.setenv("LOYVERSE_STORE_ID", "test-store")
     cli.preflight.return_value["table_counts"] = {"Products": 0}
+    cli.preflight.return_value["revision"] = revision
     assert sync_catalog.main(ARGS + ["--preflight", "--store-id", "test-store"]) == 0
     assert cli.preflight.call_count == 2
     assert all(call.kwargs == {"require_empty": True} for call in cli.preflight.call_args_list)
     cli.preview.assert_awaited_once()
+    assert cli.preview.call_args.kwargs == ({"include_categories": True} if revision == "20261115_0008" else {})
     cli.synchronize.assert_not_called()
     output = capsys.readouterr().out
     assert '"status": "ready_for_initial_sync"' in output
@@ -369,16 +373,23 @@ def test_initial_preflight_rejects_nonempty_catalog(sync_test_database):
             connection.exec_driver_sql('DELETE FROM public."Products" WHERE loyverse_id = \'preflight-fixture\'')
 
 
-@pytest.mark.parametrize("failure", range(24))
-def test_operator_requires_every_individual_privilege(failure):
+@pytest.mark.parametrize("revision,failure", [
+    (revision, failure)
+    for revision, count in (("20261102_0003", 54), ("20261115_0008", 67))
+    for failure in range(count)
+])
+def test_operator_requires_every_individual_privilege(revision, failure, monkeypatch):
+    monkeypatch.setattr("app.services.sync_service.validate_catalog_revision", lambda connection: revision)
     connection = MagicMock()
     connection.execute.return_value.one.return_value = ("operator", "operator", "off", False)
     connection.engine.url.username = "operator"
     connection.connection.driver_connection.readonly = None
-    # CONNECT/USAGE + nueve SELECT/resolución + diez DML + cuatro secuencias.
+    # Cada comprobación individual de CONNECT/USAGE, tablas, columnas y
+    # secuencias debe abortar inmediatamente cuando su permiso falta.
     connection.scalar.side_effect = [True] * failure + [False]
     with pytest.raises(DatabaseTargetError):
         sync_catalog._inspect_operator(connection)
+    assert connection.scalar.call_count == failure + 1
 
 
 @pytest.mark.parametrize("user,session_user,default,driver_readonly,recovery", [
