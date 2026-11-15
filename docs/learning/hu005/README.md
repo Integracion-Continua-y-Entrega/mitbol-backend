@@ -1,5 +1,147 @@
 # HU-005 — Enriquecer información de productos
 
+## Almacenamiento persistente: actualización del 14 de noviembre de 2026
+
+Esta actualización agrega R2 de forma optativa. Las secciones numeradas que
+siguen documentan el laboratorio original con archivos locales; sus conteos de
+pruebas y revisiones Alembic son evidencia histórica, no del despliegue actual.
+No se ha accedido a Neon, Render ni Cloudflare para implementar este cambio.
+
+### Arquitectura y compatibilidad
+
+- [ImageStorage](../../../app/services/image_storage.py) define lectura,
+  preparación de cargas/eliminaciones, resolución y recuperación. Local sigue
+  siendo el proveedor predeterminado; conserva directorios, diario y archivos.
+- [R2ImageStorage](../../../app/services/r2_image_storage.py) usa boto3/S3 con
+  credenciales explícitas, firma v4, región `auto`, HTTPS, timeouts acotados y
+  checksums compatibles. El cliente se construye al primer uso, sin consultar
+  credenciales AWS del host. No crea buckets, cambia ACL ni los hace públicos.
+- PostgreSQL conserva `ProductImages` sin cambios. No hay migración Alembic.
+  Se mantienen IDs, variantes, `display_order`, contratos y URLs relativas
+  `/media/products/{product}/variants/{variant}/{uuid}.{ext}`.
+- La ruta pública comprueba registro, pertenencia y producto activo antes de
+  leer R2. Entrega bytes desde FastAPI, sin redirigir al bucket ni exponer URLs
+  firmadas. Conserva MIME, `Content-Length`, `nosniff` y el 404 para archivo
+  ausente; errores de permisos/conectividad/proveedor devuelven 503 sanitizado.
+  La lectura remota se limita a 5 MB y termina antes de enviar cabeceras.
+- La subida conserva validación y recodificación JPEG/PNG/WebP, 5,000,000 bytes,
+  20 megapíxeles, rechazo de animaciones y eliminación de metadatos.
+- Seleccionar R2 no habilita autenticación ni escrituras. Se mantienen
+  `ADMIN_ENABLED=false` en cloud y todas las restricciones de `AUTH_*`, permisos,
+  Origin y CSRF. El perfil cloud `restaurant` continúa rechazando escrituras de
+  imágenes; cualquier habilitación académica requiere el perfil ya existente
+  y aprobación posterior independiente.
+
+### Variables
+
+| Variable | Uso |
+|---|---|
+| `IMAGE_STORAGE_PROVIDER` | `local` por defecto; `r2` para seleccionar el adaptador. |
+| `IMAGE_STORAGE_ROOT` | Carpeta existente del proveedor local; no se usa como caché R2. |
+| `R2_ENDPOINT_URL` | `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`; también se admiten endpoints de jurisdicción `eu`/`fedramp`. Solo HTTPS de cuenta R2, sin rutas, query o credenciales. |
+| `R2_BUCKET` | Bucket privado existente, de 3 a 63 caracteres minúsculos, números o guiones. |
+| `R2_ACCESS_KEY_ID` | Secreto explícito, nunca en React, Git ni ejemplos reales. |
+| `R2_SECRET_ACCESS_KEY` | Secreto explícito del token S3 de R2. |
+| `R2_KEY_PREFIX` | Por defecto `mitbol/product-images`; prefijo exclusivo para **una sola base de datos**. |
+
+Todas las instancias conectadas a la misma base deben usar el mismo bucket y
+prefijo. No compartirlos entre bases: recuperación decide según sus referencias
+PostgreSQL. Cambiar proveedor/prefijo no transfiere archivos automáticamente.
+Cloud sigue leyendo únicamente variables del proceso, sin completar desde `.env`.
+Los secretos se validan sin incluirlos en errores ni representaciones de Settings.
+
+La clave equivalente de una URL es
+`<R2_KEY_PREFIX>/<product>/variants/<variant>/<uuid>.<ext>`.
+No se guarda un dominio de bucket en `image_url`.
+
+### Fallos, diario y recuperación
+
+Las operaciones administrativas usan el mismo bloqueo PostgreSQL de imágenes.
+En R2, `.pending/<operación>.json` registra la intención antes de escribir
+archivos y `.staging/<operación>.<ext>` conserva una copia temporal durable de
+la carga. Escrituras condicionales `If-None-Match: *` evitan sobrescribir objetos;
+metadatos de operación y SHA-256 permiten comprobar su identidad.
+
+La eliminación prepara solo el diario: no retira el objeto antes del commit.
+Tras confirmar, solo se elimina si ya no hay referencias; un rollback lo deja
+intacto. Las referencias compartidas conservan su objeto. La sesión individual
+resuelve almacenamiento después de confirmar/revertir también su auditoría.
+Un commit incierto se resuelve leyendo el estado real de PostgreSQL en una
+nueva transacción con bloqueo. El diario está en R2 y sobrevive al proceso.
+
+No existe atomicidad entre PostgreSQL y S3. Si falla la limpieza después del
+commit, el objeto permanece privado y registrado en el diario para reintentar
+en la siguiente mutación autorizada. No hay limpieza destructiva al arrancar
+ni tareas nuevas en background. Si una carga agotó su timeout y HEAD aún no
+encuentra el objeto, se conserva intención/staging: el PUT original podría
+terminar después. Una recuperación posterior puede resolverlo; si nunca llega,
+el residuo privado requiere revisión operativa. No borrar `.pending`/`.staging`
+ni configurar reglas de expiración ciega sobre esos prefijos.
+
+### Fotografías existentes e inventario
+
+[inventory_images](../../../app/cli/inventory_images.py) es una herramienta de
+solo lectura. Exige `DATABASE_URL` del proceso, raíz local existente y base
+esperada; no lee `.env`, no contacta R2 ni ofrece `--execute`. Usa transacción
+`READ ONLY`; una conexión cloud exige además `APP_ENV=cloud`,
+`EXPECTED_DATABASE` y `EXPECTED_DATABASE_HOST` con las verificaciones TLS
+existentes. No ejecutar contra Neon/Render sin autorización posterior.
+
+```powershell
+.\.venv\Scripts\python.exe -B -m app.cli.inventory_images --local-root RUTA_DE_COPIA_LOCAL --expected-database NOMBRE_VERIFICADO --dry-run
+```
+
+Clasifica `recoverable`, `missing`, `invalid_reference`, `invalid_image` y
+`unreadable`; conserva IDs/URL/orden y calcula tamaño/SHA-256 de los recuperables.
+No modifica filas ni archivos. El resultado es administrativo: guardarlo fuera
+de Git. `missing` significa que falta la ruta principal: antes de declarar una
+foto perdida, conservar y revisar también `.pending`, `.staging`, `.trash` y
+respaldos. El inventario no resuelve diarios ni restaura archivos. Un archivo
+ausente sin otra copia **no puede recuperarse desde su URL**.
+
+Transferencia futura, todavía no implementada ni ejecutada:
+
+1. Antes de reiniciar/desplegar, respaldar referencias PostgreSQL y copiar todos
+   los archivos recuperables del servicio; inventariar esa copia. No asumir que
+   `storage/` de este equipo contiene las imágenes de Render.
+2. En una ventana sin escrituras, copiar cada recuperable a la clave equivalente
+   R2 usando creación condicional. No sobrescribir un destino distinto ni borrar
+   el origen; verificar bytes/tamaño/SHA-256 por lectura posterior, no solo ETag.
+3. Conservar filas, IDs, relaciones, orden y URLs. Registrar faltantes/corruptos
+   para recarga manual, sin eliminarlos automáticamente. No recodificar durante
+   la copia si se quiere verificar el mismo hash.
+4. Cambiar proveedor solo tras verificar todas las referencias recuperables y
+   preparar reversión coordinada. Volver a local requiere una copia actualizada
+   de las imágenes cargadas posteriormente en R2.
+
+### Pruebas y habilitación posterior
+
+El ejecutor existente crea PostgreSQL 18 desechable en loopback, elimina del
+entorno hijo variables AWS/R2/almacenamiento heredadas y no utiliza servicios
+reales ni credenciales personales. R2 se simula en memoria y también se verifica
+el contrato SDK mediante `botocore.stub.Stubber`.
+
+```powershell
+.\.venv\Scripts\python.exe -B scripts/test_auth_phase1.py tests/test_r2_image_storage.py tests/test_r2_images_api.py tests/test_image_inventory.py tests/test_enrichment_api.py tests/test_auth_admin_api.py tests/test_auth_cloud.py tests/test_cloud_configuration.py tests/test_frontend_remote.py tests/test_product_enrichment_models.py tests/test_product_enrichment_postgresql.py -q
+```
+
+Resultado local de esta actualización: **367 pruebas aprobadas, sin fallos ni
+omisiones**, en PostgreSQL 18 temporal; dos avisos de deprecación existentes de
+Starlette/AnyIO. `pip check` no detectó dependencias incompatibles.
+
+Para habilitar posteriormente en Render: crear/verificar bucket privado con
+acceso público deshabilitado, configurar un token limitado a ese bucket
+(lectura/listado para servir; permisos de objetos adicionales solo cuando se
+autoricen cargas/eliminaciones), completar las variables, transferir y verificar
+las fotos, y desplegar el commit aprobado. Mantener la configuración de
+autenticación vigente. No se requiere CORS del bucket porque React consulta
+FastAPI. Finalmente verificar URLs/hashes después de reinicio, redespliegue y
+reactivación tras suspensión. Esas verificaciones reales siguen pendientes.
+
+Referencias oficiales: [boto3 con R2](https://developers.cloudflare.com/r2/examples/aws/boto3/),
+[operaciones condicionales](https://developers.cloudflare.com/r2/api/s3/conditional-operations/)
+y [consistencia, incluidos timeouts](https://developers.cloudflare.com/r2/reference/consistency/).
+
 ## 1. Objetivo, alcance y resultado
 
 HU-005 permite completar el catálogo comercial con descripciones, fotografías y etiquetas locales. Loyverse sigue siendo la fuente de nombres, precios, variantes y modificadores. MITBOL administra el contenido que necesita el menú digital y lo conserva durante las sincronizaciones.

@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError, Tim
 from app.models import Product, ProductImage, ProductTag, ProductVariant, Tag
 from app.schemas.enrichment import DescriptionResponse, ImageResponse, TagResponse
 from app.services.enrichment_errors import EnrichmentError, StorageError
-from app.services.image_storage import LocalImageStorage, validate_image
+from app.services.image_storage import ImageStorage, validate_image
 from app.services.admin_transaction import (
     commit_changes, managed, rollback_changes, track_image_storage,
 )
@@ -162,7 +162,7 @@ def _finalize(storage, operation, referenced):
         logger.warning("Limpieza de imágenes pendiente (%s).", type(error).__name__)
 
 
-def add_image(db, storage: LocalImageStorage, variant_id, content, display_order=None):
+def add_image(db, storage: ImageStorage, variant_id, content, display_order=None):
     processed, extension = validate_image(content)
     with database_errors(db):
         _storage_lock(db)
@@ -202,7 +202,7 @@ def update_image_order(db, variant_id, image_id, display_order):
         return result
 
 
-def delete_image(db, storage: LocalImageStorage, variant_id, image_id):
+def delete_image(db, storage: ImageStorage, variant_id, image_id):
     with database_errors(db):
         _storage_lock(db)
         storage.recover(db)

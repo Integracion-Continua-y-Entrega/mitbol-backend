@@ -13,7 +13,7 @@ from app.core.security import ADMIN_SECURITY_DESCRIPTION, AdminRequestGuard
 from app.db.database import session_factory_for
 from app.schemas.menu import MenuProductDetailResponse, MenuResponse
 from app.services.enrichment_errors import EnrichmentError
-from app.services.image_storage import LocalImageStorage
+from app.services.image_storage import create_image_storage
 
 def create_app(config: Settings | None = None) -> FastAPI:
     config = config or settings
@@ -26,6 +26,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            application.state.image_storage.close()
             application.state.session_factory.kw["bind"].dispose()
             if config.auth_enabled:
                 application.state.auth_session_factory.kw["bind"].dispose()
@@ -39,7 +40,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     )
     application.state.settings = config
     application.state.session_factory = session_factory_for(config)
-    application.state.image_storage = LocalImageStorage(config.image_storage_root)
+    application.state.image_storage = create_image_storage(config)
     if not config.auth_enabled:
         application.add_middleware(
             CORSMiddleware, allow_origins=config.cors_origins, allow_credentials=False,

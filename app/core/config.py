@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     admin_enabled: bool = False
     admin_api_key: SecretStr | None = None
     image_storage_root: Path = Path("storage/product-images")
+    image_storage_provider: Literal["local", "r2"] = "local"
+    r2_endpoint_url: str | None = None
+    r2_bucket: str | None = None
+    r2_access_key_id: SecretStr | None = None
+    r2_secret_access_key: SecretStr | None = None
+    r2_key_prefix: str = "mitbol/product-images"
     auth_enabled: bool = False
     auth_profile: Literal["restaurant", "frontend_dev"] = "restaurant"
     auth_catalog_enabled: bool = False
@@ -140,6 +146,24 @@ class Settings(BaseSettings):
                 url = urlsplit(origin)
                 if url.scheme != "https" and url.hostname not in {"localhost", "127.0.0.1", "::1"}:
                     raise ValueError("Los orígenes remotos cloud deben utilizar HTTPS.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_image_storage_configuration(self):
+        if self.image_storage_provider not in {"local", "r2"}:
+            raise ValueError("IMAGE_STORAGE_PROVIDER requiere local o r2.")
+        if self.image_storage_provider == "local":
+            return self
+        if not re.fullmatch(r"https://[0-9a-f]{32}(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com/?", self.r2_endpoint_url or ""):
+            raise ValueError("R2_ENDPOINT_URL requiere un endpoint HTTPS de cuenta Cloudflare R2, sin credenciales ni rutas.")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", self.r2_bucket or ""):
+            raise ValueError("R2_BUCKET requiere un nombre de bucket válido de 3 a 63 caracteres.")
+        for secret in (self.r2_access_key_id, self.r2_secret_access_key):
+            value = secret.get_secret_value() if secret else ""
+            if not value or any(char.isspace() or ord(char) < 32 for char in value):
+                raise ValueError("R2 requiere R2_ACCESS_KEY_ID y R2_SECRET_ACCESS_KEY explícitas y sin espacios.")
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*", self.r2_key_prefix):
+            raise ValueError("R2_KEY_PREFIX requiere segmentos explícitos sin puntos ni barras exteriores.")
         return self
 
     @model_validator(mode="after")

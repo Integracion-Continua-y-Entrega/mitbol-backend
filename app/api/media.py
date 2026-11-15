@@ -1,6 +1,5 @@
 """Entrega pública de imágenes registradas de productos comercialmente activos."""
 
-import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Request
@@ -40,12 +39,12 @@ def get_image(
         if image is None:
             raise EnrichmentError(404, "Fotografía no encontrada.")
         try:
-            stream = request.app.state.image_storage.path_for(image.image_url).open("rb")
+            stored = request.app.state.image_storage.open_image(image.image_url)
         except FileNotFoundError:
             raise EnrichmentError(404, "Fotografía no encontrada.") from None
         except OSError:
             raise StorageError() from None
-    size = os.fstat(stream.fileno()).st_size
+    stream, size = stored.stream, stored.size
 
     def chunks():
         try:

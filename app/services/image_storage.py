@@ -1,4 +1,4 @@
-"""Imágenes procesadas y diario local para coordinar archivos con PostgreSQL."""
+"""Contrato de almacenamiento, validación de imágenes y proveedor local."""
 
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+from typing import BinaryIO, Protocol
 from uuid import uuid4
 import warnings
 
@@ -64,9 +65,56 @@ class FileOperation:
     operation_id: str = field(default_factory=lambda: uuid4().hex)
 
 
+@dataclass(frozen=True)
+class ImageFile:
+    stream: BinaryIO
+    size: int
+
+
+class ImageStorage(Protocol):
+    @property
+    def identity(self) -> tuple: ...
+    def open_image(self, image_url: str) -> ImageFile: ...
+    def prepare_create(self, content: bytes, extension: str, product_id: int, variant_id: int) -> FileOperation: ...
+    def prepare_delete(self, image_url: str) -> FileOperation: ...
+    def settle(self, operation: FileOperation, referenced: bool): ...
+    def recover(self, db): ...
+    def close(self): ...
+
+
+def image_parts(image_url: str) -> tuple[str, str, str, str]:
+    match = IMAGE_URL_PATTERN.fullmatch(image_url)
+    if match is None:
+        raise StorageError()
+    return match.groups()
+
+
+def create_image_storage(config) -> ImageStorage:
+    config.validate_image_storage_configuration()
+    if config.image_storage_provider == "r2":
+        from app.services.r2_image_storage import R2ImageStorage
+        return R2ImageStorage.from_settings(config)
+    return LocalImageStorage(config.image_storage_root)
+
+
 class LocalImageStorage:
     def __init__(self, root: Path):
         self.root = Path(root).resolve()
+
+    @property
+    def identity(self) -> tuple:
+        return ("local", self.root)
+
+    def close(self):
+        pass
+
+    def open_image(self, image_url: str) -> ImageFile:
+        stream = self.path_for(image_url).open("rb")
+        try:
+            return ImageFile(stream, os.fstat(stream.fileno()).st_size)
+        except Exception:
+            stream.close()
+            raise
 
     def _inside(self, *parts: str) -> Path:
         path = self.root.joinpath(*parts)
@@ -75,10 +123,7 @@ class LocalImageStorage:
         return path
 
     def path_for(self, image_url: str) -> Path:
-        match = IMAGE_URL_PATTERN.fullmatch(image_url)
-        if match is None:
-            raise StorageError()
-        product, variant, filename, _ = match.groups()
+        product, variant, filename, _ = image_parts(image_url)
         return self._inside(product, "variants", variant, filename)
 
     def _paths(self, operation: FileOperation):
