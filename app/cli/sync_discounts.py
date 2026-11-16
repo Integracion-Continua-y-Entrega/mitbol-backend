@@ -15,6 +15,7 @@ from app.db.connection import (
     CloudDatabaseTarget, DatabaseTargetError, create_database_engine, environment_mode,
     local_database_url, validate_local_connection,
 )
+from app.db.schema_compatibility import validate_bridge_schema
 from app.services.discount_sync_service import DISCOUNT_COMPATIBLE_REVISIONS, DiscountSyncError, DiscountSyncService
 from app.services.discount_transform import DiscountValidationError
 from app.services.loyverse_client import LoyverseAPIClient, LoyverseAPIError
@@ -28,6 +29,7 @@ def preflight(engine, *, expected_database: str, cloud_target=None) -> dict:
             validate_local_connection(connection)
         else:
             cloud_target.validate_connection(connection)
+            validate_bridge_schema(connection)
         if connection.scalar(select(func.current_database())) != expected_database:
             raise DiscountSyncError("La conexión real no coincide con la base autorizada.")
         identity = connection.execute(text("SELECT current_user, session_user")).one()
@@ -43,7 +45,9 @@ def preflight(engine, *, expected_database: str, cloud_target=None) -> dict:
         context = MigrationContext.configure(connection, opts={"version_table_schema": "public"})
         heads = context.get_current_heads()
         if len(heads) != 1 or heads[0] not in DISCOUNT_COMPATIBLE_REVISIONS:
-            raise DiscountSyncError("La sincronización requiere 20261111_0006 o su extensión compatible 20261114_0007.")
+            raise DiscountSyncError("La sincronización requiere 20261111_0006 o su extensión explícitamente compatible 20261114_0007/20261115_0008.")
+        if cloud_target is None and heads[0] == "20261115_0008":
+            validate_bridge_schema(connection)
         valid = connection.scalar(text("""
             SELECT relkind = 'r' AND NOT relrowsecurity FROM pg_catalog.pg_class
             WHERE oid = pg_catalog.to_regclass('public."Discounts"')

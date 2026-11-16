@@ -189,10 +189,10 @@ def test_approved_writer_policy_reused_in_read_only_connection(writer_database, 
         raw = engine.raw_connection()
         try:
             if allowed:
-                writer_policy.validate_writer_connection(raw.driver_connection)
-                with raw.cursor() as cursor:
-                    cursor.execute("SHOW transaction_read_only")
-                    assert cursor.fetchone()[0] == "on"
+                # Esta fixture histórica está en 0005. El pool cloud del puente
+                # exige 0007/0008; ambas revisiones se ejercitan en test_schema_bridge.
+                with pytest.raises(DatabaseTargetError, match='puente'):
+                    writer_policy.validate_writer_connection(raw.driver_connection)
             else:
                 with pytest.raises(psycopg2.Error, match="WRITER_NEON_IDENTITY"):
                     writer_policy.validate_writer_connection(raw.driver_connection)

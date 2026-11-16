@@ -23,6 +23,7 @@ $guard$;
 DO $reader_policy$
 DECLARE
     reader_oid oid;
+    categories_installed boolean;
     allowed_tables CONSTANT text[] := ARRAY[
         'Products', 'ProductVariants', 'ProductModifiers', 'ProductComplements',
         'ProductModifierAssignments', 'ProductImages', 'Tags', 'ProductTags'
@@ -59,6 +60,16 @@ BEGIN
        OR NOT has_schema_privilege(reader_oid, 'public', 'USAGE') THEN
         RAISE EXCEPTION 'READER_REQUIRED_ACCESS';
     END IF;
+    categories_installed := to_regclass('public."Categories"') IS NOT NULL;
+    IF categories_installed AND has_any_column_privilege(reader_oid,'public."Categories"','SELECT')
+       AND EXISTS (
+        SELECT 1 FROM pg_attribute a WHERE a.attrelid=to_regclass('public."Categories"')
+          AND a.attnum>0 AND NOT a.attisdropped
+          AND has_column_privilege(reader_oid,a.attrelid,a.attnum,'SELECT') <>
+              (a.attname::text=ANY(ARRAY['category_id','name','color','is_active']))
+    ) THEN
+        RAISE EXCEPTION 'READER_CATEGORY_COLUMNS';
+    END IF;
     IF has_database_privilege(reader_oid, current_database(), 'CREATE,TEMPORARY')
        OR EXISTS (SELECT 1 FROM pg_namespace WHERE has_schema_privilege(reader_oid, oid, 'CREATE')) THEN
         RAISE EXCEPTION 'READER_CREATE_OR_TEMP';
@@ -85,6 +96,7 @@ BEGIN
             has_table_privilege(reader_oid, c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
             OR has_any_column_privilege(reader_oid, c.oid, 'INSERT,UPDATE,REFERENCES')
             OR (NOT (n.nspname = 'public' AND c.relname::text = ANY(allowed_tables) AND c.relkind = 'r')
+                AND NOT (categories_installed AND n.nspname='public' AND c.relname='Categories' AND c.relkind='r')
                 AND has_any_column_privilege(reader_oid, c.oid, 'SELECT'))
             ELSE false END
     ) THEN

@@ -1,5 +1,119 @@
 # HU-010 — Administración de sincronizaciones
 
+## Backend puente para 0007 y 0008
+
+La rama `fix/backend-schema-0007-0008-compat` parte de `origin/develop`
+(`afbf671cfcc122854e811b7d23630ff1cd733606`). Es una publicación intermedia,
+separada del PR #15 de categorías. No se ha podido verificar el SHA que Render
+tiene desplegado: el SHA anterior identifica la base del cambio en Git.
+
+El verificador administrativo anterior comparaba la revisión con `0007` y
+rechazaba `0008` con `WRITER_QUEUE_SCHEMA`. También había controles exclusivos
+de revisión en HU-010, HU-008, descuentos y el trabajador, además de matrices
+de permisos que no contemplaban el delta aditivo de categorías.
+
+El puente conserva los modelos, rutas, consultas y sincronización de `0007`.
+No incluye la migración `0008`, endpoints de categorías ni solicitudes nuevas
+a Loyverse. `app/db/schema_compatibility.py` comprueba explícitamente `0007` o
+`0008`, columnas/tipos/nulabilidad, ausencia de RLS, claves, restricciones
+validadas e índices del contrato. Inspecciona los catálogos PostgreSQL; no
+requiere lectura de filas de `Categories`. Una revisión desconocida o una
+extensión incompleta se rechazan. El pool administrativo cloud, el trabajador
+cloud y la cola utilizan este control. Los flujos locales históricos de HU-008
+y descuentos conservan sus listas explícitas de revisiones anteriores para
+mantener la compatibilidad de las herramientas existentes; no habilitan esas
+revisiones en los perfiles operativos cloud del puente.
+
+El CLI de carga inicial cloud también exige el esquema completo `0007` o
+`0008`. Conserva su requisito de catálogo vacío y la aprobación del manifiesto;
+una revisión histórica aceptada por una herramienta local no autoriza una
+carga cloud. Su preflight informa el rechazo antes de contactar al proveedor.
+
+Se admiten tres estados operativos:
+
+| Estado | Administrador | Trabajador | Lector |
+| --- | --- | --- | --- |
+| `0007` | Perfil mínimo existente. | Perfil comercial/cola existente, cuatro secuencias. | Catálogo existente, sin escrituras. |
+| `0008`, antes del delta | Mismo perfil, sin exigir `category_id`. | El SELECT de Products a nivel tabla abarca automáticamente la columna nueva; sin escritura en categorías. | Sin exigir SELECT de Categories. |
+| `0008`, después del delta revisado | Admite únicamente el SELECT adicional de Products.category_id. | Admite exactamente Categories, INSERT/UPDATE comercial de Products.category_id y USAGE de su quinta secuencia. | Admite únicamente category_id/name/color/is_active de Categories. |
+
+Los verificadores siguen rechazando permisos adicionales, DDL, membresías,
+grant options y escrituras en campos locales protegidos. No aplican grants ni
+crean roles. Los permisos de categorías permiten la transición, pero las
+consultas y escrituras comerciales del puente no los utilizan ni alteran
+relaciones de categorías existentes. Autenticación, sesiones, roles, Origin,
+CSRF y almacenamiento R2 se conservan.
+
+### Verificación aislada del puente
+
+```powershell
+.\.venv\Scripts\python.exe -B scripts/test_auth_phase1.py --with-reader tests/test_schema_bridge.py -q
+.\.venv\Scripts\python.exe -B scripts/test_auth_phase1.py --with-reader -q
+.\.venv\Scripts\python.exe -B scripts/render_admin_deployment_sql.py --check
+git diff --check
+```
+
+El ejecutor crea PostgreSQL 18 local desechable y sanea el entorno, sin cargar
+`.env` privados. La matriz reproduce `0007`, `0008` antes del delta y `0008`
+después del delta con LOGIN reales y permisos limitados. El contrato SQL de
+`tests/fixtures/schema_0008_bridge.sql` reproduce el upgrade revisado de #15 y
+se protege con nombre aleatorio de base, operador de pruebas y loopback; no
+es una migración operativa. Se comprueban menú, sesiones, roles, Origin/CSRF,
+solicitudes/historial y consumo durable, preservación de categorías,
+subida/lectura/borrado R2 simulados, rechazo de revisiones/esquemas inválidos
+y de permisos adicionales en los tres roles. Sólo el transporte cloud se
+adapta a loopback. R2 y Loyverse utilizan proveedores simulados.
+
+La regresión local final del puente aprobó **342 pruebas** con PostgreSQL
+18.2: matriz de esquemas/permisos, CLI y carga inicial, descuentos,
+destacados, autenticación cloud, preparación 0007, HU-010 y R2. Incluye todos
+los casos afectados detectados por la primera ejecución completa. El SQL
+generado, `pip check` y `git diff --check` pasaron. Dos avisos de deprecación
+proceden del TestClient y sus dependencias. La CI del PR ejecuta nuevamente
+la suite completa con PostgreSQL 18 en Linux.
+
+### Orden del despliegue posterior, sujeto a autorización
+
+1. Revisar el PR del puente, exigir CI aprobado y fusionarlo primero a
+   `develop`. Mantener el PR #15 abierto y Auto-Deploy desactivado.
+2. En Render confirmar la rama y el SHA fusionado; desplegar manualmente ese
+   SHA mientras Neon continúa en `20261114_0007`. No añadir migraciones a
+   build/start/pre-deploy ni cambiar credenciales o controles de seguridad.
+3. Comprobar salud y menú con acceso real a PostgreSQL, inicio/cierre de
+   sesión, permisos y CSRF, estado/historial de HU-010 y fotografías R2 con
+   recursos de prueba autorizados. No iniciar sincronizaciones comerciales
+   para comprobar el estado de la cola.
+4. Con autorización independiente para producción, confirmar proyecto,
+   Branch ID/endpoint directo, TLS, base y revisión exacta `0007`. Crear un
+   respaldo nuevo `pg_dump -Fc` fuera del repositorio; verificar SHA-256,
+   `pg_restore --list` y restauración aislada con PostgreSQL 18 compatible.
+   Conservar el respaldo anterior y registrar filas, relaciones, secuencias
+   y ACL. No continuar si falla la recuperación.
+5. Desde el código revisado de #15, aplicar únicamente `20261115_0008` y
+   confirmar COMMIT. Aplicar por separado el delta revisado
+   `docs/database/update_catalog_categories.sql`, con sus comprobaciones y
+   aprobación explícita; no volver a ejecutar migraciones ni recrear roles.
+6. Confirmar revisión `0008`, conservación de datos y secuencias, esquema y
+   verificadores con nuevas conexiones de los tres roles. Verificar que el
+   mismo backend puente mantiene menú, autenticación, administración y R2.
+   Antes de reactivar el trabajador, renovar su archivo privado de aprobación
+   para la revisión efectiva `0008`; una aprobación que diga `0007` se rechaza.
+7. Actualizar la rama de #15 desde `develop`, revisar los conflictos de
+   validadores, matrices SQL y orquestación y ejecutar nuevamente toda la CI.
+   El código completo de categorías debe seguir exigiendo su esquema `0008`;
+   no copiar sin revisión la tolerancia transitoria del puente.
+8. Con autorización, fusionar #15 y desplegar manualmente el backend completo
+   en Render, verificando el SHA desplegado y Auto-Deploy desactivado.
+9. Comprobar categorías, filtros, menú, administración, cola y fotografías.
+   Ejecutar cualquier sincronización comercial sólo con su autorización y
+   configuración operativa independientes.
+
+Después de migrar la base a `0008`, la versión de recuperación del backend es
+el puente validado. No volver al backend anterior incompatible ni ejecutar
+downgrades destructivos para revertir un despliegue. Ante errores de base,
+detener operaciones, conservar evidencias y evaluar recuperación desde el
+respaldo en un destino aislado antes de intervenir la base compartida.
+
 Estado al 14 de noviembre de 2026: implementado y preparado para el perfil cloud
 `restaurant`, deshabilitado por defecto. Migraciones y permisos sólo se ensayan
 en PostgreSQL temporal. No se migró Neon, modificó Render, sincronizó Loyverse
