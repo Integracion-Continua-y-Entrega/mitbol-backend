@@ -3,6 +3,11 @@ name: MITBOL catalog synchronization
 # Only this orchestration file belongs on main. Runtime code comes from develop.
 # schedule is best-effort; GitHub can delay runs. No Render Cron Job is required.
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/catalog-sync.yml
+      - tests/workflows/test_catalog_sync_workflow.py
   workflow_dispatch:
     inputs:
       mode:
@@ -22,7 +27,7 @@ permissions:
 # All modes share this group. Preserve a running transaction; PostgreSQL also
 # retains HU-008/HU-010 advisory locks, coalescing, retries and job recovery.
 concurrency:
-  group: mitbol-catalog-production
+  group: ${{ github.event_name == 'pull_request' && format('mitbol-catalog-diagnostics-pr-{0}', github.event.pull_request.number) || 'mitbol-catalog-production' }}
   cancel-in-progress: false
 
 jobs:
@@ -86,51 +91,115 @@ jobs:
           import os
           from types import SimpleNamespace
 
-          from app.cli.sync_catalog_recurrent import configuration
-          from app.db.connection import create_database_engine
-          from app.db.schema_compatibility import validate_bridge_schema
-          from app.db.worker_policy import validate_worker_connection
-          from app.services.sync_service import CATEGORIES_REVISION
+
+          class CheckFailure(Exception):
+              def __init__(self, code):
+                  self.code = code
+
+
+          def require(condition, code):
+              if not condition:
+                  raise CheckFailure(code)
+
 
           engine = None
+          failure = None
+          stage = 'SYNC_RUNTIME_CODE_INVALID'
           try:
-              mode = os.environ['SYNC_MODE']
-              if (os.environ.get('GITHUB_REPOSITORY') != 'Integracion-Continua-y-Entrega/mitbol-backend'
-                      or os.environ.get('GITHUB_REF') != 'refs/heads/main'
-                      or mode not in {'dry-run', 'process-queue', 'scheduled'}
-                      or (mode != 'dry-run' and os.environ.get('MITBOL_SYNC_ENABLED') != 'true')):
-                  raise ValueError('Execution is not enabled')
+              from sqlalchemy.engine import make_url
+              from app.cli.sync_catalog_recurrent import configuration
+              from app.db.connection import create_database_engine
+              from app.db.schema_compatibility import validate_bridge_schema
+              from app.db.worker_policy import validate_worker_connection
+              from app.services.sync_service import CATEGORIES_REVISION
+
+              mode = os.environ.get('SYNC_MODE', '')
+              require(os.environ.get('GITHUB_REPOSITORY') == 'Integracion-Continua-y-Entrega/mitbol-backend'
+                      and os.environ.get('GITHUB_REF') == 'refs/heads/main',
+                      'SYNC_WORKFLOW_CONTEXT_INVALID')
+              require(mode in {'dry-run', 'process-queue', 'scheduled'}, 'SYNC_MODE_INVALID')
+              require(mode == 'dry-run' or os.environ.get('MITBOL_SYNC_ENABLED') == 'true',
+                      'SYNC_EXECUTION_DISABLED')
+              stage = 'SYNC_CONFIG_INVALID'
+              for name in ('APP_ENV', 'ADMIN_ENABLED', 'EXPECTED_DATABASE',
+                           'EXPECTED_DATABASE_HOST', 'LOYVERSE_STORE_ID',
+                           'DATABASE_URL', 'LOYVERSE_ACCESS_TOKEN'):
+                  require(bool(os.environ.get(name, '').strip()), 'SYNC_CONFIG_MISSING_' + name)
+              # Approval is deliberately optional for dry-run, even if absent or malformed.
+              if mode != 'dry-run':
+                  require(bool(os.environ.get('MITBOL_RECURRENT_SYNC_APPROVAL', '').strip()),
+                          'SYNC_CONFIG_MISSING_MITBOL_RECURRENT_SYNC_APPROVAL')
+              require(os.environ['APP_ENV'] == 'cloud' and os.environ['ADMIN_ENABLED'] == 'false',
+                      'SYNC_CONFIG_INVALID')
               arguments = SimpleNamespace(
                   expected_database=os.environ['EXPECTED_DATABASE'],
                   expected_host=os.environ['EXPECTED_DATABASE_HOST'],
                   store_id=os.environ['LOYVERSE_STORE_ID'],
                   execute=mode != 'dry-run',
               )
+              stage = 'SYNC_CONFIG_DATABASE_URL_INVALID'
+              candidate = make_url(os.environ['DATABASE_URL'])
+              require(candidate.query.get('sslmode') == 'verify-full'
+                      and candidate.query.get('channel_binding', 'require') == 'require',
+                      'SYNC_TLS_CONFIG_INVALID')
+              stage = 'SYNC_CONFIG_INVALID'
               url, target, _, _ = configuration(arguments)
-              if (url.username != 'mitbol_catalog_worker'
-                      or url.database != 'mitbol_cloud_dev'
-                      or url.host.split('.')[0] != 'ep-green-hill-bddfbmgh'
-                      or CATEGORIES_REVISION != '20261115_0008'):
-                  raise ValueError('Unapproved production target or code')
+              require(url.username == 'mitbol_catalog_worker', 'SYNC_WORKER_ROLE_MISMATCH')
+              require(url.database == 'mitbol_cloud_dev'
+                      and url.host == 'ep-green-hill-bddfbmgh.c-8.us-east-2.aws.neon.tech',
+                      'SYNC_NEON_TARGET_MISMATCH')
+              require(CATEGORIES_REVISION == '20261115_0008', 'SYNC_RUNTIME_CODE_INVALID')
+              stage = 'SYNC_CONNECTION_TLS_FAILED'
               engine = create_database_engine(url, target=target)
               with engine.connect() as connection, connection.begin():
+                  stage = 'SYNC_READ_ONLY_FAILED'
                   connection.exec_driver_sql('SET TRANSACTION READ ONLY')
+                  stage = 'SYNC_CONNECTION_TLS_FAILED'
                   target.validate_connection(connection)
+                  stage = 'SYNC_NEON_IDENTITY_UNAVAILABLE'
                   branch = connection.exec_driver_sql(
                       "SELECT current_setting('neon.branch_id', true)"
                   ).scalar_one()
-                  if branch != 'br-snowy-king-bd0n9w42':
-                      raise ValueError('Not the verified production branch')
-                  if validate_bridge_schema(connection) != '20261115_0008':
-                      raise ValueError('Unapproved schema revision')
+                  require(bool(branch), 'SYNC_NEON_IDENTITY_UNAVAILABLE')
+                  require(branch == 'br-snowy-king-bd0n9w42', 'SYNC_NEON_BRANCH_MISMATCH')
+                  stage = 'SYNC_ALEMBIC_REVISION_INVALID'
+                  heads = connection.exec_driver_sql('SELECT version_num FROM public.alembic_version').all()
+                  require(heads == [('20261115_0008',)], 'SYNC_ALEMBIC_REVISION_INVALID')
+                  stage = 'SYNC_SCHEMA_CONTRACT_INVALID'
+                  require(validate_bridge_schema(connection) == '20261115_0008',
+                          'SYNC_ALEMBIC_REVISION_INVALID')
+                  stage = 'SYNC_WORKER_PERMISSIONS_INVALID'
                   validate_worker_connection(connection, target)
-          except Exception:
-              print('::error::Production identity, TLS, schema, permissions or configuration check failed.')
-              raise SystemExit(2) from None
+                  stage = 'SYNC_READ_ONLY_TRANSACTION_FAILED'
+          except CheckFailure as error:
+              failure = error.code  # Codes are constants or required variable names, never values.
+          except Exception as error:
+              # Inspect structured identifiers only. Never format exception text, args or URLs.
+              state = getattr(getattr(error, 'orig', None), 'pgcode', None) or getattr(error, 'pgcode', None)
+              target_code = getattr(error, 'code', None)
+              if state == '42501':
+                  failure = 'SYNC_WORKER_PERMISSIONS_INVALID'
+              elif state in {'28P01', '28000'}:
+                  failure = 'SYNC_DB_AUTH_FAILED'
+              elif target_code in {'TLS_NOT_ACTIVE', 'TLS_MODE_MISMATCH',
+                                   'CHANNEL_BINDING_MISMATCH', 'TLS_CA_MISMATCH'}:
+                  failure = 'SYNC_TLS_VALIDATION_FAILED'
+              elif target_code in {'EFFECTIVE_HOST_MISMATCH', 'EFFECTIVE_DATABASE_MISMATCH',
+                                   'EFFECTIVE_PORT_MISMATCH', 'EFFECTIVE_USER_MISMATCH',
+                                   'EFFECTIVE_OPTIONS_REJECTED'}:
+                  failure = 'SYNC_NEON_TARGET_MISMATCH'
+              else:
+                  failure = stage
           finally:
               if engine is not None:
-                  engine.dispose()
-          print('Production preflight passed (read-only).')
+                  try:
+                      engine.dispose()
+                  except Exception:
+                      failure = failure or 'SYNC_CONNECTION_CLEANUP_FAILED'
+          if failure:
+              print('::error::' + failure)
+              raise SystemExit(2)
+          print('SYNC_PREFLIGHT_OK')
           PY
 
           args=(--expected-database "$EXPECTED_DATABASE"
@@ -143,3 +212,30 @@ jobs:
             *) exit 2 ;;
           esac
           python -m app.cli.sync_catalog_jobs "${args[@]}"
+
+  diagnostics:
+    name: Workflow diagnostic tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout workflow and offline tests
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Test diagnostics without service credentials or connections
+        run: python -B -m unittest discover -s tests/workflows -v
+      - name: Validate workflow syntax with verified actionlint
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$archive"
+          printf '%s  %s\n' '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8' "$archive" | sha256sum --check --status
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -pyflakes= .github/workflows/catalog-sync.yml
