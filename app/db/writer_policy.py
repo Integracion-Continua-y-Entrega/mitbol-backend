@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from app.db.connection import DatabaseTargetError
+from app.db.schema_compatibility import validate_bridge_schema
 
 
 def writer_policy_sql():
@@ -25,3 +26,4 @@ def validate_writer_connection(driver_connection):
         cursor.execute("SET LOCAL statement_timeout = '15s'")
         cursor.execute("SET LOCAL mitbol.external_tls_verified = 'verify-full-channel-binding'")
         cursor.execute(writer_policy_sql())
+    validate_bridge_schema(driver_connection)

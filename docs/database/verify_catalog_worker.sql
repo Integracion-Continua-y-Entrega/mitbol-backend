@@ -14,7 +14,9 @@ DECLARE
     operation text;
     expected boolean;
     allowed jsonb;
-    policy CONSTANT jsonb := '{
+    categories_installed boolean := to_regclass('public."Categories"') IS NOT NULL;
+    category_grants boolean := false;
+    policy jsonb := '{
       "Products": {"SELECT":["product_id","loyverse_id","name","description","is_available","is_active","is_featured","is_new","synced_at"],"INSERT":["loyverse_id","name","is_active","synced_at"],"UPDATE":["name","is_active","synced_at"]},
       "ProductVariants": {"SELECT":["product_variant_id","loyverse_id","name","price","is_available","is_commercially_available","synced_at","product_id"],"INSERT":["loyverse_id","name","price","product_id","is_available","is_commercially_available","synced_at"],"UPDATE":["name","price","is_commercially_available","synced_at"]},
       "ProductModifiers": {"SELECT":["product_modifier_id","loyverse_id","name","display_order","synced_at"],"INSERT":["loyverse_id","name","display_order","synced_at"],"UPDATE":["name","display_order","synced_at"]},
@@ -38,10 +40,24 @@ BEGIN
         RAISE EXCEPTION 'WORKER_IDENTITY';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num='20261114_0007') THEN
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007','20261115_0008')) THEN
         RAISE EXCEPTION 'WORKER_SCHEMA';
     END IF;
     SELECT oid INTO worker FROM pg_roles WHERE rolname = current_user;
+    IF categories_installed THEN
+        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
+            RAISE EXCEPTION 'WORKER_CATEGORIES_SCHEMA';
+        END IF;
+        category_grants := has_any_column_privilege(worker,'public."Categories"','SELECT,INSERT,UPDATE')
+            OR has_sequence_privilege(worker,'public."Categories_category_id_seq"','USAGE');
+        -- SELECT de Products a nivel tabla alcanza automáticamente category_id.
+        policy := jsonb_set(policy,'{Products,SELECT}',(policy->'Products'->'SELECT') || '["category_id"]'::jsonb);
+        IF category_grants THEN
+            policy := policy || '{"Categories":{"SELECT":["category_id","loyverse_id","name","color","is_active","synced_at"],"INSERT":["loyverse_id","name","color","is_active","synced_at"],"UPDATE":["name","color","is_active","synced_at"]}}'::jsonb;
+            policy := jsonb_set(policy,'{Products,INSERT}',(policy->'Products'->'INSERT') || '["category_id"]'::jsonb);
+            policy := jsonb_set(policy,'{Products,UPDATE}',(policy->'Products'->'UPDATE') || '["category_id"]'::jsonb);
+        END IF;
+    END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE oid = worker AND
        (NOT rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls))
        OR EXISTS (SELECT 1 FROM pg_auth_members WHERE member = worker) THEN
@@ -63,12 +79,12 @@ BEGIN
         RAISE EXCEPTION 'WORKER_OWNER';
     END IF;
     IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind = 'r' AND policy ? c.relname::text) <> 10 THEN
+        WHERE n.nspname = 'public' AND c.relkind = 'r' AND policy ? c.relname::text) <> (CASE WHEN category_grants THEN 11 ELSE 10 END) THEN
         RAISE EXCEPTION 'WORKER_MISSING_RELATIONS';
     END IF;
     IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relname IN
-        ('Products_product_id_seq','ProductVariants_product_variant_id_seq','ProductModifiers_product_modifier_id_seq','ProductComplements_product_complement_id_seq')) <> 4 THEN
+        ('Products_product_id_seq','ProductVariants_product_variant_id_seq','ProductModifiers_product_modifier_id_seq','ProductComplements_product_complement_id_seq','Categories_category_id_seq')) <> (CASE WHEN categories_installed THEN 5 ELSE 4 END) THEN
         RAISE EXCEPTION 'WORKER_MISSING_SEQUENCES';
     END IF;
     FOR rel IN SELECT c.*, n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -96,6 +112,7 @@ BEGIN
         ELSIF rel.relkind = 'S' THEN
             expected := rel.nspname = 'public' AND rel.relname IN
                 ('Products_product_id_seq','ProductVariants_product_variant_id_seq','ProductModifiers_product_modifier_id_seq','ProductComplements_product_complement_id_seq');
+            expected := expected OR (category_grants AND rel.nspname='public' AND rel.relname='Categories_category_id_seq');
             IF has_sequence_privilege(worker, rel.oid, 'USAGE') <> expected
                OR has_sequence_privilege(worker, rel.oid, 'SELECT,UPDATE') THEN
                 RAISE EXCEPTION 'WORKER_SEQUENCE: %', rel.relname;

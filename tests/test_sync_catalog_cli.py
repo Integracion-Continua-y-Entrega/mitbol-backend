@@ -5,6 +5,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from alembic import command
 from alembic.runtime.migration import MigrationContext
 import httpx
 from pydantic import SecretStr
@@ -19,6 +20,7 @@ from app.services.loyverse_client import LoyverseAPIClient, LoyverseConfiguratio
 from app.services.sync_service import SyncService, validate_catalog_revision
 from app.services.catalog_manifest import catalog_manifest, manifest_sha256
 from app.services.catalog_transform import transform_catalog
+from test_auth_persistence import config_for
 
 
 HOST = "ep-catalog.example.com"
@@ -136,7 +138,21 @@ def test_failed_preflight_never_calls_loyverse_and_disposes_engine(cli, monkeypa
     assert "PRIVATE" not in capsys.readouterr().out
 
 
-def test_cloud_preflight_is_a_real_read_only_transaction(sync_test_database):
+@pytest.fixture
+def cloud_schema_database(sync_test_database):
+    # El perfil cloud del puente requiere el esquema completo 0007. Las
+    # fixtures locales históricas continúan en 0003 y no eluden este control.
+    with sync_test_database.begin() as connection:
+        command.upgrade(config_for(connection), '20261114_0007')
+    try:
+        yield sync_test_database
+    finally:
+        with sync_test_database.begin() as connection:
+            command.downgrade(config_for(connection), '20261102_0003')
+
+
+def test_cloud_preflight_is_a_real_read_only_transaction(cloud_schema_database):
+    sync_test_database = cloud_schema_database
     # TLS/host se verifican por separado con el controlador simulado. Aquí se
     # prueba la inspección de revisión y la ausencia de escrituras en PostgreSQL.
     target = MagicMock(spec=CloudDatabaseTarget)
@@ -192,6 +208,7 @@ async def test_service_rejects_live_cloud_identity_before_http(sync_db):
 
 
 def test_cloud_path_preserves_local_description_and_rejects_another_store(sync_db, commercial_snapshot):
+    command.upgrade(config_for(sync_db.connection), '20261114_0007')
     target = MagicMock(spec=CloudDatabaseTarget)
     target.expected_database = sync_db.engine.url.database
     service = SyncService(sync_db.sessions, expected_database=target.expected_database,
@@ -219,6 +236,7 @@ def test_cloud_service_cannot_use_legacy_authorization(monkeypatch):
 async def test_cli_orchestrates_existing_client_and_transactional_service(
     sync_db, commercial_snapshot, monkeypatch, valid_store,
 ):
+    command.upgrade(config_for(sync_db.connection), '20261114_0007')
     target = MagicMock(spec=CloudDatabaseTarget)
     target.expected_database = sync_db.engine.url.database
     calls = []
@@ -262,7 +280,7 @@ async def test_cloud_service_checks_revision_before_lock_http_or_upsert(sync_db)
     service = SyncService(sync_db.sessions, expected_database=target.expected_database,
                           store_id="test-store", cloud_target=target)
     client = MagicMock()
-    with pytest.raises(CatalogTargetError, match="20261102_0003"):
+    with pytest.raises(CatalogTargetError, match="20261114_0007.*20261115_0008"):
         await service.synchronize(client)
     assert client.mock_calls == []
     assert sync_db.connection.execute(select(Product)).all() == []
@@ -351,7 +369,8 @@ async def test_preview_uses_full_download_and_transform_without_persistence(comm
     forbidden.assert_not_called()
 
 
-def test_initial_preflight_rejects_nonempty_catalog(sync_test_database):
+def test_initial_preflight_rejects_nonempty_catalog(cloud_schema_database):
+    sync_test_database = cloud_schema_database
     target = MagicMock(spec=CloudDatabaseTarget)
     target.expected_database = sync_test_database.url.database
     target.expected_host = "isolated-postgresql"

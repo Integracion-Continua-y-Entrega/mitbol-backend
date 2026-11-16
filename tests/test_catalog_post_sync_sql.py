@@ -10,6 +10,7 @@ import subprocess
 import re
 from unittest.mock import MagicMock
 
+from alembic import command
 from pydantic import SecretStr
 import pytest
 from sqlalchemy import delete
@@ -21,10 +22,12 @@ from app.models import Base
 from app.services.catalog_manifest import catalog_manifest
 from app.services.catalog_transform import transform_catalog
 from app.services.sync_service import SyncService
+from test_auth_persistence import config_for
 
 
 @pytest.mark.asyncio
 async def test_approved_initial_sync_uses_guard_in_actual_transaction(sync_db, commercial_snapshot, monkeypatch):
+    command.upgrade(config_for(sync_db.connection), '20261114_0007')
     import httpx
     from app.services.loyverse_client import LoyverseAPIClient
 
@@ -41,7 +44,7 @@ async def test_approved_initial_sync_uses_guard_in_actual_transaction(sync_db, c
     monkeypatch.setattr(sync_catalog, 'sessionmaker', lambda **kwargs: sync_db.sessions)
     target = MagicMock(spec=CloudDatabaseTarget)
     target.expected_database = sync_db.engine.url.database
-    approved = {'user': sync_db.engine.url.username, 'revision': '20261102_0003', 'catalog_manifest': catalog_manifest(
+    approved = {'user': sync_db.engine.url.username, 'revision': '20261114_0007', 'catalog_manifest': catalog_manifest(
         transform_catalog(commercial_snapshot), commercial_snapshot.store,
     )}
     result = await sync_catalog.synchronize(sync_db.engine, target, 'test-store', SecretStr('fake-token'), approved)

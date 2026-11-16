@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.connection import DatabaseTargetError
+from app.db.schema_compatibility import validate_bridge_schema
 
 
 def worker_policy_sql():
@@ -23,7 +24,8 @@ def validate_worker_connection(connection, target):
     # SET LOCAL no altera configuraciones persistentes del servidor.
     target.validate_connection(connection)
     try:
+        validate_bridge_schema(connection)
         connection.exec_driver_sql("SET LOCAL mitbol.external_tls_verified='verify-full-channel-binding'")
         connection.exec_driver_sql(worker_policy_sql(), execution_options={"no_parameters": True})
-    except SQLAlchemyError:
+    except (SQLAlchemyError, DatabaseTargetError):
         raise DatabaseTargetError("El trabajador no cumple el perfil mínimo de permisos revisado.") from None
