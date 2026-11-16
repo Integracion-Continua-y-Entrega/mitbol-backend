@@ -435,7 +435,7 @@ FORBIDDEN = [
     'CREATE FUNCTION public.forbidden() RETURNS int LANGUAGE sql AS \'SELECT 1\'',
     'CREATE ROLE forbidden', 'ALTER ROLE mitbol_admin_writer SUPERUSER',
     'GRANT mitbol_ci TO mitbol_admin_writer', 'SET ROLE mitbol_ci',
-    'UPDATE alembic_version SET version_num = \'forbidden\'', 'SELECT * FROM alembic_version',
+    'UPDATE alembic_version SET version_num = \'forbidden\'',
 ]
 
 
@@ -482,13 +482,17 @@ def test_verifier_detects_a_dangerous_column_grant_and_public_leak(writer_databa
 
 def test_writer_cannot_run_alembic(backend):
     b = backend
-    # La revisión negativa sucede antes de cualquier DDL si no puede leer versión.
+    # HU-010 permite leer la revisión; ejecutar DDL sigue prohibido. Upgrade
+    # head sería un no-op, por lo que se intenta un downgrade sólo en esta base
+    # temporal: el primer DDL debe fallar y toda la transacción se revierte.
     with b.roles.writer.connect() as db:
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261115_0008"
         with pytest.raises(CommandError):
-            command.upgrade(config_for(db), "head")
+            command.downgrade(config_for(db), "20261114_0007")
         db.rollback()
     with b.roles.owner.connect() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261106_0005"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261115_0008"
+        assert db.scalar(text("SELECT to_regclass('public.\"Categories\"')")) is not None
 
 
 def test_role_change_uses_existing_account_lock_and_invalidates_pending_request(backend, monkeypatch):

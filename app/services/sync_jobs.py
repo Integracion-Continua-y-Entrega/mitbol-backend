@@ -19,7 +19,8 @@ from app.services.loyverse_client import (
 )
 from app.services.sync_service import CATALOG_SYNC_LOCK_KEY
 
-SYNC_JOBS_REVISION = "20261114_0007"
+SYNC_JOBS_REVISION = "20261115_0008"
+SYNC_JOBS_COMPATIBLE_REVISIONS = frozenset({"20261114_0007", SYNC_JOBS_REVISION})
 QUEUE_LOCK_KEY = 0x4D4954424F50
 WORKER_LOCK_KEY = 0x4D4954424F51
 ACTIVE = ("queued", "running", "retry_wait")

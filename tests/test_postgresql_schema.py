@@ -4,7 +4,7 @@ Activar con MITBOL_POSTGRES_TESTS=1. En CI inspecciona la base aislada migrada.
 Las consultas de esta fixture son de lectura.
 """
 
-from app.models import catalog_metadata
+from app.models import runtime_catalog_metadata as catalog_metadata
 import os
 
 import pytest

@@ -113,15 +113,15 @@ def test_migration_is_additive_reversible_and_offline(management_database, monke
     with management_database.begin() as connection:
         assert not compare_metadata(MigrationContext.configure(connection), [
             Base.metadata, AuthBase.metadata, SyncBase.metadata])
-        before = set(inspect(connection).get_table_names()) - {"SyncRuns"}
+        before = set(inspect(connection).get_table_names()) - {"SyncRuns", "Categories"}
         command.downgrade(config_for(connection), "20261111_0006")
         assert set(inspect(connection).get_table_names()) == before
         command.upgrade(config_for(connection), jobs.SYNC_JOBS_REVISION)
-        assert set(inspect(connection).get_table_names()) == before | {"SyncRuns"}
+        assert set(inspect(connection).get_table_names()) == before | {"SyncRuns", "Categories"}
 
 
-def test_hu009_accepts_the_additive_hu010_revision(sync_test_database):
-    engine = sync_test_database
+def test_hu009_accepts_the_additive_hu010_revision(current_catalog_database):
+    engine = current_catalog_database
     with engine.connect() as connection, connection.begin():
         command.upgrade(config_for(connection), jobs.SYNC_JOBS_REVISION)
         service = DiscountSyncService(sessionmaker(bind=connection, join_transaction_mode="create_savepoint"),
@@ -428,7 +428,7 @@ def test_legacy_profile_still_rejects_auth_database_and_missing_queue_schema(bac
         assert b.client.get("/api/admin/sync/status").status_code == 503
     finally:
         with b.engine.begin() as connection:
-            connection.exec_driver_sql("UPDATE public.alembic_version SET version_num='20261114_0007'")
+            connection.exec_driver_sql("UPDATE public.alembic_version SET version_num='20261115_0008'")
 
 
 def test_history_pagination_missing_run_and_validation_sanitized(backend, commercial_snapshot):

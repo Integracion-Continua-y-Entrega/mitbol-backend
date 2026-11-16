@@ -49,9 +49,11 @@ class FakeCatalogAPI:
                 return response
         if key == "stores":
             return httpx.Response(200, json={key: [self.snapshot.store]})
-        assert key in {"items", "modifiers"}
+        assert key in {"items", "modifiers", "categories"}
         assert request.url.params["show_deleted"] == "true"
-        records = getattr(self.snapshot, key)
+        records = getattr(self.snapshot, key) or ()
+        if key == "items" and self.snapshot.categories is None:
+            records = tuple({"category_id": None, **row} for row in records)
         start = int(request.url.params.get("cursor", "0"))
         end = start + int(request.url.params["limit"])
         payload = {key: records[start:end]}
@@ -65,8 +67,8 @@ class FakeCatalogAPI:
 
 
 @pytest.fixture
-def recurring_db(sync_test_database):
-    engine = sync_test_database
+def recurring_db(current_catalog_database):
+    engine = current_catalog_database
     assert engine.url.database.startswith("mitbol_test_hu008_")
     assert engine.url.host == "127.0.0.1"
 
@@ -80,7 +82,7 @@ def recurring_db(sync_test_database):
     runner = RecurringCatalogSync(sessions, expected_database=engine.url.database,
                                 expected_host=engine.url.host, store_id="test-store")
     scope = {"host": engine.url.host, "database": engine.url.database,
-             "user": engine.url.username, "store_id": "test-store", "revision": "20261102_0003"}
+             "user": engine.url.username, "store_id": "test-store", "revision": "20261115_0008"}
     try:
         yield SimpleNamespace(engine=engine, sessions=sessions, runner=runner,
             approval={"operation": "catalog_recurrent_v1", "approved": True, **scope})
@@ -120,7 +122,7 @@ def run(db, snapshot, *, dry_run=False, api=None, approval=None):
 def test_first_import_and_repeat_preserve_ids_and_report_unchanged(recurring_db, commercial_snapshot):
     db = recurring_db
     first, pages, _ = run(db, commercial_snapshot)
-    assert pages == {"/stores": 1, "/items": 3, "/modifiers": 2}
+    assert pages == {"/stores": 1, "/items": 3, "/modifiers": 2, "/categories": 1}
     assert first["status"] == "synchronized" and first["writes"] is True
     assert [first["changes"][key]["new"] for key in
             ("products", "variants", "modifiers", "complements")] == [3, 5, 2, 5]
@@ -326,7 +328,7 @@ def test_lock_is_held_while_fetching_every_page(recurring_db, commercial_snapsho
 
     api = FakeCatalogAPI(commercial_snapshot, check_lock)
     run(db, commercial_snapshot, dry_run=dry_run, api=api)
-    assert len(api.requests) == 6
+    assert len(api.requests) == 7
 
 
 def test_failure_after_dml_rolls_back_all_commercial_changes(recurring_db, commercial_snapshot, monkeypatch):
@@ -387,7 +389,7 @@ def test_schema_rejected_before_any_http(recurring_db, commercial_snapshot):
         assert not api.requests
     finally:
         with db.engine.begin() as connection:
-            connection.exec_driver_sql("UPDATE public.alembic_version SET version_num='20261102_0003'")
+            connection.exec_driver_sql("UPDATE public.alembic_version SET version_num='20261115_0008'")
 
 
 def test_insufficient_real_postgresql_permissions_rejected_before_http(recurring_db, commercial_snapshot):

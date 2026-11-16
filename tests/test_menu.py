@@ -236,6 +236,7 @@ def test_menu_is_public_and_preserves_contract(menu_client, add_product):
     assert response.json() == {
         "currency": "MXN",
         "products": [{
+            "category": None,
             "product_id": product.product_id,
             "name": "Hamburguesa clásica",
             "description": "Descripción local MITBOL",
@@ -409,6 +410,7 @@ def test_menu_tag_ids_reach_query_with_name_filter(api_app):
     from sqlalchemy.dialects import postgresql
 
     db = Mock()
+    db.connection.return_value.exec_driver_sql.return_value.one.return_value = (True, True, 4, 6)
     db.scalars.return_value.all.return_value = []
     api_app.dependency_overrides[get_db] = lambda: db
     with TestClient(api_app) as client:
@@ -464,7 +466,9 @@ def test_empty_public_catalog_returns_200(menu_client, menu_db, add_product, ina
         response = menu_client.get("/api/menu")
     assert response.status_code == 200
     assert response.json() == {"currency": "MXN", "products": []}
-    assert len([sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]) == 1
+    selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
+    assert len(selects) == 2
+    assert "SELECT to_regclass" in selects[0]
 
 
 def test_repeated_reads_preserve_data_and_stable_identifiers(menu_client, menu_db, add_product):
@@ -500,8 +504,9 @@ def test_menu_loads_variants_without_n_plus_one(menu_client, menu_db, add_produc
     assert response.status_code == 200
     assert len(response.json()["products"]) == product_count
     selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
-    assert len(selects) == 4
-    assert '"Products"' in selects[0] and '"ProductVariants"' in selects[1]
+    assert len(selects) == 5  # Una comprobación de compatibilidad por solicitud.
+    assert "SELECT to_regclass" in selects[0]
+    assert '"Products"' in selects[1] and '"ProductVariants"' in selects[2]
     assert not any(sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE", "CREATE", "ALTER"))
                    for sql in statements)
 
@@ -546,12 +551,18 @@ def test_invalid_prices_never_become_zero(invalid):
     (OperationalError, 503), (InterfaceError, 503), (TimeoutError, 503),
     (ProgrammingError, 500), (RuntimeError, 500),
 ])
-def test_database_errors_do_not_expose_sensitive_details(api_app, caplog, error_type, expected_status):
+@pytest.mark.parametrize("stage", ["capability", "data"])
+def test_database_errors_do_not_expose_sensitive_details(api_app, caplog, error_type, expected_status, stage):
     sensitive = "PRIVATE_PASSWORD internal-host SQL_INTERNO SELECT * FROM sensitive_table"
     error = (error_type(sensitive) if error_type in (TimeoutError, RuntimeError)
              else error_type("SELECT SQL_INTERNO", {}, RuntimeError(sensitive)))
 
     class FailingSession:
+        def connection(self):
+            if stage == "capability":
+                raise error
+            return SimpleNamespace(exec_driver_sql=lambda _: SimpleNamespace(one=lambda: (False, False, 0, 0)))
+
         def scalars(self, statement):
             raise error
 
@@ -631,7 +642,10 @@ def test_openapi_and_swagger_describe_public_contract(api_app):
     ("https://external.example", False),
 ])
 def test_only_authorized_development_origin_is_allowed(api_app, origin, allowed):
-    empty_session = SimpleNamespace(scalars=lambda statement: SimpleNamespace(all=lambda: []))
+    empty_session = SimpleNamespace(
+        scalars=lambda statement: SimpleNamespace(all=lambda: []),
+        connection=lambda: SimpleNamespace(exec_driver_sql=lambda _: SimpleNamespace(one=lambda: (False, False, 0, 0))),
+    )
     api_app.dependency_overrides[get_db] = lambda: empty_session
     with TestClient(api_app) as client:
         preflight = client.options("/api/menu", headers={
@@ -834,7 +848,8 @@ def test_detail_missing_and_inactive_share_404(menu_client, menu_db, add_product
         assert response.status_code == 404
         assert response.json() == {"detail": "Producto no encontrado."}
         selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
-        assert len(selects) == 1
+        assert len(selects) == 2
+        assert "SELECT to_regclass" in selects[0]
 
 
 @pytest.mark.parametrize("identifier", ["abc", "0", "-1", "1.5"])
@@ -905,10 +920,11 @@ def test_detail_loads_full_tree_without_n_plus_one(menu_client, menu_db, add_pro
     assert all(len(variant["modifiers"][0]["complements"]) == 1 for variant in variants)
     # Los SAVEPOINT de la fixture aíslan las pruebas; no son consultas de catálogo.
     selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
-    assert len(selects) == 6
-    assert '"Products"' in selects[0] and '"ProductVariants"' in selects[1]
-    assert '"ProductModifierAssignments"' in selects[2] and 'JOIN "ProductModifiers"' in selects[2]
-    assert '"ProductComplements"' in selects[3]
+    assert len(selects) == 7
+    assert "SELECT to_regclass" in selects[0]
+    assert '"Products"' in selects[1] and '"ProductVariants"' in selects[2]
+    assert '"ProductModifierAssignments"' in selects[3] and 'JOIN "ProductModifiers"' in selects[3]
+    assert '"ProductComplements"' in selects[4]
     assert not any(sql.lstrip().upper().startswith(
         ("INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "TRUNCATE"),
     ) for sql in statements)
@@ -936,12 +952,18 @@ def test_detail_repeated_reads_preserve_all_catalog_rows(menu_client, menu_db, d
     (OperationalError, 503), (InterfaceError, 503), (TimeoutError, 503),
     (ProgrammingError, 500), (RuntimeError, 500),
 ])
-def test_detail_database_errors_are_sanitized(api_app, caplog, error_type, expected_status):
+@pytest.mark.parametrize("stage", ["capability", "data"])
+def test_detail_database_errors_are_sanitized(api_app, caplog, error_type, expected_status, stage):
     sensitive = "PRIVATE_PASSWORD internal-host SQL_INTERNO sensitive_table"
     error = (error_type(sensitive) if error_type in (TimeoutError, RuntimeError)
              else error_type("SELECT SQL_INTERNO", {}, RuntimeError(sensitive)))
 
     class FailingSession:
+        def connection(self):
+            if stage == "capability":
+                raise error
+            return SimpleNamespace(exec_driver_sql=lambda _: SimpleNamespace(one=lambda: (False, False, 0, 0)))
+
         def scalars(self, statement):
             raise error
 

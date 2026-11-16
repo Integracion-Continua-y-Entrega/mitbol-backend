@@ -19,8 +19,8 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1
        OR NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN
-            ('20261102_0003', '20261105_0004', '20261106_0005', '20261111_0006')) THEN
-        RAISE EXCEPTION 'La base requiere 20261102_0003 o una revision compatible hasta 20261111_0006.';
+            ('20261102_0003', '20261105_0004', '20261106_0005', '20261111_0006', '20261114_0007', '20261115_0008')) THEN
+        RAISE EXCEPTION 'La base requiere 20261102_0003 o una revision compatible hasta 20261115_0008.';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'mitbol_render_reader') THEN
         RAISE EXCEPTION 'El rol ya existe; revisar sus permisos antes de modificarlo.';
@@ -47,6 +47,14 @@ GRANT SELECT ON TABLE
     public."ProductImages", public."Tags", public."ProductTags"
 TO mitbol_render_reader;
 
+DO $categories$
+BEGIN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
+        GRANT SELECT (category_id,name,color,is_active) ON public."Categories" TO mitbol_render_reader;
+    END IF;
+END
+$categories$;
+
 -- No se concede lectura de alembic_version ni de otras tablas.
 -- Las tablas futuras requieren GRANT SELECT explicito despues de revisar su uso.
 -- Estos REVOKE por esquema no anulan grants globales ni los de PUBLIC.
@@ -63,6 +71,7 @@ ALTER ROLE mitbol_render_reader SET default_transaction_read_only = on;
 DO $reader_policy$
 DECLARE
     reader_oid oid;
+    categories_installed boolean;
     allowed_tables CONSTANT text[] := ARRAY[
         'Products', 'ProductVariants', 'ProductModifiers', 'ProductComplements',
         'ProductModifierAssignments', 'ProductImages', 'Tags', 'ProductTags'
@@ -99,6 +108,16 @@ BEGIN
        OR NOT has_schema_privilege(reader_oid, 'public', 'USAGE') THEN
         RAISE EXCEPTION 'READER_REQUIRED_ACCESS';
     END IF;
+    -- Resolver relaciones sólo después de comprobar USAGE del esquema.
+    categories_installed := to_regclass('public."Categories"') IS NOT NULL;
+    IF categories_installed AND EXISTS (
+        SELECT 1 FROM pg_attribute a WHERE a.attrelid=to_regclass('public."Categories"')
+          AND a.attnum>0 AND NOT a.attisdropped
+          AND has_column_privilege(reader_oid,a.attrelid,a.attnum,'SELECT') <>
+              (a.attname::text=ANY(ARRAY['category_id','name','color','is_active']))
+    ) THEN
+        RAISE EXCEPTION 'READER_CATEGORY_COLUMNS';
+    END IF;
     IF has_database_privilege(reader_oid, current_database(), 'CREATE,TEMPORARY')
        OR EXISTS (SELECT 1 FROM pg_namespace WHERE has_schema_privilege(reader_oid, oid, 'CREATE')) THEN
         RAISE EXCEPTION 'READER_CREATE_OR_TEMP';
@@ -125,6 +144,7 @@ BEGIN
             has_table_privilege(reader_oid, c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
             OR has_any_column_privilege(reader_oid, c.oid, 'INSERT,UPDATE,REFERENCES')
             OR (NOT (n.nspname = 'public' AND c.relname::text = ANY(allowed_tables) AND c.relkind = 'r')
+                AND NOT (categories_installed AND n.nspname='public' AND c.relname='Categories' AND c.relkind='r')
                 AND has_any_column_privilege(reader_oid, c.oid, 'SELECT'))
             ELSE false END
     ) THEN

@@ -294,7 +294,7 @@ def test_neon_writer_scripts_with_proxy_tls_marker_on_isolated_copy(writer_datab
                 execute_script(writer, verify)
             verified = verify.replace("SET LOCAL search_path", tls + "SET LOCAL search_path", 1)
             execute_script(writer, verified)
-            for statement in ('UPDATE "ProductVariants" SET price=0', 'UPDATE "Products" SET loyverse_id=\'forbidden\'', 'SELECT * FROM public.alembic_version'):
+            for statement in ('UPDATE "ProductVariants" SET price=0', 'UPDATE "Products" SET loyverse_id=\'forbidden\'', "UPDATE public.alembic_version SET version_num='forbidden'"):
                 denied(writer, statement)
             with pytest.raises(DBAPIError, match="NEON_WRITER_EXISTS"):
                 execute_script(r.owner, prepare.replace("BEGIN;", "BEGIN;\n" + tls + approved, 1))

@@ -19,15 +19,15 @@ def validate_bridge_schema(connection):
     """Valida revisión, columnas, claves e índices mediante la misma conexión.
 
     Admite Connection SQLAlchemy o conexión DBAPI ya contrastada por el cliente.
-    Los modelos siguen siendo los de 0007; 0008 es únicamente un contrato aditivo.
+    El perfil histórico 0007 se valida aparte de los modelos actuales de 0008.
     No necesita SELECT sobre datos de Categories ni registra otro modelo ORM.
     """
     driver = (connection.connection.driver_connection
               if hasattr(connection, "engine") else connection)
-    from app.models import AuthBase, Base
+    from app.models import AuthBase, pre_categories_metadata
     from app.models.sync_run import SyncBase
 
-    tables = [table for metadata in (Base.metadata, AuthBase.metadata, SyncBase.metadata)
+    tables = [table for metadata in (pre_categories_metadata, AuthBase.metadata, SyncBase.metadata)
               for table in metadata.tables.values()]
     with driver.cursor() as cursor:
         cursor.execute("SELECT has_column_privilege(current_user, 'public.alembic_version', 'version_num', 'SELECT')")

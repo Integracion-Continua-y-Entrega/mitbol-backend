@@ -15,6 +15,14 @@ from app.services.loyverse_client import LoyverseResponseError
 class ProductData:
     loyverse_id: str
     name: str
+    category_loyverse_id: str | None = None
+
+
+@dataclass(frozen=True)
+class CategoryData:
+    loyverse_id: str
+    name: str
+    color: str | None
 
 
 @dataclass(frozen=True)
@@ -55,6 +63,8 @@ class CatalogPlan:
     deleted_variants: tuple[tuple[str, str], ...]
     deleted_modifiers: tuple[str, ...]
     deleted_complements: tuple[tuple[str, str], ...]
+    categories: tuple[CategoryData, ...] | None = None
+    deleted_categories: tuple[str, ...] = ()
 
 
 def _bounded(value: str, maximum: int, label: str) -> str:
@@ -113,6 +123,21 @@ def _transform_catalog(snapshot: CatalogSnapshot) -> CatalogPlan:
     if snapshot.fetched_at.utcoffset() is None:
         raise CatalogValidationError("La fecha de sincronización debe incluir zona horaria.")
     store_id = _identifier(_text(snapshot.store, "id"))
+    categories = None
+    deleted_categories = []
+    category_ids = set()
+    if snapshot.categories is not None:
+        categories = []
+        for identifier, record in _identities(list(snapshot.categories)).items():
+            _identifier(identifier)
+            if _deleted(record):
+                deleted_categories.append(identifier)
+                continue
+            color = record.get("color")
+            if color is not None and (not isinstance(color, str) or color not in {"GREY", "RED", "PINK", "ORANGE", "GREEN", "BLUE", "PURPLE"}):
+                raise CatalogValidationError("Color de categoría no admitido por Loyverse.")
+            categories.append(CategoryData(identifier, _bounded(_text(record, "name"), 64, "Categoría"), color))
+            category_ids.add(identifier)
     items = _identities(list(snapshot.items))
     groups = _identities(list(snapshot.modifiers))
     deleted_products = []
@@ -195,7 +220,17 @@ def _transform_catalog(snapshot: CatalogSnapshot) -> CatalogPlan:
     assignments = []
     for item in report["items"]:
         name = _name(item["name"])
-        products.append(ProductData(_identifier(item["id"]), name))
+        external_category = None
+        if categories is not None:
+            source = items[item["id"]]
+            if "category_id" not in source:
+                raise CatalogValidationError("Falta category_id explícito; no se borra una clasificación por omisión.")
+            external_category = source["category_id"]
+            if external_category is not None:
+                _identifier(external_category)
+                if external_category not in category_ids:
+                    raise CatalogValidationError("El producto refiere una categoría ausente o eliminada; lote incompleto.")
+        products.append(ProductData(_identifier(item["id"]), name, external_category))
         for variant in item["variants"]:
             values = [value for value in variant["option_values"] if value is not None]
             if any(not isinstance(value, str) or not value.strip() for value in values):
@@ -219,4 +254,5 @@ def _transform_catalog(snapshot: CatalogSnapshot) -> CatalogPlan:
         store_id, snapshot.fetched_at,
         tuple(products), tuple(variants), tuple(modifiers), tuple(complements), tuple(assignments),
         tuple(deleted_products), tuple(deleted_variants), tuple(deleted_modifiers), tuple(deleted_complements),
+        tuple(categories) if categories is not None else None, tuple(deleted_categories),
     )

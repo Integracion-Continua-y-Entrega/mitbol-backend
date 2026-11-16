@@ -40,7 +40,7 @@ BEGIN
         RAISE EXCEPTION 'WORKER_IDENTITY';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007','20261115_0008')) THEN
+       (SELECT 1 FROM public.alembic_version WHERE version_num=CASE WHEN categories_installed THEN '20261115_0008' ELSE '20261114_0007' END) THEN
         RAISE EXCEPTION 'WORKER_SCHEMA';
     END IF;
     SELECT oid INTO worker FROM pg_roles WHERE rolname = current_user;

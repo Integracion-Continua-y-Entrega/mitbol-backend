@@ -205,7 +205,8 @@ def _metadata_test_database(record_testsuite_property):
     engine = create_engine(url.set(database=name), hide_parameters=True)
     try:
         with engine.begin() as connection:
-            catalog_metadata.create_all(connection)
+            from app.models import runtime_catalog_metadata
+            runtime_catalog_metadata.create_all(connection)
             connection.exec_driver_sql("CREATE TABLE public.alembic_version (version_num varchar(32) PRIMARY KEY)")
             connection.exec_driver_sql("INSERT INTO public.alembic_version VALUES ('20261102_0003')")
         record_testsuite_property("isolated_postgresql_database", name)
@@ -216,6 +217,46 @@ def _metadata_test_database(record_testsuite_property):
         with control.connect() as connection:
             connection.exec_driver_sql(f"DROP DATABASE {quoted} WITH (FORCE)")
         control.dispose()
+
+
+@pytest.fixture(scope="session")
+def current_catalog_database(sync_test_database):
+    """Esquema completo actual separado del laboratorio histórico de catálogo."""
+    name = "mitbol_test_hu008_" + uuid4().hex[:12]
+    assert sync_test_database.url.host == "127.0.0.1"
+    control = create_engine(sync_test_database.url.set(database="template1"), isolation_level="AUTOCOMMIT")
+    with control.connect() as db:
+        db.exec_driver_sql(f'CREATE DATABASE "{name}" TEMPLATE template0 ENCODING \'UTF8\'')
+    engine = create_engine(sync_test_database.url.set(database=name), hide_parameters=True)
+    try:
+        configuration = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+        with engine.begin() as db:
+            configuration.attributes["connection"] = db
+            command.upgrade(configuration, "20261115_0008")
+        yield engine
+    finally:
+        engine.dispose()
+        with control.connect() as db:
+            db.exec_driver_sql(f'DROP DATABASE "{name}" WITH (FORCE)')
+        control.dispose()
+
+
+@pytest.fixture
+def bridge_sync_db(current_catalog_database):
+    """Contrato 0007 real dentro de un rollback, separado del catálogo sintético."""
+    engine = current_catalog_database
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20261114_0007")
+        sessions = sessionmaker(
+            bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False,
+        )
+        try:
+            yield SimpleNamespace(engine=engine, connection=connection, sessions=sessions)
+        finally:
+            transaction.rollback()
 
 
 @pytest.fixture

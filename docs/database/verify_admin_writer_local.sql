@@ -42,6 +42,11 @@ BEGIN
        OR current_setting('server_version_num')::int / 10000 <> 18 THEN
         RAISE EXCEPTION 'WRITER_LOCAL_IDENTITY';
     END IF;
+    IF to_regclass('public."Categories"') IS NOT NULL THEN
+        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
+            RAISE EXCEPTION 'WRITER_CATEGORIES_SCHEMA';
+        END IF;
+    END IF;
     SELECT oid INTO writer FROM pg_roles WHERE rolname = current_user;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE oid = writer AND
        (NOT rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls))

@@ -60,6 +60,7 @@ BEGIN
        OR NOT has_schema_privilege(reader_oid, 'public', 'USAGE') THEN
         RAISE EXCEPTION 'READER_REQUIRED_ACCESS';
     END IF;
+    -- Resolver relaciones sólo después de comprobar USAGE del esquema.
     categories_installed := to_regclass('public."Categories"') IS NOT NULL;
     IF categories_installed AND has_any_column_privilege(reader_oid,'public."Categories"','SELECT')
        AND EXISTS (

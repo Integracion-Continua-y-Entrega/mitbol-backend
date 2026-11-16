@@ -19,6 +19,7 @@ from test_auth_admin_api import backend as catalog_backend
 from test_auth_api import backend as auth_backend, password_hash, PASSWORD
 from test_auth_persistence import auth_database
 from test_cloud_configuration import cloud_settings, CLOUD_URL
+from category_runtime import upgrade_runtime
 
 
 ORIGIN = "https://mitbol-frontend.onrender.com"
@@ -182,6 +183,7 @@ def test_render_forwarded_ip_cannot_evade_shared_quota(cloud_backend):
 
 def test_approved_writer_policy_reused_in_read_only_connection(writer_database, monkeypatch):
     r = writer_database
+    upgrade_runtime(r.owner)
     approved = writer_policy.writer_policy_sql()
     assert "GRANT " not in approved and "CREATE ROLE" not in approved
     monkeypatch.setattr(writer_policy, "writer_policy_sql", lambda: approved.replace("mitbol_cloud_dev", r.owner.url.database))
@@ -189,10 +191,11 @@ def test_approved_writer_policy_reused_in_read_only_connection(writer_database, 
         raw = engine.raw_connection()
         try:
             if allowed:
-                # Esta fixture histórica está en 0005. El pool cloud del puente
-                # exige 0007/0008; ambas revisiones se ejercitan en test_schema_bridge.
-                with pytest.raises(DatabaseTargetError, match='puente'):
-                    writer_policy.validate_writer_connection(raw.driver_connection)
+                # La fixture integrada ya incluye 0008 y sus permisos mínimos.
+                writer_policy.validate_writer_connection(raw.driver_connection)
+                with raw.cursor() as cursor:
+                    cursor.execute('SHOW transaction_read_only')
+                    assert cursor.fetchone()[0] == 'on'
             else:
                 with pytest.raises(psycopg2.Error, match="WRITER_NEON_IDENTITY"):
                     writer_policy.validate_writer_connection(raw.driver_connection)

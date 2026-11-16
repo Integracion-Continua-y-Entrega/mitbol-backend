@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from test_discount_migration import staged_config
 from app.services.discount_sync_service import DiscountSyncService
 from app.services.discount_transform import DiscountValidationError
-from app.models import Base, AuthBase
+from app.models import AuthBase, pre_categories_metadata
 
 
 STORE = "a3a56a06-d40c-4c07-931c-41abcbaaba12"
@@ -29,7 +29,8 @@ def database(empty_postgresql_database, staged_config):
         staged_config.attributes["connection"] = connection
         command.upgrade(staged_config, "20261111_0006")
         context = MigrationContext.configure(connection, opts={"compare_type": True, "compare_server_default": True})
-        assert compare_metadata(context, [Base.metadata, AuthBase.metadata]) == []
+        # Este laboratorio conserva deliberadamente la revisión histórica 0006.
+        assert compare_metadata(context, [pre_categories_metadata, AuthBase.metadata]) == []
     try:
         yield engine
     finally:

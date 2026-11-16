@@ -1,11 +1,11 @@
 """Lectura del catálogo de HU-008, sin escrituras ni llamadas a Loyverse."""
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import false, or_, select
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError, TimeoutError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, load_only, noload, selectinload, undefer
 
-from app.models import Product, ProductImage, ProductModifier, ProductModifierAssignment, ProductTag, ProductVariant, Tag
+from app.models import CommercialCategory, Product, ProductImage, ProductModifier, ProductModifierAssignment, ProductTag, ProductVariant, Tag
 from app.services.availability_rules import product_can_order, variant_can_order
 from app.schemas.menu import (
     MenuComplement,
@@ -18,6 +18,7 @@ from app.schemas.menu import (
     MenuVariantDetail,
     MenuImage,
     MenuTag,
+    MenuCategory, MenuCategoriesResponse,
 )
 from app.services.menu_search import apply_name_search
 from app.services.menu_tag_filter import apply_tag_filter
@@ -79,6 +80,8 @@ def _build_product(product: Product, images: dict, tags: dict) -> MenuProduct:
         default=None,
     )
     return MenuProduct(
+        category=MenuCategory.model_validate(product.category)
+                 if product.category is not None and product.category.is_active else None,
         product_id=product.product_id,
         name=product.name,
         description=product.description,
@@ -95,16 +98,26 @@ def _build_product(product: Product, images: dict, tags: dict) -> MenuProduct:
     )
 
 
-def get_menu(db: Session, q: str | None = None, tag_ids: list[int] | None = None) -> MenuResponse:
+def get_menu(db: Session, q: str | None = None, tag_ids: list[int] | None = None,
+             category_id: int | None = None, uncategorized: bool = False) -> MenuResponse:
     """Carga productos y variantes por lotes; la sesión pertenece a get_db."""
+    categories_enabled = _categories_enabled(db)
     statement = (
         select(Product)
         .where(Product.is_active.is_(True))
-        .options(selectinload(Product.variants))
+        .options(selectinload(Product.variants), *_category_load(categories_enabled))
         .order_by(Product.product_id)
     )
     statement = apply_name_search(statement=statement, q=q)
     statement = apply_tag_filter(statement=statement, tag_ids=tag_ids)
+    if category_id is not None and not categories_enabled:
+        statement = statement.where(false())
+    elif category_id is not None:
+        statement = statement.where(Product.category_id == category_id,
+                                    Product.category.has(CommercialCategory.is_active.is_(True)))
+    if uncategorized and categories_enabled:
+        statement = statement.where(or_(Product.category_id.is_(None),
+            Product.category.has(CommercialCategory.is_active.is_(False))))
     try:
         products = db.scalars(statement).all()
         images, tags = _load_enrichment(db, products)
@@ -113,6 +126,63 @@ def get_menu(db: Session, q: str | None = None, tag_ids: list[int] | None = None
         raise MenuUnavailableError("El menú no está disponible temporalmente.") from error
     except (SQLAlchemyError, ValidationError) as error:
         raise MenuReadError("No fue posible consultar el menú.") from error
+
+
+def _categories_enabled(db: Session) -> bool:
+    """Detecta la extensión y sus permisos sin dar SELECT de Alembic al lector.
+
+    No consulta filas ni conserva un caché entre transacciones: permite pasar
+    de 0007 a 0008 y aplicar el delta sin reiniciar un pool existente.
+    """
+    try:
+        installed, linked, readable, any_readable = db.connection().exec_driver_sql("""
+            SELECT to_regclass('public."Categories"') IS NOT NULL,
+                EXISTS (SELECT 1 FROM pg_attribute
+                    WHERE attrelid=to_regclass('public."Products"')
+                      AND attname='category_id' AND attnum>0 AND NOT attisdropped),
+                (SELECT count(*) FROM pg_attribute
+                    WHERE attrelid=to_regclass('public."Categories"') AND attnum>0 AND NOT attisdropped
+                      AND attname::text=ANY(ARRAY['category_id','name','color','is_active'])
+                      AND has_column_privilege(current_user,attrelid,attnum,'SELECT')),
+                (SELECT count(*) FROM pg_attribute
+                    WHERE attrelid=to_regclass('public."Categories"') AND attnum>0 AND NOT attisdropped
+                      AND has_column_privilege(current_user,attrelid,attnum,'SELECT'))
+        """).one()
+        if installed != linked:
+            raise MenuReadError("La extensión de categorías está incompleta.")
+        if installed and any_readable and readable != 4:
+            raise MenuReadError("Faltan permisos de lectura de categorías.")
+        return bool(installed and readable == 4)
+    except (OperationalError, InterfaceError, TimeoutError) as error:
+        raise MenuUnavailableError("El catálogo no está disponible temporalmente.") from error
+    except SQLAlchemyError as error:
+        raise MenuReadError("No fue posible comprobar el catálogo.") from error
+
+
+def _category_load(enabled: bool):
+    if not enabled:
+        return (noload(Product.category),)
+    return (undefer(Product.category_id), selectinload(Product.category).load_only(
+        CommercialCategory.category_id, CommercialCategory.name,
+        CommercialCategory.color, CommercialCategory.is_active,
+    ))
+
+
+def get_categories(db: Session) -> MenuCategoriesResponse:
+    if not _categories_enabled(db):
+        return MenuCategoriesResponse(categories=[])
+    statement = select(CommercialCategory).options(load_only(
+        CommercialCategory.category_id, CommercialCategory.name,
+        CommercialCategory.color, CommercialCategory.is_active,
+    )).where(CommercialCategory.is_active.is_(True), CommercialCategory.products.any(
+        Product.is_active.is_(True),
+    )).order_by(CommercialCategory.name, CommercialCategory.category_id)
+    try:
+        return MenuCategoriesResponse(categories=[MenuCategory.model_validate(row) for row in db.scalars(statement)])
+    except (OperationalError, InterfaceError, TimeoutError) as error:
+        raise MenuUnavailableError("Las categorías no están disponibles temporalmente.") from error
+    except (SQLAlchemyError, ValidationError) as error:
+        raise MenuReadError("No fue posible consultar las categorías.") from error
 
 
 def _build_modifier(modifier: ProductModifier, *, variant_can_order: bool) -> MenuModifier:
@@ -167,6 +237,7 @@ def get_product_detail(db: Session, product_id: int) -> MenuProductDetailRespons
         select(Product)
         .where(Product.product_id == product_id, Product.is_active.is_(True))
         .options(
+            *_category_load(_categories_enabled(db)),
             selectinload(Product.variants)
             .selectinload(ProductVariant.modifier_assignments)
             .joinedload(ProductModifierAssignment.modifier)

@@ -10,7 +10,6 @@ import subprocess
 import re
 from unittest.mock import MagicMock
 
-from alembic import command
 from pydantic import SecretStr
 import pytest
 from sqlalchemy import delete
@@ -22,12 +21,11 @@ from app.models import Base
 from app.services.catalog_manifest import catalog_manifest
 from app.services.catalog_transform import transform_catalog
 from app.services.sync_service import SyncService
-from test_auth_persistence import config_for
 
 
 @pytest.mark.asyncio
-async def test_approved_initial_sync_uses_guard_in_actual_transaction(sync_db, commercial_snapshot, monkeypatch):
-    command.upgrade(config_for(sync_db.connection), '20261114_0007')
+async def test_approved_initial_sync_uses_guard_in_actual_transaction(bridge_sync_db, commercial_snapshot, monkeypatch):
+    sync_db = bridge_sync_db
     import httpx
     from app.services.loyverse_client import LoyverseAPIClient
 

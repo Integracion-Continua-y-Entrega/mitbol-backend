@@ -225,6 +225,10 @@ class LoyverseAPIClient:
         params = {"show_deleted": "true"} if include_deleted else None
         return await self.get_all_paginated("/modifiers", "modifiers", params)
 
+    async def get_categories(self, *, include_deleted: bool = False) -> list[dict]:
+        params = {"show_deleted": "true"} if include_deleted else None
+        return await self.get_all_paginated("/categories", "categories", params)
+
     async def get_discounts(self, *, include_deleted: bool = False) -> list[dict]:
         # /discounts no documenta limit/cursor. No reutilizar paginación de /items.
         params = {"show_deleted": "true"} if include_deleted else None

@@ -47,7 +47,8 @@ def cli(monkeypatch, commercial_snapshot):
     engine = MagicMock()
     factory = MagicMock(return_value=engine)
     monkeypatch.setattr(sync_catalog, "create_database_engine", factory)
-    preflight = MagicMock(return_value={"status": "preflight_ok", "writes": False, "loyverse_contacted": False})
+    preflight = MagicMock(return_value={"status": "preflight_ok", "writes": False,
+                                       "loyverse_contacted": False, "revision": "20261102_0003"})
     monkeypatch.setattr(sync_catalog, "preflight", preflight)
     synchronize = AsyncMock(return_value={"status": "synchronized"})
     monkeypatch.setattr(sync_catalog, "synchronize", synchronize)
@@ -138,17 +139,18 @@ def test_failed_preflight_never_calls_loyverse_and_disposes_engine(cli, monkeypa
     assert "PRIVATE" not in capsys.readouterr().out
 
 
-@pytest.fixture
-def cloud_schema_database(sync_test_database):
+@pytest.fixture(params=['20261114_0007', '20261115_0008'])
+def cloud_schema_database(current_catalog_database, request):
     # El perfil cloud del puente requiere el esquema completo 0007. Las
     # fixtures locales históricas continúan en 0003 y no eluden este control.
-    with sync_test_database.begin() as connection:
-        command.upgrade(config_for(connection), '20261114_0007')
+    engine = current_catalog_database
+    with engine.begin() as connection:
+        command.downgrade(config_for(connection), request.param)
     try:
-        yield sync_test_database
+        yield engine
     finally:
-        with sync_test_database.begin() as connection:
-            command.downgrade(config_for(connection), '20261102_0003')
+        with engine.begin() as connection:
+            command.upgrade(config_for(connection), '20261115_0008')
 
 
 def test_cloud_preflight_is_a_real_read_only_transaction(cloud_schema_database):
@@ -178,7 +180,8 @@ def test_cloud_preflight_is_a_real_read_only_transaction(cloud_schema_database):
     assert all(statement.lstrip().upper().startswith(("SET TRANSACTION READ ONLY", "SELECT"))
                for statement in statements)
     target.validate_connection.assert_called_once()
-    assert len(result["table_counts"]) == 8 and not any(result["table_counts"].values())
+    assert len(result["table_counts"]) == (9 if result['revision']=='20261115_0008' else 8)
+    assert not any(result["table_counts"].values())
     with sync_test_database.connect() as connection:
         assert connection.exec_driver_sql("SHOW transaction_read_only").scalar_one() == "off"
         after = connection.exec_driver_sql(
@@ -207,8 +210,8 @@ async def test_service_rejects_live_cloud_identity_before_http(sync_db):
     assert client.mock_calls == []
 
 
-def test_cloud_path_preserves_local_description_and_rejects_another_store(sync_db, commercial_snapshot):
-    command.upgrade(config_for(sync_db.connection), '20261114_0007')
+def test_cloud_path_preserves_local_description_and_rejects_another_store(bridge_sync_db, commercial_snapshot):
+    sync_db = bridge_sync_db
     target = MagicMock(spec=CloudDatabaseTarget)
     target.expected_database = sync_db.engine.url.database
     service = SyncService(sync_db.sessions, expected_database=target.expected_database,
@@ -234,9 +237,9 @@ def test_cloud_service_cannot_use_legacy_authorization(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("valid_store", [True, False])
 async def test_cli_orchestrates_existing_client_and_transactional_service(
-    sync_db, commercial_snapshot, monkeypatch, valid_store,
+    bridge_sync_db, commercial_snapshot, monkeypatch, valid_store,
 ):
-    command.upgrade(config_for(sync_db.connection), '20261114_0007')
+    sync_db = bridge_sync_db
     target = MagicMock(spec=CloudDatabaseTarget)
     target.expected_database = sync_db.engine.url.database
     calls = []
@@ -292,14 +295,17 @@ def test_reader_is_rejected_before_connecting(cli, monkeypatch):
     cli.factory.assert_not_called()
 
 
-def test_initial_preflight_never_calls_persistence(cli, monkeypatch, capsys):
+@pytest.mark.parametrize("revision", ["20261102_0003", "20261115_0008"])
+def test_initial_preflight_never_calls_persistence(cli, monkeypatch, capsys, revision):
     monkeypatch.setenv("LOYVERSE_ACCESS_TOKEN", "PRIVATE_TOKEN")
     monkeypatch.setenv("LOYVERSE_STORE_ID", "test-store")
     cli.preflight.return_value["table_counts"] = {"Products": 0}
+    cli.preflight.return_value["revision"] = revision
     assert sync_catalog.main(ARGS + ["--preflight", "--store-id", "test-store"]) == 0
     assert cli.preflight.call_count == 2
     assert all(call.kwargs == {"require_empty": True} for call in cli.preflight.call_args_list)
     cli.preview.assert_awaited_once()
+    assert cli.preview.call_args.kwargs == ({"include_categories": True} if revision == "20261115_0008" else {})
     cli.synchronize.assert_not_called()
     output = capsys.readouterr().out
     assert '"status": "ready_for_initial_sync"' in output
@@ -380,7 +386,7 @@ def test_initial_preflight_rejects_nonempty_catalog(cloud_schema_database):
             "VALUES ('preflight-fixture', 'Simulado', now())"
         )
     try:
-        with pytest.raises(DatabaseTargetError, match="ocho tablas vacías"):
+        with pytest.raises(DatabaseTargetError, match="todas las tablas del catálogo vacías"):
             sync_catalog.preflight(sync_test_database, target, require_empty=True)
         assert sync_catalog.preflight(sync_test_database, target)["table_counts"]["Products"] == 1
     finally:
@@ -388,16 +394,23 @@ def test_initial_preflight_rejects_nonempty_catalog(cloud_schema_database):
             connection.exec_driver_sql('DELETE FROM public."Products" WHERE loyverse_id = \'preflight-fixture\'')
 
 
-@pytest.mark.parametrize("failure", range(24))
-def test_operator_requires_every_individual_privilege(failure):
+@pytest.mark.parametrize("revision,failure", [
+    (revision, failure)
+    for revision, count in (("20261102_0003", 54), ("20261115_0008", 67))
+    for failure in range(count)
+])
+def test_operator_requires_every_individual_privilege(revision, failure, monkeypatch):
+    monkeypatch.setattr("app.services.sync_service.validate_catalog_revision", lambda connection: revision)
     connection = MagicMock()
     connection.execute.return_value.one.return_value = ("operator", "operator", "off", False)
     connection.engine.url.username = "operator"
     connection.connection.driver_connection.readonly = None
-    # CONNECT/USAGE + nueve SELECT/resolución + diez DML + cuatro secuencias.
+    # Cada comprobación individual de CONNECT/USAGE, tablas, columnas y
+    # secuencias debe abortar inmediatamente cuando su permiso falta.
     connection.scalar.side_effect = [True] * failure + [False]
     with pytest.raises(DatabaseTargetError):
         sync_catalog._inspect_operator(connection)
+    assert connection.scalar.call_count == failure + 1
 
 
 @pytest.mark.parametrize("user,session_user,default,driver_readonly,recovery", [

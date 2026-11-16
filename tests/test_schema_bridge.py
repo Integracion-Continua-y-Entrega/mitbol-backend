@@ -1,12 +1,14 @@
 """Puente operativo 0007/0008 con LOGIN reales y proveedores simulados en PG18."""
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from alembic import command
 from sqlalchemy import event
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import writer_policy
 from app.db.connection import DatabaseTargetError
@@ -16,6 +18,7 @@ from app.cli.sync_discounts import preflight as discount_preflight
 from app.models import Product
 from app.services.discount_sync_service import DiscountSyncService
 from app.services.recurring_catalog_sync import RecurringCatalogSync
+from app.services.catalog_errors import CatalogTargetError
 from app.services.sync_jobs import SyncJobWorker
 from test_admin_writer import execute_script, VERIFY
 from test_neon_release_0007 import (
@@ -25,6 +28,7 @@ from test_neon_release_0007 import (
 import test_neon_release_0007 as release_tests
 from test_recurring_catalog_sync import FakeCatalogAPI
 from test_discount_migration import discount_snapshot
+from test_auth_persistence import config_for
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL = ROOT / 'docs/database'
@@ -35,10 +39,14 @@ def release_backend(base_release_backend, request):
     b = base_release_backend
     b.bridge_phase = request.param
     b.bridge_revision = '20261114_0007'
-    if request.param != '0007':
+    # La fixture integrada ya está en 0008 con el delta. Reproduce también
+    # 0007 y la transición sin grants únicamente en su base local desechable.
+    if request.param != '0008-after-delta':
         with b.roles.owner.begin() as db:
-            db.exec_driver_sql((ROOT/'tests/fixtures/schema_0008_bridge.sql').read_text(encoding='utf-8'),
-                               execution_options={'no_parameters': True})
+            command.downgrade(config_for(db), '20261114_0007')
+            if request.param == '0008-before-delta':
+                command.upgrade(config_for(db), '20261115_0008')
+    if request.param != '0007':
         b.bridge_revision = '20261115_0008'
     if request.param == '0008-after-delta':
         with b.roles.owner.begin() as db:
@@ -48,15 +56,7 @@ def release_backend(base_release_backend, request):
             db.exec_driver_sql('GRANT INSERT(loyverse_id,name,color,is_active,synced_at), UPDATE(name,color,is_active,synced_at) ON public."Categories" TO mitbol_catalog_worker')
             db.exec_driver_sql('GRANT SELECT(category_id),INSERT(category_id),UPDATE(category_id) ON public."Products" TO mitbol_catalog_worker')
             db.exec_driver_sql('GRANT USAGE ON SEQUENCE public."Categories_category_id_seq" TO mitbol_catalog_worker')
-    try:
-        yield b
-    finally:
-        if request.param != '0007':
-            # Únicamente la base propia de la fixture, nunca una URL externa.
-            with b.roles.owner.begin() as db:
-                db.exec_driver_sql('ALTER TABLE public."Products" DROP COLUMN category_id')
-                db.exec_driver_sql('DROP TABLE public."Categories"')
-                db.exec_driver_sql("UPDATE public.alembic_version SET version_num='20261114_0007'")
+    yield b  # La fixture base revierte el esquema y elimina los roles locales.
 
 
 def test_real_schema_and_three_strict_login_profiles(release_backend, monkeypatch):
@@ -86,17 +86,47 @@ def test_menu_auth_sessions_roles_csrf_and_persistent_queue(restaurant):
     b = restaurant
     assert b.client.get('/api/menu').status_code == 200
     release_tests.test_restaurant_queue_session_role_origin_csrf_and_history(b)
-    assert b.client.get('/api/categories').status_code == 404
-    # El ORM y los contratos HTTP del puente no incluyen la nueva función.
-    assert 'category_id' not in Product.__table__.columns
-    assert 'Categories' not in Product.metadata.tables
+    assert b.client.get('/api/categories').status_code == 200
+    assert 'category_id' in Product.__table__.columns
+    assert 'Categories' in Product.metadata.tables
+
+
+def test_public_reader_uses_categories_only_when_schema_and_grants_are_ready(release_backend):
+    from app.services.menu_service import get_categories, get_menu, get_product_detail
+    b = release_backend
+    if b.bridge_revision == '20261115_0008':
+        with b.roles.owner.begin() as db:
+            db.exec_driver_sql("INSERT INTO public.\"Categories\"(category_id,loyverse_id,name,synced_at) VALUES(42,'visible-category','Visible',now())")
+            db.exec_driver_sql('UPDATE public."Products" SET category_id=42 WHERE product_id=%s', (b.product_id,))
+    statements = []
+    def observe(connection, cursor, statement, parameters, context, many):
+        statements.append(statement)
+    event.listen(b.roles.reader, 'before_cursor_execute', observe)
+    try:
+        with Session(b.roles.reader) as db:
+            menu = get_menu(db)
+            detail = get_product_detail(db, b.product_id)
+            categories = get_categories(db)
+            assert menu.products
+            if b.bridge_phase == '0008-after-delta':
+                assert detail.product.category.name == 'Visible'
+                assert len(categories.categories) == 1
+                assert get_menu(db, category_id=42).products
+            else:
+                assert detail.product.category is None and not categories.categories
+                assert not get_menu(db, category_id=42).products
+                assert get_menu(db, uncategorized=True).products
+                assert not any('"Products".category_id' in statement or
+                               'FROM "Categories"' in statement for statement in statements)
+    finally:
+        event.remove(b.roles.reader, 'before_cursor_execute', observe)
 
 
 def test_r2_upload_read_delete_still_works_with_limited_roles(restaurant):
     release_tests.test_restaurant_r2_upload_public_read_and_delete_with_limited_writer(restaurant)
 
 
-def test_recurring_worker_processes_queue_without_touching_categories(release_backend, commercial_snapshot):
+def test_recurring_worker_requires_complete_category_permissions_before_http(release_backend, commercial_snapshot):
     b = release_backend
     if b.bridge_revision == '20261115_0008':
         with b.roles.owner.begin() as db:
@@ -114,14 +144,29 @@ def test_recurring_worker_processes_queue_without_touching_categories(release_ba
         expected_host=b.worker.url.host,store_id='test-store',auth_catalog=True,cloud_target=target)
     approval = dict(operation='catalog_recurrent_v1',approved=True,host=b.worker.url.host,
         database=b.worker.url.database,user='mitbol_catalog_worker',store_id='test-store',revision=b.bridge_revision)
-    api = FakeCatalogAPI(commercial_snapshot)
+    snapshot = commercial_snapshot
+    if b.bridge_revision == '20261115_0008':
+        snapshot = replace(snapshot, items=tuple(dict(row, category_id=None) for row in snapshot.items),
+            categories=({'id':'kept-category','name':'Kept','color':'GREEN','deleted_at':None},))
+    api = FakeCatalogAPI(snapshot)
     async def process():
         async with api.client() as client:
             return await SyncJobWorker(runner).run_once(client,approval=approval,scheduled=True)
     try:
+        if b.bridge_phase == '0008-before-delta':
+            # El puente permite consultar durante la transición, pero el nuevo
+            # sincronizador exige todos los permisos de categorías antes de HTTP.
+            with pytest.raises((DatabaseTargetError, CatalogTargetError)):
+                asyncio.run(process())
+            assert not api.requests and not touched
+            return
         assert asyncio.run(process())['run']['status'] == 'succeeded'
-        assert not any('Categories' in statement or 'category_id' in statement for statement in touched)
-        assert not any('/categories' in str(request.url) for request in api.requests)
+        category_requests = any('/categories' in str(request.url) for request in api.requests)
+        if b.bridge_revision == '20261114_0007':
+            assert not any('Categories' in statement or 'category_id' in statement for statement in touched)
+            assert not category_requests
+        else:
+            assert category_requests and any('Categories' in statement for statement in touched)
         if b.bridge_revision == '20261115_0008':
             with b.roles.owner.connect() as db:
                 assert db.exec_driver_sql('SELECT category_id FROM public."Products" WHERE product_id=%s',(b.product_id,)).scalar_one() == 42
@@ -146,7 +191,7 @@ def test_cloud_discount_preflight_and_persistence_use_bridge_contract(release_ba
         assert db.exec_driver_sql('SELECT count(*) FROM public."Discounts"').scalar_one() == 1
 
 
-@pytest.mark.parametrize('revision',['20261111_0006','20261116_0009','unknown'])
+@pytest.mark.parametrize('revision',['20261106_0005','20261111_0006','20261116_0009','unknown'])
 def test_bridge_rejects_unapproved_revisions(release_backend, revision):
     with release_backend.roles.owner.connect() as db:
         db.exec_driver_sql('UPDATE public.alembic_version SET version_num=%s',(revision,))

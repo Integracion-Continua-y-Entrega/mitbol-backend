@@ -16,16 +16,21 @@ class CatalogSnapshot:
     modifiers: tuple[dict, ...]
     includes_deleted: bool = False
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # None distingue snapshots históricos de una colección observada vacía.
+    categories: tuple[dict, ...] | None = None
 
 
 async def fetch_catalog(
     client: LoyverseAPIClient, store_id: str | None, *, include_deleted: bool = False,
+    include_categories: bool = False,
 ) -> CatalogSnapshot:
     store = select_store(await client.get_stores(), store_id)
     items = await client.get_items(include_deleted=include_deleted)
     modifiers = await client.get_modifiers(include_deleted=include_deleted)
+    categories = await client.get_categories(include_deleted=include_deleted) if include_categories else None
     # El cliente sólo entrega una colección cuando terminó toda su paginación.
-    return CatalogSnapshot(store, tuple(items), tuple(modifiers), include_deleted)
+    return CatalogSnapshot(store, tuple(items), tuple(modifiers), include_deleted,
+                           categories=tuple(categories) if categories is not None else None)
 
 
 def _text(record: dict, field: str) -> str:

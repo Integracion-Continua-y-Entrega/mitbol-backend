@@ -3,7 +3,7 @@
 from sqlalchemy import text
 
 from app.db.connection import DatabaseTargetError
-from app.models import catalog_metadata
+from app.models import catalog_metadata, runtime_catalog_metadata
 
 
 WRITE_TABLES = {
@@ -45,7 +45,10 @@ def inspect_catalog_operator(connection) -> dict:
         "AND pg_catalog.has_schema_privilege(current_user, 'public', 'USAGE')"
     )):
         raise DatabaseTargetError("Falta CONNECT o USAGE para el catálogo autorizado.")
-    for name in (*catalog_metadata.tables, "alembic_version"):
+    from app.services.sync_service import CATEGORIES_REVISION, validate_catalog_revision
+    categories_enabled = validate_catalog_revision(connection) == CATEGORIES_REVISION
+    metadata = runtime_catalog_metadata if categories_enabled else catalog_metadata
+    for name in (*metadata.tables, "alembic_version"):
         relation = f'public."{name}"'
         valid = connection.scalar(text(
             "SELECT c.relkind = 'r' AND NOT c.relrowsecurity "
@@ -55,7 +58,13 @@ def inspect_catalog_operator(connection) -> dict:
         ), {"relation": relation, "unqualified": f'"{name}"'})
         if not valid:
             raise DatabaseTargetError("Falta una tabla legible en public, hay RLS o search_path desvía el catálogo.")
-        for privilege, columns in WRITE_COLUMNS.get(name, {}).items():
+        operations = dict(WRITE_COLUMNS.get(name, {}))
+        if categories_enabled and name == "Products":
+            operations = {key: (*values, "category_id") for key, values in operations.items()}
+        if name == "Categories":
+            operations = {"INSERT": ("loyverse_id", "name", "color", "is_active", "synced_at"),
+                          "UPDATE": ("name", "color", "is_active", "synced_at")}
+        for privilege, columns in operations.items():
             for column in columns:
                 if not connection.scalar(text(
                     "SELECT pg_catalog.has_column_privilege(current_user, :relation, :column, :privilege)"
@@ -67,11 +76,11 @@ def inspect_catalog_operator(connection) -> dict:
                 "SELECT pg_catalog.has_table_privilege(current_user, :relation, :privilege)"
             ), {"relation": relation, "privilege": privilege}):
                 raise DatabaseTargetError("Faltan permisos para las operaciones comerciales previstas.")
-        if name in WRITE_TABLES:
+        if name in WRITE_TABLES or name == "Categories":
             if not connection.scalar(text(
                 "SELECT pg_catalog.has_sequence_privilege(current_user, "
                 "pg_catalog.pg_get_serial_sequence(:relation, :column), 'USAGE,UPDATE')"
-            ), {"relation": relation, "column": WRITE_TABLES[name]}):
+            ), {"relation": relation, "column": WRITE_TABLES.get(name, "category_id")}):
                 raise DatabaseTargetError("Falta acceso a una secuencia comercial; no se consumió ningún valor.")
     return {"user": user, "default_transaction_read_only": default_read_only,
             "write_permissions_verified": True}
