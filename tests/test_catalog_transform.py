@@ -10,6 +10,25 @@ from app.services.catalog_errors import CatalogValidationError
 from app.services.catalog_transform import transform_catalog
 
 
+@pytest.mark.parametrize("color", ["GREY", "RED", "PINK", "ORANGE", "LIME", "GREEN", "BLUE", "PURPLE", None])
+def test_category_colors_preserve_documented_and_observed_values(commercial_snapshot, color):
+    snapshot = replace(commercial_snapshot, categories=(
+        {"id": "synthetic-category", "name": "Categoría de prueba", "color": color},
+    ), items=tuple({**item, "category_id": "synthetic-category"} for item in commercial_snapshot.items))
+    plan = transform_catalog(snapshot)
+    assert plan.categories[0].color == color
+    assert all(product.category_loyverse_id == "synthetic-category" for product in plan.products)
+
+
+@pytest.mark.parametrize("color", ["UNRECOGNIZED", "lime", "", "LIME ", "#00FF00", [], {}, 1, True])
+def test_unknown_or_malformed_category_colors_remain_rejected(commercial_snapshot, color):
+    snapshot = replace(commercial_snapshot, categories=(
+        {"id": "synthetic-category", "name": "Categoría de prueba", "color": color},
+    ))
+    with pytest.raises(CatalogValidationError, match="Color de categoría"):
+        transform_catalog(snapshot)
+
+
 def test_plan_contains_decimal_prices_and_real_relationships(commercial_snapshot):
     plan = transform_catalog(commercial_snapshot)
     assert (len(plan.products), len(plan.variants), len(plan.modifiers), len(plan.complements)) == (3, 5, 2, 5)

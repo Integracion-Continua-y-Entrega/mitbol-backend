@@ -134,7 +134,8 @@ def _transform_catalog(snapshot: CatalogSnapshot) -> CatalogPlan:
                 deleted_categories.append(identifier)
                 continue
             color = record.get("color")
-            if color is not None and (not isinstance(color, str) or color not in {"GREY", "RED", "PINK", "ORANGE", "GREEN", "BLUE", "PURPLE"}):
+            # LIME se observa en GET /categories aunque la referencia lo omite.
+            if color is not None and (not isinstance(color, str) or color not in {"GREY", "RED", "PINK", "ORANGE", "LIME", "GREEN", "BLUE", "PURPLE"}):
                 raise CatalogValidationError("Color de categoría no admitido por Loyverse.")
             categories.append(CategoryData(identifier, _bounded(_text(record, "name"), 64, "Categoría"), color))
             category_ids.add(identifier)
