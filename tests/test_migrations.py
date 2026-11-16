@@ -239,7 +239,10 @@ async def test_fastapi_import_does_not_create_tables_or_connect(monkeypatch):
 
     def isolated_menu_db():
         # El menú ahora consulta datos; esta prueba de importación no abre conexiones.
-        yield SimpleNamespace(scalars=lambda statement: SimpleNamespace(all=lambda: []))
+        yield SimpleNamespace(
+            scalars=lambda statement: SimpleNamespace(all=lambda: []),
+            connection=lambda: SimpleNamespace(exec_driver_sql=lambda _: SimpleNamespace(one=lambda: (False, False, 0, 0))),
+        )
 
     main.app.dependency_overrides[get_db] = isolated_menu_db
     try:

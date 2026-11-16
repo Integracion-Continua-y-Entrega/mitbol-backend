@@ -4,11 +4,11 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from alembic.runtime.migration import MigrationContext
 from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.connection import DatabaseTargetError
+from app.db.schema_compatibility import validate_bridge_schema
 from app.models import Product, ProductComplement, ProductModifier, ProductVariant
 from app.models.sync_run import SyncRun
 from app.services.catalog_errors import (
@@ -48,9 +48,10 @@ def inspect_queue(db, *, expected_database, expected_host, permission="read"):
     if (connection.engine.url.database != expected_database or connection.engine.url.host != expected_host
             or identity != (expected_database, connection.engine.url.username, connection.engine.url.username)):
         raise CatalogTargetError("La cola no coincide con el destino y usuario autorizados.")
-    heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
-    if len(heads) != 1 or heads[0] not in SYNC_JOBS_COMPATIBLE_REVISIONS:
-        raise CatalogTargetError("HU-010 requiere su migración y revisión verificadas.")
+    try:
+        validate_bridge_schema(connection)
+    except DatabaseTargetError:
+        raise CatalogTargetError("HU-010 requiere un esquema puente 0007/0008 completo y verificado.") from None
     valid = db.scalar(text("""
         SELECT c.relkind = 'r' AND NOT c.relrowsecurity
            AND pg_catalog.has_table_privilege(current_user, c.oid, 'SELECT')

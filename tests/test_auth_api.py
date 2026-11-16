@@ -57,7 +57,10 @@ def backend(auth_database, password_hash):
         auth_database_url=auth_database.url.render_as_string(hide_password=False),
         auth_cookie_secure=False, auth_login_attempts=50, auth_ip_attempts=200)
     application = create_app(config)
-    application.dependency_overrides[get_db] = lambda: SimpleNamespace(scalars=lambda _: SimpleNamespace(all=lambda: []))
+    application.dependency_overrides[get_db] = lambda: SimpleNamespace(
+        scalars=lambda _: SimpleNamespace(all=lambda: []),
+        connection=lambda: SimpleNamespace(exec_driver_sql=lambda _: SimpleNamespace(one=lambda: (True, True, 4, 6))),
+    )
 
     @application.post("/api/_test/description")
     def description(user=Depends(require_permission("description:write"))):

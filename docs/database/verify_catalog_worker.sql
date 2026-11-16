@@ -15,6 +15,7 @@ DECLARE
     expected boolean;
     allowed jsonb;
     categories_installed boolean := to_regclass('public."Categories"') IS NOT NULL;
+    category_grants boolean := false;
     policy jsonb := '{
       "Products": {"SELECT":["product_id","loyverse_id","name","description","is_available","is_active","is_featured","is_new","synced_at"],"INSERT":["loyverse_id","name","is_active","synced_at"],"UPDATE":["name","is_active","synced_at"]},
       "ProductVariants": {"SELECT":["product_variant_id","loyverse_id","name","price","is_available","is_commercially_available","synced_at","product_id"],"INSERT":["loyverse_id","name","price","product_id","is_available","is_commercially_available","synced_at"],"UPDATE":["name","price","is_commercially_available","synced_at"]},
@@ -28,12 +29,6 @@ DECLARE
       "SyncRuns": {"SELECT":["run_id","catalog_key","store_id","source","status","requested_by","created_at","started_at","finished_at","available_at","attempts","attempt_token","result","error_code"],"INSERT":["run_id","store_id","source","requested_by"],"UPDATE":["status","started_at","finished_at","available_at","attempts","attempt_token","result","error_code"]}
     }';
 BEGIN
-    IF categories_installed THEN
-        policy := policy || '{"Categories":{"SELECT":["category_id","loyverse_id","name","color","is_active","synced_at"],"INSERT":["loyverse_id","name","color","is_active","synced_at"],"UPDATE":["name","color","is_active","synced_at"]}}'::jsonb;
-        policy := jsonb_set(policy, '{Products,SELECT}', (policy->'Products'->'SELECT') || '["category_id"]'::jsonb);
-        policy := jsonb_set(policy, '{Products,INSERT}', (policy->'Products'->'INSERT') || '["category_id"]'::jsonb);
-        policy := jsonb_set(policy, '{Products,UPDATE}', (policy->'Products'->'UPDATE') || '["category_id"]'::jsonb);
-    END IF;
     IF current_user <> 'mitbol_catalog_worker' OR session_user <> 'mitbol_catalog_worker'
        OR current_setting('server_version_num')::int / 10000 <> 18
        OR NOT (
@@ -49,6 +44,20 @@ BEGIN
         RAISE EXCEPTION 'WORKER_SCHEMA';
     END IF;
     SELECT oid INTO worker FROM pg_roles WHERE rolname = current_user;
+    IF categories_installed THEN
+        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
+            RAISE EXCEPTION 'WORKER_CATEGORIES_SCHEMA';
+        END IF;
+        category_grants := has_any_column_privilege(worker,'public."Categories"','SELECT,INSERT,UPDATE')
+            OR has_sequence_privilege(worker,'public."Categories_category_id_seq"','USAGE');
+        -- SELECT de Products a nivel tabla alcanza automáticamente category_id.
+        policy := jsonb_set(policy,'{Products,SELECT}',(policy->'Products'->'SELECT') || '["category_id"]'::jsonb);
+        IF category_grants THEN
+            policy := policy || '{"Categories":{"SELECT":["category_id","loyverse_id","name","color","is_active","synced_at"],"INSERT":["loyverse_id","name","color","is_active","synced_at"],"UPDATE":["name","color","is_active","synced_at"]}}'::jsonb;
+            policy := jsonb_set(policy,'{Products,INSERT}',(policy->'Products'->'INSERT') || '["category_id"]'::jsonb);
+            policy := jsonb_set(policy,'{Products,UPDATE}',(policy->'Products'->'UPDATE') || '["category_id"]'::jsonb);
+        END IF;
+    END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE oid = worker AND
        (NOT rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls))
        OR EXISTS (SELECT 1 FROM pg_auth_members WHERE member = worker) THEN
@@ -70,7 +79,7 @@ BEGIN
         RAISE EXCEPTION 'WORKER_OWNER';
     END IF;
     IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind = 'r' AND policy ? c.relname::text) <> (CASE WHEN categories_installed THEN 11 ELSE 10 END) THEN
+        WHERE n.nspname = 'public' AND c.relkind = 'r' AND policy ? c.relname::text) <> (CASE WHEN category_grants THEN 11 ELSE 10 END) THEN
         RAISE EXCEPTION 'WORKER_MISSING_RELATIONS';
     END IF;
     IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -102,8 +111,8 @@ BEGIN
             END IF;
         ELSIF rel.relkind = 'S' THEN
             expected := rel.nspname = 'public' AND rel.relname IN
-                ('Products_product_id_seq','ProductVariants_product_variant_id_seq','ProductModifiers_product_modifier_id_seq','ProductComplements_product_complement_id_seq')
-                OR (categories_installed AND rel.nspname='public' AND rel.relname='Categories_category_id_seq');
+                ('Products_product_id_seq','ProductVariants_product_variant_id_seq','ProductModifiers_product_modifier_id_seq','ProductComplements_product_complement_id_seq');
+            expected := expected OR (category_grants AND rel.nspname='public' AND rel.relname='Categories_category_id_seq');
             IF has_sequence_privilege(worker, rel.oid, 'USAGE') <> expected
                OR has_sequence_privilege(worker, rel.oid, 'SELECT,UPDATE') THEN
                 RAISE EXCEPTION 'WORKER_SEQUENCE: %', rel.relname;

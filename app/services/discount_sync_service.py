@@ -15,6 +15,7 @@ from app.services.discount_batch import prepare_discount_batch
 from app.services.discount_probe import DiscountSnapshot, fetch_discount_snapshot
 from app.services.discount_writer import write_discount_batch
 from app.services.loyverse_client import LoyverseAPIClient
+from app.db.schema_compatibility import validate_bridge_schema
 from app.services.sync_service import CATALOG_SYNC_LOCK_KEY
 
 
@@ -58,11 +59,14 @@ class DiscountSyncService:
                 validate_local_connection(connection)
             else:
                 self.cloud_target.validate_connection(connection)
+                validate_bridge_schema(connection)
             if session.scalar(select(func.current_database())) != self.expected_database:
                 raise DiscountSyncError("La conexión real no coincide con la base autorizada.")
             heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
             if len(heads) != 1 or heads[0] not in DISCOUNT_COMPATIBLE_REVISIONS:
-                raise DiscountSyncError("La sincronización requiere 20261111_0006 o una revisión compatible hasta 20261115_0008.")
+                raise DiscountSyncError("La sincronización requiere 20261111_0006 o su extensión explícitamente compatible 20261114_0007/20261115_0008.")
+            if self.cloud_target is None and heads[0] == "20261115_0008":
+                validate_bridge_schema(connection)
             # Compartido con catálogo: impide importar fotografías comerciales
             # concurrentes en distinto orden. Se libera al cerrar la transacción.
             if not session.scalar(select(func.pg_try_advisory_xact_lock(CATALOG_SYNC_LOCK_KEY))):

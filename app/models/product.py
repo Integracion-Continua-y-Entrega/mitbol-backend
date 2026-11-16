@@ -30,6 +30,7 @@ class Product(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("Categories.category_id", ondelete="RESTRICT"),
+        deferred=True,
     )
 
     category: Mapped[CommercialCategory | None] = relationship(back_populates="products")

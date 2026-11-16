@@ -62,7 +62,8 @@ BEGIN
     END IF;
     -- Resolver relaciones sólo después de comprobar USAGE del esquema.
     categories_installed := to_regclass('public."Categories"') IS NOT NULL;
-    IF categories_installed AND EXISTS (
+    IF categories_installed AND has_any_column_privilege(reader_oid,'public."Categories"','SELECT')
+       AND EXISTS (
         SELECT 1 FROM pg_attribute a WHERE a.attrelid=to_regclass('public."Categories"')
           AND a.attnum>0 AND NOT a.attisdropped
           AND has_column_privilege(reader_oid,a.attrelid,a.attnum,'SELECT') <>

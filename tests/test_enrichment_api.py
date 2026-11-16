@@ -573,7 +573,7 @@ def test_commercial_retirement_hides_images_without_deleting_local_enrichment(ba
     assert backend.db.connection.scalar(select(func.count()).select_from(Tag)) == 1
 
 
-@pytest.mark.parametrize("count,menu_queries,detail_queries", [(1, 4, 6), (25, 4, 6), (501, 6, 9)])
+@pytest.mark.parametrize("count,menu_queries,detail_queries", [(1, 5, 7), (25, 5, 7), (501, 7, 10)])
 def test_enriched_menu_queries_are_batched(backend, count, menu_queries, detail_queries):
     image = upload(backend).json()
     with backend.db.sessions() as session, session.begin():
@@ -594,9 +594,11 @@ def test_enriched_menu_queries_are_batched(backend, count, menu_queries, detail_
     event.listen(backend.db.connection, "before_cursor_execute", record)
     try:
         assert backend.client.get("/api/menu").status_code == 200
+        assert sum("SELECT to_regclass" in statement for statement in statements) == 1
         assert len(statements) == menu_queries
         statements.clear()
         assert backend.client.get(f"/api/menu/{backend.product_id}").status_code == 200
+        assert sum("SELECT to_regclass" in statement for statement in statements) == 1
         assert len(statements) == detail_queries
     finally:
         event.remove(backend.db.connection, "before_cursor_execute", record)

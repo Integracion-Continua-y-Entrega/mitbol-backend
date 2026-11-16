@@ -58,6 +58,7 @@ def test_public_cloud_starts_without_loyverse_and_publishes_no_writes(monkeypatc
     application = create_app(config)
     application.dependency_overrides[get_db] = lambda: SimpleNamespace(
         scalars=lambda statement: SimpleNamespace(all=lambda: []),
+        connection=lambda: SimpleNamespace(exec_driver_sql=lambda _: SimpleNamespace(one=lambda: (False, False, 0, 0))),
     )
     with TestClient(application) as client:
         assert client.get("/").status_code == 200
@@ -106,6 +107,7 @@ def test_app_factory_uses_its_own_database_and_closes_sessions(monkeypatch):
     assert factory.kw["bind"].url.host == config.expected_database_host
     assert factory.kw["bind"].url.database == config.expected_database
     session = MagicMock()
+    session.connection.return_value.exec_driver_sql.return_value.one.return_value = (False, False, 0, 0)
     session.scalars.return_value.all.return_value = []
     sessions = MagicMock(return_value=session)
     sessions.kw = factory.kw

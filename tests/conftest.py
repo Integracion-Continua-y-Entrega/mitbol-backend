@@ -242,6 +242,24 @@ def current_catalog_database(sync_test_database):
 
 
 @pytest.fixture
+def bridge_sync_db(current_catalog_database):
+    """Contrato 0007 real dentro de un rollback, separado del catálogo sintético."""
+    engine = current_catalog_database
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20261114_0007")
+        sessions = sessionmaker(
+            bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False,
+        )
+        try:
+            yield SimpleNamespace(engine=engine, connection=connection, sessions=sessions)
+        finally:
+            transaction.rollback()
+
+
+@pytest.fixture
 def sync_db(sync_test_database):
     engine = sync_test_database
     with engine.connect() as connection:

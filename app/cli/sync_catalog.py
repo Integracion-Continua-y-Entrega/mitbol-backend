@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.connection import (
     CloudDatabaseTarget, DatabaseTargetError, create_database_engine, environment_mode,
 )
+from app.db.schema_compatibility import validate_bridge_schema
 from app.models import catalog_metadata, runtime_catalog_metadata
 from app.services.catalog_errors import CatalogSyncError
 from app.services.catalog_manifest import CatalogPlanChanged, catalog_manifest, manifest_sha256
@@ -37,11 +38,12 @@ def preflight(engine, target: CloudDatabaseTarget, *, require_empty: bool = Fals
     with engine.connect() as connection, connection.begin():
         connection.exec_driver_sql("SET TRANSACTION READ ONLY")
         target.validate_connection(connection)
+        validate_bridge_schema(connection)
         operator = _inspect_operator(connection)
         revision = validate_catalog_revision(connection)
         counts = _table_counts(connection)
         if require_empty and any(counts.values()):
-            raise DatabaseTargetError("La preparación inicial requiere las ocho tablas vacías; no se autorizan escrituras.")
+            raise DatabaseTargetError("La preparación inicial requiere todas las tablas del catálogo vacías; no se autorizan escrituras.")
         info = connection.connection.driver_connection.info
         tls = {"protocol": info.ssl_attribute("protocol"),
                "sslmode": info.dsn_parameters.get("sslmode"),

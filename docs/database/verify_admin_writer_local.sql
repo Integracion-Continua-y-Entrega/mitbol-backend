@@ -46,7 +46,6 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
             RAISE EXCEPTION 'WRITER_CATEGORIES_SCHEMA';
         END IF;
-        policy := jsonb_set(policy, '{Products,SELECT}', (policy->'Products'->'SELECT') || '["category_id"]'::jsonb);
     END IF;
     SELECT oid INTO writer FROM pg_roles WHERE rolname = current_user;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE oid = writer AND
@@ -84,6 +83,11 @@ BEGIN
         IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
            (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007','20261115_0008')) THEN
             RAISE EXCEPTION 'WRITER_QUEUE_SCHEMA';
+        END IF;
+        -- El puente no consulta la columna y admite el SELECT revisado del delta.
+        IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008')
+           AND has_column_privilege(writer,'public."Products"','category_id','SELECT') THEN
+            policy := jsonb_set(policy,'{Products,SELECT}',(policy->'Products'->'SELECT') || '["category_id"]'::jsonb);
         END IF;
     END IF;
     IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

@@ -2,6 +2,28 @@
 
 ## Categorías comerciales: ampliación 0008 (15 de noviembre de 2026)
 
+### Integración con el backend puente
+
+La integración de `origin/develop` conserva la validación estricta de `0007`
+y `0008`: el contrato histórico se obtiene de `pre_categories_metadata`,
+independiente de los modelos actuales de categorías. Las revisiones desconocidas
+y los esquemas incompletos siguen siendo rechazados por los pools cloud y HU-010.
+
+En `0007` no se consulta `Products.category_id` ni se accede a filas de
+`Categories`: el menú y el detalle conservan su funcionamiento y `/api/categories`
+devuelve una lista vacía. En `0008`, durante la transición sin permisos de lectura,
+se conserva esa respuesta; permisos parciales se rechazan. Después del delta
+revisado se habilitan categorías y filtros. No se concede lectura de Alembic al
+lector público: se comprueban estructura y privilegios mediante catálogos PG.
+
+La sincronización mantiene el perfil comercial anterior en `0007`; en `0008`
+incluye categorías, relaciones y contadores HU-010. Requiere todos los permisos
+comerciales antes de consultar Loyverse; la tolerancia del puente a grants todavía
+no aplicados no autoriza una importación parcial. Se conservan UPSERT, bloqueos,
+transacciones, disponibilidad local, descripciones, destacados, fotografías y R2.
+Las pruebas reproducen ambos esquemas y la transición de permisos en PG18 temporal;
+no contactan servicios comerciales reales.
+
 El modelo del prototipo `app/models/category.py` conserva `categories` en LegacyBase,
 fuera de Alembic. No se importa, renombra ni elimina esa tabla. El catálogo vigente
 incorpora CommercialCategory con tabla `Categories`: category_id INTEGER/SERIAL PK,
@@ -71,8 +93,9 @@ pasa de 118 a 125 columnas y de cuatro a cinco secuencias.
    y renovar MITBOL_RECURRENT_SYNC_APPROVAL con revision=20261115_0008.
 7. Aprobar por separado production y despliegue. Pausar el trabajador/Cron y cerrar
    temporalmente las operaciones administrativas durante el cambio: los perfiles
-   estrictos anteriores rechazan los privilegios nuevos. Primero esquema/permisos,
-   después código y trabajador del mismo commit. Ante fallo, cerrar flags y conservar el
+   estrictos anteriores rechazan los privilegios nuevos. Primero desplegar el puente
+   validado para 0007/0008, después esquema/permisos y finalmente el código de categorías
+   y el trabajador del mismo commit. Ante fallo, cerrar flags y conservar el
    esquema aditivo; no aplicar downgrade ni restaurar production automáticamente.
 
 Pruebas reproducibles:

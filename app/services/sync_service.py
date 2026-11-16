@@ -23,6 +23,7 @@ from app.services.catalog_errors import (
 from app.services.catalog_probe import CatalogSnapshot, fetch_catalog
 from app.services.catalog_transform import CatalogPlan, transform_catalog
 from app.services.loyverse_client import LoyverseAPIClient
+from app.db.schema_compatibility import validate_bridge_schema
 
 # Un catálogo por base: todas las instancias del servicio usan la misma clave.
 CATALOG_SYNC_LOCK_KEY = 0x4D4954424F4C
@@ -34,7 +35,9 @@ CATALOG_COMPATIBLE_REVISIONS = frozenset({CATALOG_SCHEMA_REVISION, "20261105_000
 def validate_catalog_revision(connection) -> str:
     heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
     if len(heads) != 1 or heads[0] not in CATALOG_COMPATIBLE_REVISIONS:
-        raise CatalogTargetError("La sincronización requiere 20261102_0003 o una revisión compatible hasta 20261115_0008.")
+        raise CatalogTargetError("La sincronización requiere 20261102_0003 o una revisión explícitamente compatible hasta 20261115_0008.")
+    if heads[0] == CATEGORIES_REVISION:
+        validate_bridge_schema(connection)
     return heads[0]
 
 
@@ -78,6 +81,7 @@ class SyncService:
                     session.connection().exec_driver_sql("SET TRANSACTION READ ONLY")
                 if self.cloud_target is not None:
                     self.cloud_target.validate_connection(session.connection())
+                    validate_bridge_schema(session.connection())
                     validate_catalog_revision(session.connection())
                 else:
                     validate_local_connection(session.connection())
