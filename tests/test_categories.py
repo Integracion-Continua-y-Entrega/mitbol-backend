@@ -15,7 +15,7 @@ from alembic.runtime.migration import MigrationContext
 from fastapi.testclient import TestClient
 import httpx
 import pytest
-from sqlalchemy import MetaData, Table, create_engine, func, inspect, select, text, update
+from sqlalchemy import MetaData, Table, create_engine, event, func, inspect, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -132,6 +132,62 @@ def test_first_repeat_preview_and_category_price_names(categories):
         assert db.scalar(select(func.count()).select_from(CommercialCategory)) == 1
         assert db.get(CommercialCategory, category_id).name == "Alimentos"
         assert db.get(Product, product_id).category_id == category_id
+
+
+def test_jobs_cli_lime_dry_run_needs_no_approval_and_performs_no_writes(categories, monkeypatch, capsys):
+    from app.cli import sync_catalog_jobs as cli
+
+    b = categories
+    snapshot = replace(b.snapshot, categories=(
+        {**b.snapshot.categories[0], "color": "LIME"},
+    ))
+    api = FakeCatalogAPI(snapshot)
+    monkeypatch.setattr(cli, "LoyverseAPIClient", lambda **kwargs: api.client())
+    for key, value in {
+        "APP_ENV": "test", "ADMIN_ENABLED": "false",
+        "DATABASE_URL": b.engine.url.render_as_string(hide_password=False),
+        "EXPECTED_DATABASE": b.engine.url.database, "EXPECTED_DATABASE_HOST": b.engine.url.host,
+        "LOYVERSE_STORE_ID": "test-store", "LOYVERSE_ACCESS_TOKEN": "synthetic-not-a-credential",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    def contents():
+        with b.engine.connect() as db:
+            return {table.name: db.execute(select(table)).all()
+                    for metadata in (Base.metadata, AuthBase.metadata, SyncBase.metadata)
+                    for table in metadata.sorted_tables}
+
+    before, sequences = contents(), sequence_state(b.engine)
+    statements = []
+
+    def observe(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement.split()[0].upper())
+
+    # Ambas formas deben ignorarse: --dry-run nunca exige ni interpreta aprobación.
+    for approval in (None, "not-valid-json"):
+        if approval is None:
+            monkeypatch.delenv("MITBOL_RECURRENT_SYNC_APPROVAL", raising=False)
+        else:
+            monkeypatch.setenv("MITBOL_RECURRENT_SYNC_APPROVAL", approval)
+        event.listen(b.engine, "before_cursor_execute", observe)
+        # El CLI crea su propio Engine; reutilizamos el temporal para observar todo el SQL.
+        monkeypatch.setattr(cli, "create_database_engine", lambda *args, **kwargs: b.engine)
+        try:
+            assert cli.main([
+                "--expected-database", b.engine.url.database,
+                "--expected-host", b.engine.url.host, "--store-id", "test-store", "--dry-run",
+            ]) == 0
+        finally:
+            event.remove(b.engine, "before_cursor_execute", observe)
+        report = json.loads(capsys.readouterr().out)
+        assert report["writes"] is False and report["persistence"] is None
+        assert report["changes"]["categories"]["new"] == 1
+        assert report["approval_template"]["approved"] is False
+        assert contents() == before and sequence_state(b.engine) == sequences
+    assert statements and set(statements) <= {"SELECT", "SHOW", "SET"}
+    assert {request.url.path.rsplit("/", 1)[-1] for request in api.requests} == {
+        "stores", "items", "modifiers", "categories",
+    }
 
 
 def test_new_category_reassignment_explicit_null_and_local_preservation(categories):
