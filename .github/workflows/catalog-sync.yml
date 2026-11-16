@@ -1,0 +1,145 @@
+name: MITBOL catalog synchronization
+
+# Only this orchestration file belongs on main. Runtime code comes from develop.
+# schedule is best-effort; GitHub can delay runs. No Render Cron Job is required.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run reads only; process-queue processes one existing HU-010 job'
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - process-queue
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+
+# All modes share this group. Preserve a running transaction; PostgreSQL also
+# retains HU-008/HU-010 advisory locks, coalescing, retries and job recovery.
+concurrency:
+  group: mitbol-catalog-production
+  cancel-in-progress: false
+
+jobs:
+  synchronize:
+    name: Catalog worker
+    if: >-
+      ${{
+        github.repository == 'Integracion-Continua-y-Entrega/mitbol-backend' &&
+        github.ref == 'refs/heads/main' &&
+        (
+          (github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run') ||
+          (
+            vars.MITBOL_SYNC_ENABLED == 'true' &&
+            (
+              github.event_name == 'schedule' ||
+              (github.event_name == 'workflow_dispatch' && inputs.mode == 'process-queue')
+            )
+          )
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout current backend from develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: develop
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip check
+
+      - name: Verify production identity and run existing worker
+        # Credentials exist only in this step, never in checkout/install or CLI args.
+        env:
+          APP_ENV: cloud
+          ADMIN_ENABLED: 'false'
+          MITBOL_SYNC_ENABLED: ${{ vars.MITBOL_SYNC_ENABLED || 'false' }}
+          SYNC_MODE: ${{ github.event_name == 'schedule' && 'scheduled' || inputs.mode }}
+          EXPECTED_DATABASE: ${{ vars.EXPECTED_DATABASE }}
+          EXPECTED_DATABASE_HOST: ${{ vars.EXPECTED_DATABASE_HOST }}
+          LOYVERSE_STORE_ID: ${{ vars.LOYVERSE_STORE_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          LOYVERSE_ACCESS_TOKEN: ${{ secrets.LOYVERSE_ACCESS_TOKEN }}
+          MITBOL_RECURRENT_SYNC_APPROVAL: ${{ secrets.MITBOL_RECURRENT_SYNC_APPROVAL }}
+        run: |
+          # Do not enable shell tracing or print connection strings/environment.
+          python - <<'PY'
+          import os
+          from types import SimpleNamespace
+
+          from app.cli.sync_catalog_recurrent import configuration
+          from app.db.connection import create_database_engine
+          from app.db.schema_compatibility import validate_bridge_schema
+          from app.db.worker_policy import validate_worker_connection
+          from app.services.sync_service import CATEGORIES_REVISION
+
+          engine = None
+          try:
+              mode = os.environ['SYNC_MODE']
+              if (os.environ.get('GITHUB_REPOSITORY') != 'Integracion-Continua-y-Entrega/mitbol-backend'
+                      or os.environ.get('GITHUB_REF') != 'refs/heads/main'
+                      or mode not in {'dry-run', 'process-queue', 'scheduled'}
+                      or (mode != 'dry-run' and os.environ.get('MITBOL_SYNC_ENABLED') != 'true')):
+                  raise ValueError('Execution is not enabled')
+              arguments = SimpleNamespace(
+                  expected_database=os.environ['EXPECTED_DATABASE'],
+                  expected_host=os.environ['EXPECTED_DATABASE_HOST'],
+                  store_id=os.environ['LOYVERSE_STORE_ID'],
+                  execute=mode != 'dry-run',
+              )
+              url, target, _, _ = configuration(arguments)
+              if (url.username != 'mitbol_catalog_worker'
+                      or url.database != 'mitbol_cloud_dev'
+                      or url.host.split('.')[0] != 'ep-green-hill-bddfbmgh'
+                      or CATEGORIES_REVISION != '20261115_0008'):
+                  raise ValueError('Unapproved production target or code')
+              engine = create_database_engine(url, target=target)
+              with engine.connect() as connection, connection.begin():
+                  connection.exec_driver_sql('SET TRANSACTION READ ONLY')
+                  target.validate_connection(connection)
+                  branch = connection.exec_driver_sql(
+                      "SELECT current_setting('neon.branch_id', true)"
+                  ).scalar_one()
+                  if branch != 'br-snowy-king-bd0n9w42':
+                      raise ValueError('Not the verified production branch')
+                  if validate_bridge_schema(connection) != '20261115_0008':
+                      raise ValueError('Unapproved schema revision')
+                  validate_worker_connection(connection, target)
+          except Exception:
+              print('::error::Production identity, TLS, schema, permissions or configuration check failed.')
+              raise SystemExit(2) from None
+          finally:
+              if engine is not None:
+                  engine.dispose()
+          print('Production preflight passed (read-only).')
+          PY
+
+          args=(--expected-database "$EXPECTED_DATABASE"
+                --expected-host "$EXPECTED_DATABASE_HOST"
+                --store-id "$LOYVERSE_STORE_ID")
+          case "$SYNC_MODE" in
+            dry-run)       args+=(--dry-run) ;;
+            process-queue) args+=(--execute) ;;
+            scheduled)     args+=(--execute --enqueue-scheduled) ;;
+            *) exit 2 ;;
+          esac
+          python -m app.cli.sync_catalog_jobs "${args[@]}"
