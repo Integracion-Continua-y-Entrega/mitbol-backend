@@ -58,7 +58,8 @@ def stored(engine):
 
 def test_committed_lifecycle_preserves_identity_and_data_on_bad_response(database):
     service = DiscountSyncService(sessionmaker(bind=database), expected_database=database.url.database, store_id=STORE)
-    client = Mock(get_discounts=AsyncMock(return_value=[source()]))
+    client = Mock(get_discounts=AsyncMock(return_value=[source()]),
+                  get_stores=AsyncMock(return_value=[dict(id=STORE, name="Tienda sintética")]))
     assert asyncio.run(service.synchronize(client)) == 1
     original = stored(database)  # Otra conexión comprueba el commit real.
     assert original["value"] == Decimal("35.25")
@@ -94,6 +95,7 @@ def test_cli_preflight_then_execute_with_fake_provider_and_real_commit(database,
     client = AsyncMock()
     client.__aenter__.return_value = client
     client.get_discounts.return_value = [source()]
+    client.get_stores.return_value = [dict(id=STORE, name="Tienda sintética")]
     factory = Mock(return_value=client)
     monkeypatch.setattr(cli, "LoyverseAPIClient", factory)
     args = ["--expected-database", database.url.database, "--store-id", STORE]

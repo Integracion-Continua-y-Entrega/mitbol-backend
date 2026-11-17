@@ -144,7 +144,8 @@ def test_coordinator_invalid_provider_batch_preserves_data(discount_service):
     b = discount_service
     b.service.persist_snapshot(discount_snapshot())
     before = b.connection.execute(select(b.table)).mappings().all()
-    client = SimpleNamespace(get_discounts=AsyncMock(return_value=[{"id": "invalid"}]))
+    client = SimpleNamespace(get_discounts=AsyncMock(return_value=[{"id": "invalid"}]),
+        get_stores=AsyncMock(return_value=[dict(id=b.service.store_id, name="Tienda sintética")]))
     with pytest.raises(DiscountValidationError):
         asyncio.run(b.service.synchronize(client))
     client.get_discounts.assert_awaited_once_with(include_deleted=True)
