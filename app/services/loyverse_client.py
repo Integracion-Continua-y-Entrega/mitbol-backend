@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from typing import Awaitable, Callable
+from uuid import UUID
 
 import httpx
 from pydantic import SecretStr
@@ -126,6 +127,23 @@ class LoyverseAPIClient:
     async def get(self, endpoint: str, params: dict | None = None) -> dict:
         if endpoint not in self.READ_ENDPOINTS:
             raise ValueError("Ruta de lectura no admitida por el cliente de Loyverse.")
+        return await self._read(endpoint, params)
+
+    async def get_discount(self, discount_id: str) -> dict:
+        """Lectura individual limitada a un UUID; no admite URLs o rutas arbitrarias."""
+        try:
+            identifier = str(UUID(discount_id))
+        except (ValueError, TypeError, AttributeError):
+            raise LoyverseConfigurationError("Identificador de descuento inválido.") from None
+        data = await self._read(f"/discounts/{identifier}", None)
+        try:
+            if not isinstance(data.get("id"), str) or str(UUID(data["id"])) != identifier:
+                raise ValueError
+        except (ValueError, TypeError, AttributeError):
+            raise LoyverseResponseError("La respuesta individual no corresponde al descuento solicitado.") from None
+        return data
+
+    async def _read(self, endpoint: str, params: dict | None) -> dict:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(self.max_attempts),
             wait=self._retry_wait,
@@ -139,18 +157,19 @@ class LoyverseAPIClient:
 
     async def _get_once(self, endpoint: str, params: dict | None) -> dict:
         self.request_count += 1
+        label = "/discounts/{discount_id}" if endpoint.startswith("/discounts/") else endpoint
         try:
             response = await self._http.get(endpoint, params=params)
         except httpx.TransportError:
             raise LoyverseTransientError(
-                f"Fallo de conexión o tiempo de espera al consultar {endpoint}."
+                f"Fallo de conexión o tiempo de espera al consultar {label}."
             ) from None
 
         status = response.status_code
         if status in (408, 429) or 500 <= status < 600:
             error_type = RateLimitException if status == 429 else LoyverseTransientError
             raise error_type(
-                f"Loyverse respondió HTTP {status} al consultar {endpoint}.",
+                f"Loyverse respondió HTTP {status} al consultar {label}.",
                 status_code=status,
                 retry_after=_retry_after_seconds(response.headers.get("Retry-After")),
             )
@@ -158,11 +177,11 @@ class LoyverseAPIClient:
             hints = {
                 401: "Revisa la vigencia del token.",
                 402: "Revisa el acceso a la API y la suscripción de Loyverse.",
-                403: ("Revisa el permiso de lectura de descuentos del token." if endpoint == "/discounts"
+                403: ("Revisa el permiso de lectura de descuentos del token." if label.startswith("/discounts")
                       else "Revisa los permisos ITEMS_READ y STORES_READ."),
             }
             raise LoyverseAPIError(
-                f"Loyverse respondió HTTP {status} al consultar {endpoint}. {hints.get(status, '')}".strip(),
+                f"Loyverse respondió HTTP {status} al consultar {label}. {hints.get(status, '')}".strip(),
                 status_code=status,
             )
         try:
@@ -170,9 +189,9 @@ class LoyverseAPIClient:
                 response.content, parse_float=Decimal, parse_constant=_reject_json_constant,
             )
         except (ValueError, UnicodeDecodeError):
-            raise LoyverseResponseError(f"JSON inválido en {endpoint}.") from None
+            raise LoyverseResponseError(f"JSON inválido en {label}.") from None
         if not isinstance(data, dict):
-            raise LoyverseResponseError(f"Se esperaba un objeto JSON en {endpoint}.")
+            raise LoyverseResponseError(f"Se esperaba un objeto JSON en {label}.")
         return data
 
     @staticmethod

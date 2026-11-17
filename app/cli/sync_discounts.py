@@ -87,9 +87,15 @@ def main(argv=None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--preflight", action="store_true")
     mode.add_argument("--execute", action="store_true")
+    parser.add_argument("--allow-partial", action="store_true",
+                        help="Autoriza omitir IDs nuevos aislados; requiere --execute y --quarantine-dir.")
+    parser.add_argument("--quarantine-dir",
+                        help="Carpeta privada persistente, absoluta y existente fuera de Git y TEMP.")
     args = parser.parse_args(argv)
     engine = None
     try:
+        if args.allow_partial and (not args.execute or not args.quarantine_dir):
+            raise DiscountSyncError("--allow-partial requiere --execute y --quarantine-dir explícitos.")
         store_id = str(UUID(args.store_id))
         if store_id != str(UUID(os.getenv("LOYVERSE_STORE_ID", ""))):
             raise DiscountSyncError("--store-id debe coincidir con LOYVERSE_STORE_ID.")
@@ -105,7 +111,8 @@ def main(argv=None) -> int:
             raise DiscountSyncError("--expected-host solo corresponde al modo cloud.")
         # Validar también base y tienda antes de abrir una conexión.
         service = DiscountSyncService(lambda: None, expected_database=args.expected_database,
-                                      store_id=store_id, cloud_target=target)
+                                      store_id=store_id, cloud_target=target,
+                                      allow_partial=args.allow_partial, quarantine_dir=args.quarantine_dir)
         raw_url = os.getenv("DATABASE_URL", "")
         url = target.validate_url(raw_url) if target else local_database_url(raw_url)
         token = None
@@ -121,6 +128,9 @@ def main(argv=None) -> int:
             processed = asyncio.run(execute(service, token))
             report.update(status="synchronized", processed=processed, store_id=store_id,
                           writes=True, loyverse_contacted=True)
+            report.update(service.last_report)
+            if service.last_report.get("partial"):
+                report["status"] = "synchronized_with_quarantine"
         print(json.dumps(report, ensure_ascii=True))
         return 0
     except (DatabaseTargetError, DiscountSyncError, DiscountValidationError, LoyverseAPIError) as error:

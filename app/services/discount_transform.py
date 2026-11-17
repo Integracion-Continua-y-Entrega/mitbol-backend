@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+import re
 from uuid import UUID
 
 from app.services.discount_rules import DiscountType, is_variable_discount
@@ -66,28 +67,21 @@ def _fixed_value(value: object, maximum: Decimal) -> Decimal:
     return amount
 
 
-def parse_discount(record: dict) -> DiscountRecord:
+def discount_identity(record: dict) -> str:
     if not isinstance(record, dict):
         raise DiscountValidationError("Se esperaba un objeto de descuento.")
-    identifier = _identifier(record.get("id"))
+    return _identifier(record.get("id"))
+
+
+def discount_metadata(record: dict) -> dict:
+    """Valida la identidad y envoltura incluso de un tipo que no sabemos interpretar."""
+    identifier = discount_identity(record)
     name = record.get("name")
     if not isinstance(name, str) or not name.strip() or len(name) > 40:
         raise DiscountValidationError("Nombre de descuento inválido.")
-    try:
-        kind = DiscountType(record.get("type"))
-    except (ValueError, TypeError):
+    kind = record.get("type")
+    if not isinstance(kind, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", kind):
         raise DiscountValidationError("Tipo de descuento no reconocido.") from None
-
-    if kind is DiscountType.FIXED_PERCENT:
-        value = _fixed_value(record.get("discount_percent"), Decimal("100"))
-    elif kind is DiscountType.FIXED_AMOUNT:
-        value = _fixed_value(record.get("discount_amount"), Decimal("999999.99"))
-    else:
-        # Variables y puntos no tienen un valor fijo de catálogo. No calcularlo.
-        if record.get("discount_percent") is not None or record.get("discount_amount") is not None:
-            raise DiscountValidationError("Tipo no fijo con un valor fijo inesperado.")
-        value = None
-
     stores = record.get("stores")
     if not isinstance(stores, list):
         raise DiscountValidationError("Lista de tiendas ausente o inválida.")
@@ -101,13 +95,30 @@ def parse_discount(record: dict) -> DiscountRecord:
     created_at = _timestamp(record.get("created_at"))
     updated_at = _timestamp(record.get("updated_at"))
     assert created_at is not None and updated_at is not None
-    return DiscountRecord(
-        loyverse_id=identifier, name=name, discount_type=kind, value=value,
+    return dict(
+        loyverse_id=identifier, name=name,
         stores=store_ids, restricted_access=restricted,
         created_at=created_at,
         updated_at=updated_at,
         deleted_at=_timestamp(record.get("deleted_at"), nullable=True),
     )
+
+
+def parse_discount(record: dict) -> DiscountRecord:
+    metadata = discount_metadata(record)
+    try:
+        kind = DiscountType(record["type"])
+    except ValueError:
+        raise DiscountValidationError("Tipo de descuento no reconocido.") from None
+    if kind is DiscountType.FIXED_PERCENT:
+        value = _fixed_value(record.get("discount_percent"), Decimal("100"))
+    elif kind is DiscountType.FIXED_AMOUNT:
+        value = _fixed_value(record.get("discount_amount"), Decimal("999999.99"))
+    else:
+        if record.get("discount_percent") is not None or record.get("discount_amount") is not None:
+            raise DiscountValidationError("Tipo no fijo con un valor fijo inesperado.")
+        value = None
+    return DiscountRecord(**metadata, discount_type=kind, value=value)
 
 
 def parse_discount_records(records: list[dict]) -> tuple[DiscountRecord, ...]:
