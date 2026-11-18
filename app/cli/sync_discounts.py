@@ -16,6 +16,9 @@ from app.db.connection import (
     local_database_url, validate_local_connection,
 )
 from app.db.schema_compatibility import validate_bridge_schema
+from app.db.discount_worker_policy import (
+    PRODUCTION_DATABASE, PRODUCTION_HOST, validate_discount_worker_connection,
+)
 from app.services.discount_sync_service import DISCOUNT_COMPATIBLE_REVISIONS, DiscountSyncError, DiscountSyncService
 from app.services.discount_transform import DiscountValidationError
 from app.services.loyverse_client import LoyverseAPIClient, LoyverseAPIError
@@ -88,14 +91,21 @@ def main(argv=None) -> int:
     mode.add_argument("--preflight", action="store_true")
     mode.add_argument("--execute", action="store_true")
     parser.add_argument("--allow-partial", action="store_true",
-                        help="Autoriza omitir IDs nuevos aislados; requiere --execute y --quarantine-dir.")
+                        help="Autoriza omitir IDs nuevos aislados; requiere --execute y cuarentena verificada.")
     parser.add_argument("--quarantine-dir",
                         help="Carpeta privada persistente, absoluta y existente fuera de Git y TEMP.")
+    parser.add_argument("--compatible-only", action="store_true",
+                        help="Política explícita sin archivo: sólo omite tipos desconocidos nuevos; informa incidencias.")
+    parser.add_argument("--require-discount-worker", action="store_true",
+                        help="Automatización: exige production, rol mínimo y flag habilitado para escribir.")
     args = parser.parse_args(argv)
     engine = None
+    service = None
     try:
         if args.allow_partial and (not args.execute or not args.quarantine_dir):
             raise DiscountSyncError("--allow-partial requiere --execute y --quarantine-dir explícitos.")
+        if args.compatible_only and (not args.execute or args.allow_partial or args.quarantine_dir):
+            raise DiscountSyncError("--compatible-only requiere --execute y no se combina con cuarentena.")
         store_id = str(UUID(args.store_id))
         if store_id != str(UUID(os.getenv("LOYVERSE_STORE_ID", ""))):
             raise DiscountSyncError("--store-id debe coincidir con LOYVERSE_STORE_ID.")
@@ -109,12 +119,19 @@ def main(argv=None) -> int:
                 raise DiscountSyncError("La operación requiere un endpoint directo, sin pooler.")
         elif args.expected_host:
             raise DiscountSyncError("--expected-host solo corresponde al modo cloud.")
-        # Validar también base y tienda antes de abrir una conexión.
-        service = DiscountSyncService(lambda: None, expected_database=args.expected_database,
-                                      store_id=store_id, cloud_target=target,
-                                      allow_partial=args.allow_partial, quarantine_dir=args.quarantine_dir)
         raw_url = os.getenv("DATABASE_URL", "")
         url = target.validate_url(raw_url) if target else local_database_url(raw_url)
+        if args.require_discount_worker:
+            if (target is None or target.expected_database != PRODUCTION_DATABASE
+                    or target.expected_host != PRODUCTION_HOST or url.username != "mitbol_discount_worker"):
+                raise DiscountSyncError("DISCOUNT_AUTOMATION_TARGET_REJECTED")
+            if args.execute and os.getenv("MITBOL_DISCOUNT_SYNC_ENABLED", "false") != "true":
+                raise DiscountSyncError("DISCOUNT_AUTOMATION_DISABLED")
+        # Validar también base, tienda y política antes de abrir una conexión.
+        service = DiscountSyncService(lambda: None, expected_database=args.expected_database,
+                                      store_id=store_id, cloud_target=target,
+                                      allow_partial=args.allow_partial, quarantine_dir=args.quarantine_dir,
+                                      compatible_only=args.compatible_only)
         token = None
         if args.execute:
             raw_token = os.getenv("LOYVERSE_ACCESS_TOKEN", "")
@@ -123,21 +140,39 @@ def main(argv=None) -> int:
             token = SecretStr(raw_token)
         engine = create_database_engine(url, target=target)
         report = preflight(engine, expected_database=args.expected_database, cloud_target=target)
+        if args.require_discount_worker:
+            with engine.connect() as connection, connection.begin():
+                connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+                validate_discount_worker_connection(connection, target)
+            report["discount_worker_policy"] = "verified"
         if args.execute:
             service.session_factory = sessionmaker(bind=engine)
             processed = asyncio.run(execute(service, token))
-            report.update(status="synchronized", processed=processed, store_id=store_id,
+            report.update(status="synchronized", processed=processed,
                           writes=True, loyverse_contacted=True)
+            if not args.compatible_only:
+                report["store_id"] = store_id
             report.update(service.last_report)
-            if service.last_report.get("partial"):
+            if args.compatible_only:
+                report["status"] = "synchronized_compatible_only"
+            elif service.last_report.get("partial"):
                 report["status"] = "synchronized_with_quarantine"
         print(json.dumps(report, ensure_ascii=True))
         return 0
     except (DatabaseTargetError, DiscountSyncError, DiscountValidationError, LoyverseAPIError) as error:
-        print(json.dumps({"status": "error", "message": str(error)}, ensure_ascii=True))
+        code = ("DISCOUNT_TARGET_FAILED" if isinstance(error, DatabaseTargetError) else
+                "DISCOUNT_SOURCE_VALIDATION_FAILED" if isinstance(error, DiscountValidationError) else
+                "DISCOUNT_PROVIDER_FAILED" if isinstance(error, LoyverseAPIError) else "DISCOUNT_SYNC_FAILED")
+        if str(error) in {"DISCOUNT_OMITTED_ID_EXISTS", "DISCOUNT_UNRESOLVED_CONFLICT",
+                          "DISCOUNT_AUTOMATION_TARGET_REJECTED", "DISCOUNT_AUTOMATION_DISABLED",
+                          "DISCOUNT_WORKER_POLICY_UNAVAILABLE", "DISCOUNT_WORKER_POLICY_REJECTED"}:
+            code = str(error)
+        print(json.dumps({"status": "error", "code": code, "message": str(error),
+                         **(service.last_diagnostics if service is not None else {})}, ensure_ascii=True))
         return 1
     except Exception:
-        print(json.dumps({"status": "error", "message": "No se pudo completar la operación; revisa configuración y estado antes de repetir."}))
+        print(json.dumps({"status": "error", "code": "DISCOUNT_UNEXPECTED_FAILURE",
+                          "message": "No se pudo completar la operación; revisa configuración y estado antes de repetir."}))
         return 1
     finally:
         if engine is not None:

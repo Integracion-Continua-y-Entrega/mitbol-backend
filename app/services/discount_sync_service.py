@@ -1,6 +1,8 @@
 """HU-009: coordinación transaccional explícita, sin sesión global ni endpoint."""
 
 from contextlib import contextmanager
+from collections import Counter
+import hashlib
 import re
 from typing import Callable
 from uuid import UUID
@@ -33,7 +35,7 @@ class DiscountSyncService:
     def __init__(
         self, session_factory: Callable[[], Session], *, expected_database: str,
         store_id: str, cloud_target: CloudDatabaseTarget | None = None,
-        allow_partial: bool = False, quarantine_dir=None,
+        allow_partial: bool = False, quarantine_dir=None, compatible_only: bool = False,
     ):
         if cloud_target is not None:
             if expected_database != cloud_target.expected_database:
@@ -51,10 +53,14 @@ class DiscountSyncService:
         self.session_factory = session_factory
         self.expected_database = expected_database
         self.cloud_target = cloud_target
+        if compatible_only and (allow_partial or quarantine_dir is not None):
+            raise DiscountSyncError("--compatible-only no se combina con el modo de cuarentena.")
         if allow_partial and quarantine_dir is None:
             raise DiscountSyncError("El modo parcial requiere un destino privado de cuarentena explícito.")
         self.allow_partial, self.quarantine_dir = allow_partial, quarantine_dir
+        self.compatible_only = compatible_only
         self.last_report = {}
+        self.last_diagnostics = {}
 
     @contextmanager
     def _transaction(self):
@@ -87,7 +93,8 @@ class DiscountSyncService:
         accepted = {record.loyverse_id for record in snapshot.records}
         if accepted & omitted:
             raise DiscountValidationError("Un ID no puede estar aceptado y aislado en el mismo lote.")
-        if self.allow_partial and (not snapshot.includes_deleted or snapshot.verified_store_id != self.store_id):
+        if (self.allow_partial or self.compatible_only) and (
+                not snapshot.includes_deleted or snapshot.verified_store_id != self.store_id):
             raise DiscountSyncError("El modo parcial requiere descarga completa y tienda verificada con Loyverse.")
         existing_omitted = False
         if omitted:
@@ -100,6 +107,18 @@ class DiscountSyncService:
         diagnostics = dict(source_records=snapshot.source_count if snapshot.source_count is not None else len(rows),
             valid_records=len(rows), isolated_ids=len(omitted), resolved_ids=len(snapshot.resolutions),
             partial=bool(omitted), quarantine_report_written=False)
+        if self.compatible_only:
+            # Política explícita distinta de la cuarentena: sólo omitir tipos
+            # desconocidos NUEVOS. Una contradicción sin resolver bloquea todo.
+            diagnostics.update(policy="compatible_only", evidence="redacted_summary_only",
+                               **_safe_incidents(snapshot))
+            self.last_diagnostics = diagnostics
+            if existing_omitted:
+                raise DiscountSyncError("DISCOUNT_OMITTED_ID_EXISTS")
+            if any(issue["reason"] != "DISCOUNT_UNSUPPORTED_TYPE" for issue in snapshot.quarantined):
+                raise DiscountSyncError("DISCOUNT_UNRESOLVED_CONFLICT")
+            self._prepared_report = diagnostics
+            return write_discount_batch(session, table, rows)
         if self.allow_partial or omitted or snapshot.resolutions:
             if self.quarantine_dir is None:
                 raise DiscountSyncError("Se requiere un informe privado para conservar los descuentos aislados o resueltos.")
@@ -109,7 +128,7 @@ class DiscountSyncService:
             isolated_test = (environment_mode() == "test" and url.host in LOOPBACK_HOSTS
                 and bool(re.fullmatch(r"mitbol_test_(?:hu008_[0-9a-f]{12}|auth_[0-9a-f]{32})", self.expected_database)))
             try:
-                identifier = write_quarantine_report(self.quarantine_dir, dict(
+                report = dict(
                     fetched_at=snapshot.fetched_at.isoformat(),
                     context=dict(database=self.expected_database, store_id=self.store_id, revision=revision,
                                  mode="partial_authorized" if self.allow_partial else "strict"),
@@ -117,7 +136,8 @@ class DiscountSyncService:
                         "source_records", "valid_records", "isolated_ids", "resolved_ids")},
                     decision=rejection or "prepared",
                     quarantined=snapshot.quarantined, resolutions=snapshot.resolutions,
-                    accepted_ids=sorted(accepted)), isolated_test=isolated_test)
+                    accepted_ids=sorted(accepted))
+                identifier = write_quarantine_report(self.quarantine_dir, report, isolated_test=isolated_test)
             except DiscountQuarantineError as error:
                 raise DiscountSyncError(str(error)) from None
             diagnostics.update(quarantine_report_written=True, quarantine_report_id=identifier)
@@ -135,6 +155,7 @@ class DiscountSyncService:
         """
         try:
             self.last_report = {}
+            self.last_diagnostics = {}
             with self._transaction() as session:
                 processed = self._write(session, snapshot)
             self.last_report = self._prepared_report
@@ -146,6 +167,7 @@ class DiscountSyncService:
         """Valida destino y bloquea antes de descargar; confirma solo al terminar."""
         try:
             self.last_report = {}
+            self.last_diagnostics = {}
             with self._transaction() as session:
                 snapshot = await fetch_discount_snapshot(client, include_deleted=True,
                     store_id=self.store_id, collect_issues=True)
@@ -154,3 +176,22 @@ class DiscountSyncService:
             return processed
         except SQLAlchemyError:
             raise DiscountSyncError("Falló la persistencia de descuentos; verifica antes de reintentar.") from None
+
+
+def _safe_incidents(snapshot: DiscountSnapshot) -> dict:
+    """Sin nombres, importes, IDs originales, payloads ni tipos arbitrarios."""
+    allowed = {"DISCOUNT_UNSUPPORTED_TYPE", "DISCOUNT_IDENTICAL_COPIES", "DISCOUNT_CURRENT_CONFIRMED",
+        "DISCOUNT_DETAIL_IDENTITY_MISMATCH", "DISCOUNT_DETAIL_NOT_OBSERVED", "DISCOUNT_DETAIL_INVALID",
+        "DISCOUNT_DETAIL_NOT_FOUND"}
+    issues = []
+    for issue in (*snapshot.quarantined, *snapshot.resolutions):
+        code = issue["reason"] if issue["reason"] in allowed else "DISCOUNT_INVALID_INCIDENT"
+        identifier = discount_identity({"id": issue["loyverse_id"]})
+        entry = dict(code=code, reference=hashlib.sha256(identifier.encode("ascii")).hexdigest()[:16])
+        if code == "DISCOUNT_UNSUPPORTED_TYPE":
+            selected = issue.get("individual") or issue["originals"][0]
+            entry["type"] = "TEYA_DISCOUNT" if selected.get("type") == "TEYA_DISCOUNT" else "OTHER_UNSUPPORTED"
+        issues.append(entry)
+    return dict(issue_counts=dict(sorted(Counter(item["code"] for item in issues).items())),
+        issues=sorted(issues, key=lambda item: (item["code"], item["reference"]))[:20],
+        issues_truncated=len(issues) > 20)
