@@ -19,7 +19,7 @@ class ScopedCORSMiddleware:
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
-        if path in {"/api/cart/validate", "/api/order-modality/validate"}:
+        if path in {"/api/cart/validate", "/api/cart/summary", "/api/order-modality/validate"}:
             await self.public_validation(scope, receive, send)
             return
         private = any(path == prefix or path.startswith(prefix + "/") for prefix in ("/api/auth", "/api/admin"))

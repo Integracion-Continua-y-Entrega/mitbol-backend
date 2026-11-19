@@ -18,6 +18,7 @@ from test_menu import add_product, api_app, capture_sql, detail_catalog, menu_cl
 
 
 PATH = "/api/cart/validate"
+SUMMARY_PATH = "/api/cart/summary"
 
 
 def item(product, *, quantity=1, variant_index=0, complements=()):
@@ -59,6 +60,7 @@ def test_empty_cart_is_valid_without_queries(api_app):
     assert db.mock_calls == []
 
 
+@pytest.mark.parametrize("path", [PATH, SUMMARY_PATH])
 @pytest.mark.parametrize("field,value", [
     ("quantity", 0), ("quantity", -1), ("quantity", 1.5), ("quantity", 1.0),
     ("quantity", "2"), ("quantity", True), ("quantity", None),
@@ -68,30 +70,32 @@ def test_empty_cart_is_valid_without_queries(api_app):
     ("complement_ids", [{"product_complement_id": 2, "price": "0.01"}]),
     ("price", "0.01"), ("unit_total", "0.01"), ("unit_price", "0.01"),
 ])
-def test_invalid_cart_lines_are_rejected_before_query(api_app, field, value):
+def test_invalid_cart_lines_are_rejected_before_query(api_app, path, field, value):
     db = Mock()
     api_app.dependency_overrides[get_db] = lambda: db
     row = {"product_id": 1, "product_variant_id": 1, "quantity": 1}
     row[field] = value
     with TestClient(api_app) as client:
-        response = client.post(PATH, json={"items": [row]})
+        response = client.post(path, json={"items": [row]})
     assert response.status_code == 422
     assert db.mock_calls == []
 
 
+@pytest.mark.parametrize("path", [PATH, SUMMARY_PATH])
 @pytest.mark.parametrize("payload", [
     {}, {"items": None}, {"items": "invalid"}, {"items": [None]},
     {"items": [{"product_id": 1, "product_variant_id": 1}]},
     {"items": [], "total": "0.01"},
 ])
-def test_invalid_cart_structure_is_rejected_before_query(api_app, payload):
+def test_invalid_cart_structure_is_rejected_before_query(api_app, path, payload):
     db = Mock()
     api_app.dependency_overrides[get_db] = lambda: db
     with TestClient(api_app) as client:
-        assert client.post(PATH, json=payload).status_code == 422
+        assert client.post(path, json=payload).status_code == 422
     assert db.mock_calls == []
 
 
+@pytest.mark.parametrize("path", [PATH, SUMMARY_PATH])
 @pytest.mark.parametrize("condition,status", [
     ("missing_product", 404), ("missing_variant", 422), ("foreign_variant", 422),
     ("missing_complement", 422), ("foreign_complement", 422), ("inactive_complement", 409),
@@ -99,7 +103,7 @@ def test_invalid_cart_structure_is_rejected_before_query(api_app, payload):
     ("unavailable_variant", 409), ("commercially_unavailable_variant", 409),
 ])
 def test_invalid_later_line_rejects_whole_cart_and_identifies_its_index(
-    menu_client, menu_db, detail_catalog, condition, status,
+    menu_client, menu_db, detail_catalog, path, condition, status,
 ):
     c = detail_catalog
     invalid = item(c.product)
@@ -122,7 +126,7 @@ def test_invalid_later_line_rejects_whole_cart_and_identifies_its_index(
             else:
                 field = "is_available" if condition == "unavailable_variant" else "is_commercially_available"
                 setattr(db.get(ProductVariant, invalid["product_variant_id"]), field, False)
-    response = menu_client.post(PATH, json={"items": [item(c.other), invalid]})
+    response = menu_client.post(path, json={"items": [item(c.other), invalid]})
     assert response.status_code == status
     assert set(response.json()) == {"detail"}
     assert response.json()["detail"]["item_index"] == 1
@@ -159,16 +163,17 @@ def test_cart_revalidates_current_unit_prices(menu_client, menu_db, detail_catal
     assert response.json()["items"][0]["quantity"] == 7
 
 
+@pytest.mark.parametrize("path", [PATH, SUMMARY_PATH])
 @pytest.mark.parametrize("error_type,status", [
     (menu_service.MenuUnavailableError, 503), (menu_service.MenuReadError, 500), (RuntimeError, 500),
 ])
-def test_cart_catalog_errors_are_sanitized(api_app, monkeypatch, caplog, error_type, status):
+def test_cart_catalog_errors_are_sanitized(api_app, monkeypatch, caplog, path, error_type, status):
     def fail(*args):
         raise error_type("synthetic-private-connection-details")
     monkeypatch.setattr(product_options_service, "validate_product_selection", fail)
     api_app.dependency_overrides[get_db] = lambda: Mock()
     with TestClient(api_app) as client:
-        response = client.post(PATH, json={"items": [{"product_id": 1, "product_variant_id": 1, "quantity": 1}]})
+        response = client.post(path, json={"items": [{"product_id": 1, "product_variant_id": 1, "quantity": 1}]})
     assert response.status_code == status
     assert "synthetic-private-connection-details" not in response.text + caplog.text
 
@@ -176,6 +181,7 @@ def test_cart_catalog_errors_are_sanitized(api_app, monkeypatch, caplog, error_t
 @pytest.mark.parametrize("mode", ["public", "auth", "legacy_admin"])
 @pytest.mark.parametrize("path,payload", [
     (PATH, {"items": []}),
+    (SUMMARY_PATH, {"items": []}),
     ("/api/order-modality/validate", {"modality": "dine_in", "name": "Alias"}),
 ])
 def test_cart_json_is_available_to_react_without_broadening_other_cors_routes(mode, path, payload):
