@@ -67,7 +67,9 @@ def test_public_config_is_available_with_auth_disabled_and_database_unavailable(
         assert client.post("/api/admin/tags", json={"name": "Forbidden"}).status_code == 404
         schema = client.get("/openapi.json").json()
         assert "security" not in schema["paths"]["/api/menu/config"]["get"]
-        assert all(set(methods) == {"get"} for methods in schema["paths"].values())
+        assert set(schema["paths"]["/api/cart/validate"]) == {"post"}
+        assert all(set(methods) == {"get"} for path, methods in schema["paths"].items()
+                   if path != "/api/cart/validate")
         assert "PRIVATE_PASSWORD" not in json.dumps(schema) + response.text
 
 
