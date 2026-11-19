@@ -1,14 +1,15 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from starlette.responses import JSONResponse
 
 from app.api.menu import router as menu_router
 from app.api.media import router as media_router
+from app.api.cart import router as cart_router
 from app.core.config import Settings, settings
+from app.core.scoped_cors import ScopedCORSMiddleware
 from app.core.security import ADMIN_SECURITY_DESCRIPTION, AdminRequestGuard
 from app.db.database import session_factory_for
 from app.schemas.menu import MenuProductDetailResponse, MenuResponse
@@ -43,11 +44,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     application.state.session_factory = session_factory_for(config)
     application.state.image_storage = create_image_storage(config)
     if not config.auth_enabled:
-        application.add_middleware(
-            CORSMiddleware, allow_origins=config.cors_origins, allow_credentials=False,
-            allow_methods=["GET"] if not config.admin_enabled else ["GET", "POST", "PATCH", "PUT", "DELETE"],
-            allow_headers=["Content-Type"] if not config.admin_enabled else ["Content-Type", "X-Admin-Key"],
-        )
+        application.add_middleware(ScopedCORSMiddleware, config=config)
     application.add_middleware(AdminRequestGuard, config=config)
     if config.auth_enabled:
         from app.api.auth import router as auth_router
@@ -61,7 +58,6 @@ def create_app(config: Settings | None = None) -> FastAPI:
         application.include_router(auth_router)
         application.add_middleware(AuthRequestGuard, config=config)
         # CORS exterior resuelve preflight sin credenciales y decora también errores.
-        from app.core.scoped_cors import ScopedCORSMiddleware
         application.add_middleware(ScopedCORSMiddleware, config=config)
 
         @application.exception_handler(AuthError)
@@ -84,6 +80,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     # Alembic administra el esquema; el router legado de sincronización no se registra.
     application.include_router(menu_router)
     application.include_router(media_router)
+    application.include_router(cart_router)
     if config.auth_sync_enabled:
         from app.api.admin_sync import router as sync_router
         application.include_router(sync_router)

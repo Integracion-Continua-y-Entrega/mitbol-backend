@@ -67,7 +67,10 @@ def test_public_cloud_starts_without_loyverse_and_publishes_no_writes(monkeypatc
             assert client.request(method, "/api/admin/tags").status_code == 404
         assert client.post("/api/v1/sync/loyverse").status_code == 404
         schema = client.get("/openapi.json").json()
-        assert all(set(methods) == {"get"} for methods in schema["paths"].values())
+        assert set(schema["paths"]["/api/cart/validate"]) == {"post"}
+        assert client.post("/api/cart/validate", json={"items": []}).json() == {"valid": True, "items": []}
+        assert all(set(methods) == {"get"} for path, methods in schema["paths"].items()
+                   if path != "/api/cart/validate")
         assert "securitySchemes" not in schema["components"]
         assert "PRIVATE_PASSWORD" not in json.dumps(schema)
     assert not config.image_storage_root.exists()
