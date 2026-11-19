@@ -347,8 +347,9 @@ def test_each_mutation_rolls_back_with_its_audit_under_writer(backend, operation
     admin_tests.test_audit_failure_rolls_back_every_real_mutation_and_image_side_effects(backend, operation)
 
 
-def test_login_under_writer(backend):
-    auth_tests.test_login_persists_only_hashes_and_cookie_attributes_and_me(backend)
+@pytest.mark.parametrize("role", ["admin", "staff", "customer"])
+def test_login_under_writer(backend, role):
+    auth_tests.test_login_persists_only_hashes_and_cookie_attributes_and_me(backend, role=role)
 
 
 def test_activity_under_writer(backend):
