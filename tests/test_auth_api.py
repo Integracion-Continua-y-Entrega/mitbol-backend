@@ -19,6 +19,7 @@ from app.core.auth_http import cookie_name
 from app.core.auth_errors import AuthError
 from app.core.config import Settings
 from app.core.passwords import hash_password, verify_password
+from app.core.session_tokens import generate_session_token, hash_session_token
 from app.db.database import get_db
 from app.main import create_app
 from app.models import AccountSession, AuditEvent, Employee, EmployeeRole, Person, PersonalAccount, Role
@@ -240,9 +241,12 @@ def test_activity_renewal_is_controlled_and_never_extends_absolute(backend):
     assert backend.client.get("/api/auth/me").status_code == 401
 
 
-@pytest.mark.parametrize("path", ["logout", "logout-all", "change-password"])
-def test_post_operations_require_origin_and_csrf(backend, path):
-    response = login(backend)
+@pytest.mark.parametrize("path,role", [
+    ("logout", "admin"), ("logout", "staff"), ("logout", "customer"),
+    ("logout-all", "admin"), ("change-password", "admin"),
+])
+def test_post_operations_require_origin_and_csrf(backend, path, role):
+    response = login(backend, role)
     payload = {"current_password": PASSWORD, "new_password": NEW_PASSWORD} if path == "change-password" else {}
     for headers in ({}, {"Origin": ORIGIN}, {"Origin": ORIGIN, "X-CSRF-Token": "wrong"},
                     {"Origin": "null", "X-CSRF-Token": response.json()["csrf_token"]},
@@ -251,15 +255,63 @@ def test_post_operations_require_origin_and_csrf(backend, path):
     assert backend.client.get("/api/auth/me").status_code == 200
 
 
-def test_logout_revokes_and_replay_fails(backend):
-    response = login(backend)
+@pytest.mark.parametrize("role", ["admin", "staff", "customer"])
+def test_logout_revokes_and_replay_fails(backend, role):
+    response = login(backend, role)
+    assert response.status_code == 200
     token = token_cookie(backend)
-    result = backend.client.post("/api/auth/logout", headers=csrf_headers(response), json={})
-    assert result.status_code == 204 and "Max-Age=0" in result.headers["set-cookie"]
-    backend.client.cookies.set(cookie_name(backend.config), token)
-    assert backend.client.get("/api/auth/me").status_code == 401
+    with TestClient(backend.app, base_url="http://localhost:8000", client=("127.0.0.1", 54326)) as other:
+        assert login(backend, role, client=other).status_code == 200
+        other_token = token_cookie(backend, other)
+        result = backend.client.post("/api/auth/logout", headers=csrf_headers(response), json={})
+        assert result.status_code == 204
+        assert "Max-Age=0" in result.headers["set-cookie"]
+        assert "HttpOnly" in result.headers["set-cookie"] and "Path=/" in result.headers["set-cookie"]
+        assert result.headers["cache-control"] == "no-store"
+        assert cookie_name(backend.config) not in backend.client.cookies
+        assert backend.client.get("/api/auth/me").status_code == 401
+        replay_headers = {**csrf_headers(response), "Cookie": f"{cookie_name(backend.config)}={token}"}
+        for path in ("/api/auth/me", "/api/auth/csrf", "/api/admin/tags"):
+            assert backend.client.get(path, headers=replay_headers).status_code == 401
+        assert backend.client.post("/api/auth/logout", headers=replay_headers, json={}).status_code == 401
+        assert other.get("/api/auth/me").status_code == 200
     with backend.sessions() as db:
-        assert db.scalar(select(AccountSession)).revocation_reason == "logout"
+        current = db.scalar(select(AccountSession).where(AccountSession.token_hash == hash_session_token(token)))
+        assert current.revoked_at is not None and current.revocation_reason == "logout"
+        other_session = db.scalar(select(AccountSession).where(AccountSession.token_hash == hash_session_token(other_token)))
+        assert other_session.revoked_at is None
+        assert db.get(PersonalAccount, backend.ids[role][0]).auth_version == 0
+
+
+@pytest.mark.parametrize("condition", ["idle_expired", "absolute_expired", "unknown", "revoked"])
+def test_logout_rejects_expired_or_invalid_session_and_clears_cookie(backend, condition):
+    response = login(backend, "customer")
+    assert response.status_code == 200
+    token = token_cookie(backend)
+    if condition == "idle_expired":
+        backend.now.value += timedelta(seconds=backend.config.auth_idle_seconds)
+    elif condition == "absolute_expired":
+        with backend.sessions.begin() as db:
+            row = db.scalar(select(AccountSession))
+            row.idle_expires_at = row.expires_at
+        backend.now.value += timedelta(seconds=backend.config.auth_absolute_seconds)
+    elif condition == "unknown":
+        token = generate_session_token().value
+    else:
+        with backend.sessions.begin() as db:
+            row = db.scalar(select(AccountSession))
+            row.revoked_at, row.revocation_reason = backend.now.value, "synthetic_revocation"
+    headers = {**csrf_headers(response), "Cookie": f"{cookie_name(backend.config)}={token}"}
+    result = backend.client.post("/api/auth/logout", headers=headers, json={})
+    assert result.status_code == 401
+    assert result.json() == {"detail": "La sesión no es válida o ha expirado."}
+    assert "Max-Age=0" in result.headers["set-cookie"]
+    assert result.headers["cache-control"] == "no-store"
+    assert cookie_name(backend.config) not in backend.client.cookies
+    with backend.sessions() as db:
+        row = db.scalar(select(AccountSession))
+        assert (row.revoked_at is None) == (condition == "unknown")
+        assert db.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.action == "auth.logout")) == 0
 
 
 def test_logout_all_revokes_other_devices(backend):
@@ -456,14 +508,17 @@ def test_https_profile_uses_secure_host_cookie_and_http_is_rejected(backend):
         assert "Secure" in response.headers["set-cookie"] and "HttpOnly" in response.headers["set-cookie"]
 
 
-def test_missing_or_malformed_cookie_rejected_without_database_and_alternate_headers_ignored(backend, monkeypatch):
+@pytest.mark.parametrize("method,path", [("GET", "/api/auth/me"), ("POST", "/api/auth/logout")])
+def test_missing_or_malformed_cookie_rejected_without_database_and_alternate_headers_ignored(backend, monkeypatch, method, path):
     def forbidden():
         raise AssertionError("Una cookie ausente o mal formada no debe consultar PostgreSQL")
     monkeypatch.setattr(backend.service, "sessions", forbidden)
     for headers in ({}, {"Authorization": "Bearer synthetic", "X-Admin-Key": "synthetic"},
                     {"Cookie": f"{cookie_name(backend.config)}=malformed"}):
-        result = backend.client.get("/api/auth/me?session=synthetic", headers=headers)
+        result = backend.client.request(method, path + "?session=synthetic", headers={"Origin": ORIGIN, **headers},
+                                        json={} if method == "POST" else None)
         assert result.status_code == 401
+        assert "Max-Age=0" in result.headers["set-cookie"]
 
 
 def test_email_case_and_spacing_share_the_same_limit(backend):

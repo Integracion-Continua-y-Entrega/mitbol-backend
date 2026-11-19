@@ -352,6 +352,16 @@ def test_login_under_writer(backend, role):
     auth_tests.test_login_persists_only_hashes_and_cookie_attributes_and_me(backend, role=role)
 
 
+@pytest.mark.parametrize("role", ["admin", "staff", "customer"])
+def test_logout_under_writer(backend, role):
+    auth_tests.test_logout_revokes_and_replay_fails(backend, role=role)
+
+
+@pytest.mark.parametrize("condition", ["idle_expired", "absolute_expired", "unknown", "revoked"])
+def test_invalid_session_logout_under_writer(backend, condition):
+    auth_tests.test_logout_rejects_expired_or_invalid_session_and_clears_cookie(backend, condition=condition)
+
+
 def test_activity_under_writer(backend):
     auth_tests.test_activity_renewal_is_controlled_and_never_extends_absolute(backend)
 
