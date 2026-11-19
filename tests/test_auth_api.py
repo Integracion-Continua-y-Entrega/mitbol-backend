@@ -43,14 +43,16 @@ def backend(auth_database, password_hash):
     suffix = uuid4().hex[:10]
     ids, emails = {}, {}
     with sessions.begin() as db:
-        for code in ("admin", "staff"):
+        for code in ("admin", "staff", "customer"):
             person = Person(name=f"Persona HTTP sintética {code}", phone="0000000000")
             account = PersonalAccount(person=person, email=f"{code}+{suffix}@example.test", password_hash=password_hash, is_active=True)
-            employee = Employee(person=person, employee_code=f"{code}-{suffix}", hired_at=date(2026, 1, 1), is_active=True)
-            db.add_all([account, employee])
+            db.add(account)
+            if code != "customer":
+                db.add(Employee(person=person, employee_code=f"{code}-{suffix}", hired_at=date(2026, 1, 1), is_active=True))
             db.flush()
-            role_id = db.scalar(select(Role.role_id).where(Role.code == code))
-            db.add(EmployeeRole(person_id=person.person_id, role_id=role_id))
+            if code != "customer":
+                role_id = db.scalar(select(Role.role_id).where(Role.code == code))
+                db.add(EmployeeRole(person_id=person.person_id, role_id=role_id))
             ids[code], emails[code] = (account.account_id, person.person_id), account.email
     config = Settings(_env_file=None, app_env="test", database_url="postgresql://unused@localhost/unused",
         admin_enabled=False, auth_enabled=True, auth_catalog_enabled=True, auth_images_enabled=True,
@@ -103,8 +105,9 @@ def token_cookie(backend, client=None):
     return (client or backend.client).cookies.get(cookie_name(backend.config))
 
 
-def test_login_persists_only_hashes_and_cookie_attributes_and_me(backend):
-    response = login(backend)
+@pytest.mark.parametrize("role", ["admin", "staff", "customer"])
+def test_login_persists_only_hashes_and_cookie_attributes_and_me(backend, role):
+    response = login(backend, role, email="  " + backend.emails[role].upper() + "  ")
     assert response.status_code == 200, response.text
     payload = response.json()
     token = token_cookie(backend)
@@ -113,30 +116,40 @@ def test_login_persists_only_hashes_and_cookie_attributes_and_me(backend):
     assert "Secure" not in cookie and "Domain=" not in cookie
     assert "Max-Age=28800" in cookie and response.headers["cache-control"] == "no-store"
     assert token not in response.text and "password_hash" not in response.text and "session_id" not in response.text
-    assert payload["user"]["roles"] == ["admin"]
+    user = payload["user"]
+    assert user["account_id"] == backend.ids[role][0]
+    assert user["person_id"] == backend.ids[role][1]
+    assert user["email"] == backend.emails[role]
+    assert user["name"] == f"Persona HTTP sintética {role}"
+    assert user["roles"] == ([] if role == "customer" else [role])
+    if role == "customer":
+        assert user["permissions"] == []
     with backend.sessions() as db:
         row = db.scalar(select(AccountSession))
         assert len(row.token_hash) == 64 and row.token_hash != token
         assert row.csrf_token_hash != payload["csrf_token"]
-        assert db.get(PersonalAccount, backend.ids["admin"][0]).last_login_at is not None
+        assert db.get(PersonalAccount, backend.ids[role][0]).last_login_at is not None
+        if role == "customer":
+            assert db.get(Employee, backend.ids[role][1]) is None
         assert db.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.outcome == "success")) == 1
     me = backend.client.get("/api/auth/me", headers={"Origin": ORIGIN})
     assert me.status_code == 200 and me.json()["user"] == payload["user"]
     assert backend.client.get("/api/auth/csrf").json() == {"csrf_token": payload["csrf_token"]}
 
 
-@pytest.mark.parametrize("condition", ["wrong_password", "missing", "inactive", "employee_disabled", "no_employee"])
-def test_login_denials_are_identical_and_create_no_session(backend, condition):
-    if condition in {"inactive", "employee_disabled", "no_employee"}:
+@pytest.mark.parametrize("role,condition", [
+    ("admin", "wrong_password"), ("admin", "missing"), ("admin", "inactive"),
+    ("admin", "employee_disabled"), ("customer", "wrong_password"),
+    ("customer", "missing"), ("customer", "inactive"),
+])
+def test_login_denials_are_identical_and_create_no_session(backend, role, condition):
+    if condition in {"inactive", "employee_disabled"}:
         with backend.sessions.begin() as db:
             if condition == "inactive":
-                db.execute(update(PersonalAccount).where(PersonalAccount.account_id == backend.ids["admin"][0]).values(is_active=False))
-            elif condition == "employee_disabled":
-                db.execute(update(Employee).where(Employee.person_id == backend.ids["admin"][1]).values(is_active=False))
+                db.execute(update(PersonalAccount).where(PersonalAccount.account_id == backend.ids[role][0]).values(is_active=False))
             else:
-                db.execute(delete(EmployeeRole).where(EmployeeRole.person_id == backend.ids["admin"][1]))
-                db.execute(delete(Employee).where(Employee.person_id == backend.ids["admin"][1]))
-    response = login(backend, password="incorrecta" if condition == "wrong_password" else PASSWORD,
+                db.execute(update(Employee).where(Employee.person_id == backend.ids[role][1]).values(is_active=False))
+    response = login(backend, role, password="incorrecta" if condition == "wrong_password" else PASSWORD,
                      email="unknown@example.test" if condition == "missing" else None)
     assert response.status_code == 401 and response.json() == {"detail": "Credenciales inválidas."}
     with backend.sessions() as db:
@@ -158,13 +171,39 @@ def test_dummy_hash_is_used_for_unknown_account(backend, monkeypatch):
 
 
 @pytest.mark.parametrize("role,path,status", [("admin", "description", 200), ("staff", "description", 403),
-                                               ("admin", "availability", 200), ("staff", "availability", 200)])
+                                               ("admin", "availability", 200), ("staff", "availability", 200),
+                                               ("customer", "description", 403), ("customer", "availability", 403)])
 def test_permission_dependencies_on_isolated_routes(backend, role, path, status):
     response = login(backend, role)
     assert response.status_code == 200
     result = backend.client.post(f"/api/_test/{path}", headers=csrf_headers(response), json={})
     assert result.status_code == status, result.text
     assert backend.client.get("/api/_test/current").status_code == 200
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/admin/tags"),
+    ("GET", "/api/admin/products/1/availability"),
+    ("PATCH", "/api/admin/products/1/availability"),
+    ("PATCH", "/api/admin/products/1/description"),
+    ("POST", "/api/admin/variants/1/images"),
+])
+def test_customer_cannot_access_real_admin_routes(backend, method, path):
+    response = login(backend, "customer")
+    assert response.status_code == 200
+    result = backend.client.request(method, path, headers=csrf_headers(response), content=b"invalid body")
+    assert result.status_code == 403
+    assert result.json() == {"detail": "No tienes permiso para esta operación."}
+    assert backend.client.get("/api/auth/me").status_code == 200
+
+
+@pytest.mark.parametrize("field,value", [("roles", ["admin", "staff"]), ("permissions", ["catalog:read"])])
+def test_customer_cannot_supply_roles_or_permissions_at_login(backend, field, value):
+    response = backend.client.post("/api/auth/login", headers={"Origin": ORIGIN, "X-CSRF-Protection": "1"},
+        json={"email": backend.emails["customer"], "password": PASSWORD, field: value})
+    assert response.status_code == 422
+    with backend.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(AccountSession)) == 0
 
 
 def test_real_admin_routes_require_permissions_and_public_menu_never_requires_cookie(backend):
@@ -261,20 +300,25 @@ def test_wrong_current_password_does_not_change_hash_or_invalidate_session(backe
         assert db.get(PersonalAccount, backend.ids["admin"][0]).password_hash == before
 
 
-@pytest.mark.parametrize("change", ["auth_version", "inactive", "employee_disabled", "roles", "hash"])
-def test_observed_security_changes_invalidate_existing_session(backend, change):
-    response = login(backend)
+@pytest.mark.parametrize("role,change", [
+    ("admin", "auth_version"), ("admin", "inactive"), ("admin", "employee_disabled"),
+    ("admin", "roles"), ("admin", "hash"), ("customer", "auth_version"),
+    ("customer", "inactive"), ("customer", "hash"),
+])
+def test_observed_security_changes_invalidate_existing_session(backend, role, change):
+    response = login(backend, role)
+    assert response.status_code == 200
     with backend.sessions.begin() as db:
         if change == "auth_version":
-            db.execute(update(PersonalAccount).where(PersonalAccount.account_id == backend.ids["admin"][0]).values(auth_version=1))
+            db.execute(update(PersonalAccount).where(PersonalAccount.account_id == backend.ids[role][0]).values(auth_version=1))
         elif change == "inactive":
-            db.execute(update(PersonalAccount).where(PersonalAccount.account_id == backend.ids["admin"][0]).values(is_active=False))
+            db.execute(update(PersonalAccount).where(PersonalAccount.account_id == backend.ids[role][0]).values(is_active=False))
         elif change == "employee_disabled":
-            db.execute(update(Employee).where(Employee.person_id == backend.ids["admin"][1]).values(is_active=False))
+            db.execute(update(Employee).where(Employee.person_id == backend.ids[role][1]).values(is_active=False))
         elif change == "hash":
-            db.execute(update(PersonalAccount).where(PersonalAccount.account_id == backend.ids["admin"][0]).values(password_hash=hash_password(NEW_PASSWORD)))
+            db.execute(update(PersonalAccount).where(PersonalAccount.account_id == backend.ids[role][0]).values(password_hash=hash_password(NEW_PASSWORD)))
         else:
-            db.execute(delete(EmployeeRole).where(EmployeeRole.person_id == backend.ids["admin"][1]))
+            db.execute(delete(EmployeeRole).where(EmployeeRole.person_id == backend.ids[role][1]))
     assert backend.client.get("/api/auth/me").status_code == 401
     with backend.sessions() as db:
         assert db.scalar(select(AccountSession)).revoked_at is not None
