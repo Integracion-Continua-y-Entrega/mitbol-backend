@@ -14,13 +14,13 @@ class ScopedCORSMiddleware:
             allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
             allow_headers=["Content-Type", "X-CSRF-Protection", "X-CSRF-Token"], expose_headers=["Retry-After"])
             if config.auth_enabled else self.public)
-        self.cart_validation = CORSMiddleware(app, allow_origins=config.cors_origins,
+        self.public_validation = CORSMiddleware(app, allow_origins=config.cors_origins,
             allow_credentials=False, allow_methods=["POST"], allow_headers=["Content-Type"])
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
-        if path == "/api/cart/validate":
-            await self.cart_validation(scope, receive, send)
+        if path in {"/api/cart/validate", "/api/order-modality/validate"}:
+            await self.public_validation(scope, receive, send)
             return
         private = any(path == prefix or path.startswith(prefix + "/") for prefix in ("/api/auth", "/api/admin"))
         await (self.private if private else self.public)(scope, receive, send)
