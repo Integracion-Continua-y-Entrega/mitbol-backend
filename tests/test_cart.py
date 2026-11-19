@@ -174,7 +174,11 @@ def test_cart_catalog_errors_are_sanitized(api_app, monkeypatch, caplog, error_t
 
 
 @pytest.mark.parametrize("mode", ["public", "auth", "legacy_admin"])
-def test_cart_json_is_available_to_react_without_broadening_other_cors_routes(mode):
+@pytest.mark.parametrize("path,payload", [
+    (PATH, {"items": []}),
+    ("/api/order-modality/validate", {"modality": "dine_in", "name": "Alias"}),
+])
+def test_cart_json_is_available_to_react_without_broadening_other_cors_routes(mode, path, payload):
     origin = "http://localhost:5173"
     if mode == "public":
         config = cloud_settings(cors_origins=[origin])
@@ -185,15 +189,15 @@ def test_cart_json_is_available_to_react_without_broadening_other_cors_routes(mo
                           admin_enabled=True, admin_api_key="synthetic-local-key-" * 3, cors_origins=[origin])
     app = create_app(config)
     with TestClient(app, base_url="http://localhost:8000", client=("127.0.0.1", 54350)) as client:
-        preflight = client.options(PATH, headers={"Origin": origin, "Access-Control-Request-Method": "POST",
+        preflight = client.options(path, headers={"Origin": origin, "Access-Control-Request-Method": "POST",
                                                   "Access-Control-Request-Headers": "content-type"})
         assert preflight.status_code == 200
-        response = client.post(PATH, headers={"Origin": origin}, json={"items": []})
+        response = client.post(path, headers={"Origin": origin}, json=payload)
         assert response.status_code == 200
         for result in (preflight, response):
             assert result.headers["access-control-allow-origin"] == origin
             assert "access-control-allow-credentials" not in result.headers
-        assert client.options(PATH, headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"}).status_code == 400
+        assert client.options(path, headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"}).status_code == 400
         if mode != "legacy_admin":
             assert client.options("/api/menu", headers={"Origin": origin, "Access-Control-Request-Method": "POST"}).status_code == 400
         if mode == "auth":
