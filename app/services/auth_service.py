@@ -1,4 +1,4 @@
-"""Sesiones administrativas locales. El llamador nunca recibe hashes de cuenta."""
+"""Sesiones de cuentas personales. El llamador nunca recibe hashes de cuenta."""
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -121,12 +121,16 @@ class AuthService:
             employee, roles = repo.employee_and_roles(db, account.person_id) if account else (None, [])
             with self.password_work.acquire():
                 correct = verify_password(password, account.password_hash if account else self._dummy_hash)
-            if not correct or not account or not account.is_active or not employee or not employee.is_active:
+            # Una cuenta sin empleado puede autenticarse sin roles administrativos.
+            # Se conserva el bloqueo de empleados desactivados.
+            if (not correct or not account or not account.is_active
+                    or (employee is not None and not employee.is_active)):
                 self.audit(db, "auth.login", "denied", request_id, code="INVALID_CREDENTIALS")
                 denied = True
             else:
                 now = self.now()
-                permissions = permissions_for_roles((role.code for role in roles), employee_active=True)
+                permissions = permissions_for_roles(
+                    (role.code for role in roles), employee_active=bool(employee and employee.is_active))
                 token = generate_session_token()
                 csrf = csrf_for_context(token.value, account, employee, roles, permissions)
                 expires, idle = self.policy.deadlines(now)
@@ -162,7 +166,7 @@ class AuthService:
         row = repo.lock_session(db, digest) if account else None
         now = self.now()
         permissions = permissions_for_roles((role.code for role in roles), employee_active=bool(employee and employee.is_active))
-        valid = bool(row and account and employee and employee.is_active and session_is_valid(
+        valid = bool(row and account and (employee is None or employee.is_active) and session_is_valid(
             row, account_active=account.is_active, current_auth_version=account.auth_version, now=now))
         csrf = csrf_for_context(token, account, employee, roles, permissions) if valid else ""
         valid = valid and bool(row.csrf_token_hash and compare_digest(sha256(csrf.encode()).hexdigest(), row.csrf_token_hash))
