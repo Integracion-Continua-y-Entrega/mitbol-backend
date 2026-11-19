@@ -9,10 +9,53 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.schemas.menu import MenuCategoriesResponse, MenuErrorResponse, MenuProductDetailResponse, MenuPublicConfigResponse, MenuResponse, MenuTag
-from app.services import menu_service, menu_tags
+from app.schemas.product_options import ProductSelectionInput, ProductSelectionResponse
+from app.services import menu_service, menu_tags, product_options_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Menú"])
+
+
+@router.get(
+    "/menu/{product_id}/selection",
+    response_model=ProductSelectionResponse,
+    summary="Validar una variante y sus complementos",
+    description=(
+        "Consulta pública sin escrituras. Recibe product_variant_id y complement_ids repetidos por opción. "
+        "Verifica pertenencia y disponibilidad utilizando el catálogo vigente. "
+        "Calcula el importe de una unidad con precios de PostgreSQL; no recibe precios del navegador. "
+        "Los complementos son opcionales y no se presuponen mínimos, máximos ni grupos obligatorios. "
+        "Devuelve importes decimales exactos; no crea carrito ni pedido."
+    ),
+    responses={
+        404: {"model": MenuErrorResponse, "description": "Producto inexistente o inactivo."},
+        409: {"model": MenuErrorResponse, "description": "Producto, variante u opción no disponibles."},
+        422: {"description": "Identificadores o configuración inválidos."},
+        500: {"model": MenuErrorResponse, "description": "Error interno del catálogo."},
+        503: {"model": MenuErrorResponse, "description": "PostgreSQL temporalmente no disponible."},
+    },
+)
+def validate_product_selection(
+    product_id: Annotated[int, Path(ge=1)],
+    selection: Annotated[ProductSelectionInput, Query()],
+    response: Response,
+    db: Session = Depends(get_db),
+) -> ProductSelectionResponse:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return product_options_service.validate_product_selection(db, product_id, selection)
+    except menu_service.MenuProductNotFoundError:
+        raise HTTPException(404, "Producto no encontrado.") from None
+    except product_options_service.UnavailableSelectionError as error:
+        raise HTTPException(409, str(error)) from None
+    except product_options_service.InvalidSelectionError as error:
+        raise HTTPException(422, str(error)) from None
+    except menu_service.MenuUnavailableError:
+        raise HTTPException(503, "La selección del producto no está disponible temporalmente.") from None
+    except Exception as error:
+        cause = error.__cause__ if isinstance(error, menu_service.MenuReadError) else error
+        logger.error("Falló la validación de opciones (%s).", type(cause).__name__)
+        raise HTTPException(500, "No fue posible validar la selección del producto.") from None
 
 
 @router.get(
