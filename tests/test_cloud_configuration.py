@@ -69,11 +69,15 @@ def test_public_cloud_starts_without_loyverse_and_publishes_no_writes(monkeypatc
         schema = client.get("/openapi.json").json()
         assert set(schema["paths"]["/api/cart/validate"]) == {"post"}
         assert client.post("/api/cart/validate", json={"items": []}).json() == {"valid": True, "items": []}
+        assert set(schema["paths"]["/api/cart/summary"]) == {"post"}
+        assert client.post("/api/cart/summary", json={"items": []}).json() == {
+            "currency": "MXN", "items": [], "subtotal": "0.00", "discount_total": "0.00",
+            "total": "0.00", "discounts_status": "not_integrated"}
         assert set(schema["paths"]["/api/order-modality/validate"]) == {"post"}
         assert client.post("/api/order-modality/validate", json={"modality": "dine_in", "name": "Alias"}).json() == {
             "valid": True, "data": {"modality": "dine_in", "name": "Alias"}}
         assert all(set(methods) == {"get"} for path, methods in schema["paths"].items()
-                   if path not in {"/api/cart/validate", "/api/order-modality/validate"})
+                   if path not in {"/api/cart/validate", "/api/cart/summary", "/api/order-modality/validate"})
         assert "securitySchemes" not in schema["components"]
         assert "PRIVATE_PASSWORD" not in json.dumps(schema)
     assert not config.image_storage_root.exists()
