@@ -108,7 +108,7 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
     output = StringIO()
     command.upgrade(alembic_config(output), "head", sql=True)
     sql = output.getvalue()
-    assert sql.count("CREATE TABLE") == 21  # Catálogo, descuentos, identidad, límites, cola y versión.
+    assert sql.count("CREATE TABLE") == 25  # Catálogo, identidad, límites, cola, pedidos y versión.
     assert 'CREATE TABLE public."SyncRuns"' in sql
     for name in CATALOG_TABLES | ENRICHMENT_TABLES:
         assert f'CREATE TABLE "{name}"' in sql
@@ -125,7 +125,8 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
 
 def test_hu007_extends_hu005_without_changing_its_ancestry():
     scripts = ScriptDirectory.from_config(alembic_config())
-    assert scripts.get_heads() == ["20261115_0008"]
+    assert scripts.get_heads() == ["20261119_0009"]
+    assert scripts.get_revision("20261119_0009").down_revision == "20261115_0008"
     assert scripts.get_revision("20261114_0007").down_revision == "20261111_0006"
     assert scripts.get_revision("20261111_0006").down_revision == "20261106_0005"
     assert scripts.get_revision("20261106_0005").down_revision == AUTH_REVISION
