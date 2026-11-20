@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     auth_cookie_secure: bool = True
     auth_cookie_partitioned: bool = False
     auth_public_origin: str | None = None
+    auth_recovery_url: str | None = Field(default=None, repr=False)
     auth_proxy_mode: Literal["direct", "render"] = "direct"
     auth_absolute_seconds: int = Field(default=28_800, gt=0, le=28_800)
     auth_idle_seconds: int = Field(default=1_800, gt=0, le=28_800)
@@ -83,12 +84,12 @@ class Settings(BaseSettings):
     def valid_environment(cls, value):
         return environment_mode(value)
 
-    @field_validator("public_menu_url")
+    @field_validator("public_menu_url", "auth_recovery_url")
     @classmethod
-    def valid_public_menu_url(cls, value):
+    def valid_frontend_url(cls, value, info):
         if value is None or value == "":
             return None
-        message = "PUBLIC_MENU_URL requiere una URL HTTP(S) sin credenciales, query ni fragmento; HTTP sólo en loopback."
+        message = f"{info.field_name.upper()} requiere una URL HTTP(S) sin credenciales, query ni fragmento; HTTP sólo en loopback."
         if value != value.strip() or "\\" in value or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
             raise ValueError(message)
         try:
@@ -141,6 +142,9 @@ class Settings(BaseSettings):
             if self.public_menu_url and (urlsplit(self.public_menu_url).scheme != "https"
                     or urlsplit(self.public_menu_url).hostname in {"localhost", "127.0.0.1", "::1"}):
                 raise ValueError("PUBLIC_MENU_URL cloud requiere un destino HTTPS remoto.")
+            if self.auth_recovery_url and (urlsplit(self.auth_recovery_url).scheme != "https"
+                    or urlsplit(self.auth_recovery_url).hostname in {"localhost", "127.0.0.1", "::1"}):
+                raise ValueError("AUTH_RECOVERY_URL cloud requiere un destino HTTPS remoto.")
             if "cors_origins" not in self.model_fields_set or not self.cors_origins:
                 raise ValueError("Cloud requiere CORS_ORIGINS explícito y no vacío.")
             for origin in self.cors_origins:

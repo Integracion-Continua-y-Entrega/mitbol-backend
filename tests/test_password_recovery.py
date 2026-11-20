@@ -33,6 +33,7 @@ def backend(auth_backend):
     with b.sessions.kw["bind"].begin() as connection:
         command.upgrade(config_for(connection), "20261119_0011")
     b.deliveries = []
+    b.service.recovery_url = "http://localhost:5173/recuperar-contrasena"
     b.service.recovery_delivery = b.deliveries.append  # Captura privada de pruebas; no simula un envío real.
     try:
         yield b
