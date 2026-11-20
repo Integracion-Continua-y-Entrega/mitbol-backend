@@ -95,6 +95,8 @@ class AuthRequestGuard:
                     raise AuthError(415, "La autenticación requiere JSON.", code="JSON_REQUIRED")
                 if scope["path"] == "/api/auth/login" and request.headers.get("x-csrf-protection") != "1":
                     raise AuthError(403, "Protección de inicio de sesión requerida.", code="LOGIN_CSRF")
+                if scope["path"] == "/api/auth/register" and request.headers.get("x-csrf-protection") != "1":
+                    raise AuthError(403, "Protección de registro requerida.", code="REGISTER_CSRF")
         except AuthError as error:
             await auth_error_response(error, self.config)(scope, receive, send)
             return

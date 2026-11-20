@@ -31,7 +31,7 @@ class PostgresAttemptLimiter:
                         separators=(",", ":")).encode(), sha256).hexdigest()
 
     def admit(self, identity, ip, *, operation="login"):
-        if operation not in {"login", "change_password"}:
+        if operation not in {"login", "change_password", "register"}:
             raise ValueError("Operación de autenticación no admitida.")
         identity = normalize_email(identity)
         address = ip_address(ip)

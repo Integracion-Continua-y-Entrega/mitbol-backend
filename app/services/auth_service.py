@@ -10,7 +10,7 @@ from secrets import compare_digest, token_urlsafe
 from uuid import uuid4
 
 from sqlalchemy import select, text, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.auth_errors import AuthError, invalid_session
 from app.core.auth_limiter import LocalAttemptLimiter, PasswordWorkGate
@@ -19,7 +19,7 @@ from app.core.permissions import permissions_for_roles
 from app.core.session_policy import SessionPolicy, session_is_valid, utc_datetime
 from app.core.session_tokens import generate_session_token, hash_session_token
 from app.db.connection import DatabaseTargetError, validate_local_connection
-from app.models import AccountSession, AuditEvent, Person
+from app.models import AccountSession, AuditEvent, Person, PersonalAccount
 from app.repositories import auth as repo
 from app.services.admin_transaction import recover_image_storages
 
@@ -112,6 +112,26 @@ class AuthService:
         name = db.scalar(select(Person.name).where(Person.person_id == account.person_id))
         return Principal(account.account_id, account.person_id, account.email, name,
                          tuple(sorted(role.code for role in roles)), permissions)
+
+    def register(self, data, *, ip, request_id):
+        """Alta de cliente sin empleado, roles ni sesión automática."""
+        self.limiter.admit(data.email, ip, operation="register")
+        with self.password_work.acquire():
+            encoded = hash_password(data.password.get_secret_value())
+        with self.transaction() as db:
+            account = PersonalAccount(person=Person(name=data.name, phone=data.phone), email=data.email,
+                                      password_hash=encoded, is_active=True)
+            db.add(account)
+            try:
+                # UNIQUE sobre el correo normalizado resuelve también altas simultáneas.
+                db.flush()
+            except IntegrityError as error:
+                constraint = getattr(getattr(error.orig, "diag", None), "constraint_name", None)
+                if getattr(error.orig, "pgcode", None) == "23505" and constraint == "uq_PersonalAccounts_email":
+                    raise AuthError(409, "Ya existe una cuenta con ese correo.", code="REGISTRATION_DUPLICATE") from None
+                raise
+            self.audit(db, "auth.register", "success", request_id, actor_id=account.account_id)
+            return self.principal(db, account, (), frozenset())
 
     def login(self, email, password, *, ip, request_id, old_token=None):
         self.limiter.admit(email, ip)
