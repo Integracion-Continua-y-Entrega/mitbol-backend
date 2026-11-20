@@ -9,6 +9,7 @@ from app.api.menu import router as menu_router
 from app.api.media import router as media_router
 from app.api.cart import router as cart_router
 from app.api.order_modality import router as order_modality_router
+from app.api.orders import router as orders_router
 from app.core.config import Settings, settings
 from app.core.scoped_cors import ScopedCORSMiddleware
 from app.core.security import ADMIN_SECURITY_DESCRIPTION, AdminRequestGuard
@@ -83,6 +84,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     application.include_router(media_router)
     application.include_router(cart_router)
     application.include_router(order_modality_router)
+    application.include_router(orders_router)
     if config.auth_sync_enabled:
         from app.api.admin_sync import router as sync_router
         application.include_router(sync_router)

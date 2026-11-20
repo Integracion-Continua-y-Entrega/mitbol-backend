@@ -16,9 +16,16 @@ class ScopedCORSMiddleware:
             if config.auth_enabled else self.public)
         self.public_validation = CORSMiddleware(app, allow_origins=config.cors_origins,
             allow_credentials=False, allow_methods=["POST"], allow_headers=["Content-Type"])
+        self.orders = CORSMiddleware(app,
+            allow_origins=list(dict.fromkeys(config.cors_origins + (config.auth_origins if config.auth_enabled else []))),
+            allow_credentials=config.auth_enabled, allow_methods=["POST"],
+            allow_headers=["Content-Type", "Idempotency-Key", "X-CSRF-Token"])
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
+        if path == "/api/orders":
+            await self.orders(scope, receive, send)
+            return
         if path in {"/api/cart/validate", "/api/cart/summary", "/api/order-modality/validate"}:
             await self.public_validation(scope, receive, send)
             return
