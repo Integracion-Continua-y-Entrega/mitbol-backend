@@ -305,6 +305,24 @@ class AuthService:
             if context is not None:
                 recover_image_storages(context.db, self.transaction)
 
+    @staticmethod
+    def profile(context):
+        person = context.db.get(Person, context.account.person_id)
+        return {"account_id": context.account.account_id, "person_id": person.person_id,
+                "email": context.account.email, "name": person.name, "phone": person.phone}
+
+    def update_profile(self, context, data):
+        # authenticated() ya mantiene el lock de la cuenta y exige CSRF.
+        person = context.db.get(Person, context.account.person_id)
+        changes = data.model_dump(exclude_unset=True)
+        for field_name in ("name", "phone"):
+            if field_name in changes:
+                setattr(person, field_name, changes[field_name])
+        person.updated_at = self.now()
+        self.audit(context.db, "auth.update_profile", "success", context.request_id,
+                   actor_id=context.account.account_id, session_id=context.session_id)
+        return self.profile(context)
+
     def logout(self, context, *, all_sessions=False):
         now = self.now()
         if all_sessions:

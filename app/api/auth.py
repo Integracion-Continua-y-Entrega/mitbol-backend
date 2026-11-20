@@ -11,7 +11,7 @@ from app.core.auth_http import clear_session_cookie, cookie_name, login_rate_add
 from app.schemas.auth import (
     CsrfResponse, CustomerRegistrationInput, CustomerRegistrationResponse,
     LoginInput, LoginResponse, PasswordChangeInput, PasswordRecoveryInput,
-    PasswordRecoveryResponse, PasswordResetInput, SessionResponse,
+    PasswordRecoveryResponse, PasswordResetInput, ProfileResponse, ProfileUpdateInput, SessionResponse,
 )
 from app.services.auth_service import Principal
 
@@ -92,6 +92,20 @@ def me(request: Request, response: Response, user: User):
 def csrf(request: Request, response: Response, user: User):
     response.headers["Cache-Control"] = "no-store"
     return {"csrf_token": request.state.auth_context.csrf}
+
+
+@router.get("/profile", response_model=ProfileResponse, summary="Consultar el perfil propio")
+def profile(request: Request, response: Response, user: User):
+    response.headers["Cache-Control"] = "no-store"
+    return request.app.state.auth_service.profile(request.state.auth_context)
+
+
+@router.patch("/profile", response_model=ProfileResponse, summary="Actualizar los datos personales propios",
+              description="Admite name y/o phone; sin campos adicionales ni nulos. El correo es de solo lectura. "
+                          "Requiere sesión, Origin autorizado y X-CSRF-Token. No cambia credenciales ni permisos.")
+def update_profile(payload: ProfileUpdateInput, request: Request, response: Response, user: User):
+    response.headers["Cache-Control"] = "no-store"
+    return request.app.state.auth_service.update_profile(request.state.auth_context, payload)
 
 
 @router.post("/logout", status_code=204)
