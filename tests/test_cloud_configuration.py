@@ -77,8 +77,10 @@ def test_public_cloud_starts_without_loyverse_and_publishes_no_writes(monkeypatc
         assert client.post("/api/order-modality/validate", json={"modality": "dine_in", "name": "Alias"}).json() == {
             "valid": True, "data": {"modality": "dine_in", "name": "Alias"}}
         assert set(schema["paths"]["/api/orders"]) == {"post"}
+        assert set(schema["paths"]["/api/orders/{order_id}/cancel"]) == {"post"}
         assert all(set(methods) == {"get"} for path, methods in schema["paths"].items()
-                   if path not in {"/api/cart/validate", "/api/cart/summary", "/api/order-modality/validate", "/api/orders"})
+                   if path not in {"/api/cart/validate", "/api/cart/summary", "/api/order-modality/validate", "/api/orders",
+                                   "/api/orders/{order_id}/cancel"})
         assert "securitySchemes" not in schema["components"]
         assert "PRIVATE_PASSWORD" not in json.dumps(schema)
     assert not config.image_storage_root.exists()

@@ -44,3 +44,12 @@ class OrderSubmissionResponse(OrderSummaryResponse):
     created_at: datetime
     data: OrderModalityInput
     tracking: GuestTrackingAccess | None = Field(default=None, repr=False)
+
+
+class OrderCancellationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class OrderCancellationResponse(BaseModel):
+    order_id: UUID
+    status: Literal["Cancelado"] = "Cancelado"

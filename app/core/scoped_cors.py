@@ -23,9 +23,16 @@ class ScopedCORSMiddleware:
         self.order_tracking = CORSMiddleware(app,
             allow_origins=list(dict.fromkeys(config.cors_origins + (config.auth_origins if config.auth_enabled else []))),
             allow_credentials=False, allow_methods=["GET"], allow_headers=["Authorization"])
+        self.order_cancellation = CORSMiddleware(app,
+            allow_origins=list(dict.fromkeys(config.cors_origins + (config.auth_origins if config.auth_enabled else []))),
+            allow_credentials=config.auth_enabled, allow_methods=["POST"],
+            allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"])
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
+        if path.startswith("/api/orders/") and path.endswith("/cancel"):
+            await self.order_cancellation(scope, receive, send)
+            return
         if path.startswith("/api/orders/") and path.endswith("/tracking"):
             await self.order_tracking(scope, receive, send)
             return
