@@ -43,6 +43,7 @@ from app.db.auth_base import AuthBase
 from app.models.auth import AccountSession, AuditEvent, Employee, EmployeeRole, Person, PersonalAccount, Role
 from app.models.auth_limits import AuthRateLimit, AuthRateLimitPolicy
 from app.models.password_recovery import PasswordRecoveryBase, PasswordResetToken
+from app.models.coupon import CouponBase, CustomerCoupon
 from app.models.order import OrderBase, Order, OrderDetail, OrderDetailComplement, RestaurantOrderSettings
 
 __all__ = [
@@ -54,5 +55,6 @@ __all__ = [
     "AccountSession", "AuditEvent",
     "AuthRateLimit", "AuthRateLimitPolicy",
     "PasswordRecoveryBase", "PasswordResetToken",
+    "CouponBase", "CustomerCoupon",
     "OrderBase", "Order", "OrderDetail", "OrderDetailComplement", "RestaurantOrderSettings",
 ]

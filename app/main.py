@@ -50,6 +50,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     application.add_middleware(AdminRequestGuard, config=config)
     if config.auth_enabled:
         from app.api.auth import router as auth_router
+        from app.api.coupons import router as coupon_router
         from app.core.auth_errors import AuthError
         from app.core.auth_http import AuthRequestGuard, auth_error_response
         from app.db.auth_database import auth_session_factory_for
@@ -58,6 +59,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
         application.state.auth_session_factory = auth_session_factory_for(config)
         application.state.auth_service = AuthService(application.state.auth_session_factory, config)
         application.include_router(auth_router)
+        application.include_router(coupon_router)
         application.add_middleware(AuthRequestGuard, config=config)
         # CORS exterior resuelve preflight sin credenciales y decora también errores.
         application.add_middleware(ScopedCORSMiddleware, config=config)
