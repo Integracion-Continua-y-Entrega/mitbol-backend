@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.cart import CartValidationInput
 from app.schemas.order_modality import OrderModalityInput
@@ -25,8 +25,22 @@ class OrderSubmissionInput(BaseModel):
         return value
 
 
+class GuestTrackingAccess(BaseModel):
+    path: str
+    token: str = Field(repr=False, description="Acceso privado del pedido; enviar como Authorization: Bearer <token>.")
+    token_type: Literal["Bearer"] = "Bearer"
+
+
+class OrderTrackingResponse(OrderSummaryResponse):
+    order_id: UUID
+    status: str = Field(description="Estado actual almacenado; consultar de nuevo para obtener cambios.")
+    created_at: datetime
+    modality: Literal["dine_in", "pickup"]
+
+
 class OrderSubmissionResponse(OrderSummaryResponse):
     order_id: UUID
-    status: Literal["Solicitud recibida"]
+    status: str = Field(description="Solicitud recibida al crear; estado vigente al recuperar un envío idempotente.")
     created_at: datetime
     data: OrderModalityInput
+    tracking: GuestTrackingAccess | None = Field(default=None, repr=False)

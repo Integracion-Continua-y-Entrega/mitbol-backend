@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import logging
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import UUID4
@@ -13,12 +13,13 @@ from sqlalchemy.orm import Session
 from app.api.auth_dependencies import get_auth_service
 from app.core.auth_http import cookie_name
 from app.db.connection import DatabaseTargetError
-from app.schemas.orders import OrderSubmissionInput, OrderSubmissionResponse
-from app.services import cart_service, menu_service, order_submission_service
+from app.schemas.orders import OrderSubmissionInput, OrderSubmissionResponse, OrderTrackingResponse
+from app.services import cart_service, menu_service, order_submission_service, order_tracking_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/orders", tags=["Solicitudes de pedido"])
 NO_STORE = {"Cache-Control": "no-store"}
+TRACKING_HEADERS = {**NO_STORE, "Referrer-Policy": "no-referrer"}
 
 
 @dataclass
@@ -65,6 +66,7 @@ def submission_context(request: Request):
         "Repetir clave y contenido devuelve la confirmación histórica; cambiar contenido o cuenta produce 409. "
         "Sin cookie se registra como invitado; con cookie válida se asocia la cuenta y se exige X-CSRF-Token y origen de autenticación autorizado. "
         "Revalida HU-017/HU-016 y recalcula HU-019 antes de guardar. Los descuentos siguen sin integrar. "
+        "Los invitados reciben tracking con path y token privado, estable en reintentos; conservarlo para consultar el pedido. "
         "El estado inicial es Solicitud recibida, pendiente de aceptación; no implica preparación ni pago."
     ),
     responses={
@@ -91,3 +93,38 @@ def submit_order(
     except menu_service.MenuReadError as error:
         logger.error("Falló el catálogo al solicitar un pedido (%s).", type(error).__name__)
         raise HTTPException(503, "El catálogo no está disponible para confirmar la solicitud.", headers=NO_STORE) from None
+
+
+def tracking_database(request: Request):
+    factory = (request.app.state.auth_session_factory if request.app.state.settings.auth_enabled
+               else request.app.state.session_factory)
+    with factory() as db:
+        yield db
+
+
+@router.get(
+    "/{order_id}/tracking", response_model=OrderTrackingResponse,
+    summary="Consultar seguimiento privado de un pedido invitado",
+    description=(
+        "No requiere sesión. Enviar Authorization: Bearer <tracking.token> recibido al registrar el pedido. "
+        "El identificador y la clave de idempotencia por sí solos no autorizan el acceso. "
+        "Devuelve estado actual, modalidad y resumen histórico, sin nombre, teléfono ni datos de cuenta. "
+        "No enviar el token por URL o parámetros de consulta. No modifica el pedido."
+    ),
+    responses={404: {"description": "Pedido o acceso privado no válidos."},
+               503: {"description": "Seguimiento temporalmente no disponible."}},
+)
+def track_order(
+    order_id: UUID, response: Response,
+    db: Annotated[Session, Depends(tracking_database)],
+    authorization: Annotated[str | None, Header(description="Bearer seguido del token privado del pedido.")] = None,
+) -> OrderTrackingResponse:
+    response.headers.update(TRACKING_HEADERS)
+    scheme, _, token = (authorization or "").partition(" ")
+    try:
+        return order_tracking_service.track_guest_order(db, order_id, token if scheme.lower() == "bearer" else None)
+    except order_tracking_service.GuestOrderAccessError:
+        raise HTTPException(404, "Pedido o acceso privado no válidos.", headers=TRACKING_HEADERS) from None
+    except (SQLAlchemyError, DatabaseTargetError) as error:
+        logger.error("Falló la consulta de seguimiento (%s).", type(error).__name__)
+        raise HTTPException(503, "El seguimiento no está disponible temporalmente.", headers=TRACKING_HEADERS) from None

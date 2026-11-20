@@ -29,7 +29,7 @@ from test_menu import add_product, detail_catalog
 
 
 PATH = "/api/orders"
-REVISION = "20261119_0009"
+REVISION = "20261119_0010"
 PREVIOUS = "20261115_0008"
 
 

@@ -20,9 +20,15 @@ class ScopedCORSMiddleware:
             allow_origins=list(dict.fromkeys(config.cors_origins + (config.auth_origins if config.auth_enabled else []))),
             allow_credentials=config.auth_enabled, allow_methods=["POST"],
             allow_headers=["Content-Type", "Idempotency-Key", "X-CSRF-Token"])
+        self.order_tracking = CORSMiddleware(app,
+            allow_origins=list(dict.fromkeys(config.cors_origins + (config.auth_origins if config.auth_enabled else []))),
+            allow_credentials=False, allow_methods=["GET"], allow_headers=["Authorization"])
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
+        if path.startswith("/api/orders/") and path.endswith("/tracking"):
+            await self.order_tracking(scope, receive, send)
+            return
         if path == "/api/orders":
             await self.orders(scope, receive, send)
             return

@@ -23,7 +23,7 @@ def test_consolidated_revision_is_additive_and_offline_sql_has_no_grants():
     config = config_for(output=output)
     command.upgrade(config, f"{PREVIOUS}:{REVISION}", sql=True)
     sql = output.getvalue()
-    assert ScriptDirectory.from_config(config).get_heads() == [REVISION]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20261119_0010"]
     assert sql.count("CREATE TABLE") == 4
     assert all(f'CREATE TABLE "{name}"' in sql for name in TABLES)
     assert not any(operation in sql for operation in ("ALTER TABLE", "DROP TABLE", "CREATE ROLE", "GRANT ", "TRUNCATE"))
@@ -42,6 +42,8 @@ def test_upgrade_matches_models_preserves_catalog_and_downgrade_roundtrips(empty
     command.upgrade(config, REVISION)
     assert set(inspect(db).get_table_names()) == before | TABLES
     assert MigrationContext.configure(db).get_current_heads() == (REVISION,)
+    # El modelo vigente incluye el delta de seguimiento; 0009 conserva su contrato histórico.
+    command.upgrade(config, "20261119_0010")
     assert compare_metadata(MigrationContext.configure(db),
                             [Base.metadata, AuthBase.metadata, SyncBase.metadata, OrderBase.metadata]) == []
     assert db.execute(select(RestaurantOrderSettings.__table__)).one() == (1, False)
