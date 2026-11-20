@@ -7,11 +7,10 @@ from uuid import UUID, uuid4
 from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
+from app.core.session_tokens import generate_session_token
 from app.models.order import Order, OrderDetail, OrderDetailComplement, RestaurantOrderSettings
-from app.schemas.orders import OrderSubmissionInput, OrderSubmissionResponse
-from app.schemas.order_summary import OrderSummaryItem
-from app.schemas.product_options import ProductSelectionResponse, SelectedComplement
-from app.services import order_summary_service
+from app.schemas.orders import GuestTrackingAccess, OrderSubmissionInput, OrderSubmissionResponse
+from app.services import order_summary_service, order_tracking_service
 
 
 class OrderSubmissionError(ValueError):
@@ -26,21 +25,10 @@ def _response(order: Order) -> OrderSubmissionResponse:
     if order.modality == "pickup":
         contact["phone"] = order.requester_phone
     return OrderSubmissionResponse(
+        **order_tracking_service.historical_summary(order).model_dump(mode="python"),
         order_id=order.order_id, status=order.status, created_at=order.created_at, data=contact,
-        subtotal=order.subtotal, discount_total=order.discount_total, total=order.total,
-        items=[OrderSummaryItem(
-            quantity=int(row.quantity), subtotal=row.subtotal,
-            selection=ProductSelectionResponse(
-                product_id=row.product_id, product_name=row.product_name,
-                product_variant_id=row.product_variant_id, variant_name=row.variant_name,
-                base_price=row.base_price, complements_total=row.complements_total, unit_total=row.unit_total,
-                complements=[SelectedComplement(
-                    product_modifier_id=option.product_modifier_id,
-                    product_complement_id=option.product_complement_id,
-                    name=option.name_snapshot, price=option.unit_price,
-                ) for option in row.complements],
-            ),
-        ) for row in order.details],
+        tracking=(GuestTrackingAccess(path=f"/api/orders/{order.order_id}/tracking", token=order.guest_tracking_token)
+                  if order.guest_tracking_token is not None else None),
     )
 
 
@@ -59,6 +47,10 @@ def submit_order(db, payload: OrderSubmissionInput, idempotency_key: UUID, *, ac
     if existing is not None:
         if existing.request_hash != fingerprint:
             raise OrderSubmissionError(409, "La clave de idempotencia ya corresponde a otra solicitud.")
+        # Pedidos anteriores a HU-022 recuperan su acceso sólo con el envío original autorizado.
+        if existing.account_id is None and existing.guest_tracking_token is None:
+            existing.guest_tracking_token = generate_session_token().value
+            db.flush()
         return _response(existing)
 
     settings = db.scalar(select(RestaurantOrderSettings).where(
@@ -68,6 +60,7 @@ def submit_order(db, payload: OrderSubmissionInput, idempotency_key: UUID, *, ac
     summary = order_summary_service.summarize_cart(db, payload.cart)
     order = Order(
         order_id=uuid4(), idempotency_key=idempotency_key, request_hash=fingerprint, account_id=account_id,
+        guest_tracking_token=generate_session_token().value if account_id is None else None,
         modality=payload.data.modality, requester_name=payload.data.name,
         requester_phone=getattr(payload.data, "phone", None),
         subtotal=summary.subtotal, discount_total=summary.discount_total, total=summary.total,

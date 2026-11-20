@@ -125,7 +125,8 @@ def test_upgrade_offline_creates_no_legacy_tables_and_never_connects(monkeypatch
 
 def test_hu007_extends_hu005_without_changing_its_ancestry():
     scripts = ScriptDirectory.from_config(alembic_config())
-    assert scripts.get_heads() == ["20261119_0009"]
+    assert scripts.get_heads() == ["20261119_0010"]
+    assert scripts.get_revision("20261119_0010").down_revision == "20261119_0009"
     assert scripts.get_revision("20261119_0009").down_revision == "20261115_0008"
     assert scripts.get_revision("20261114_0007").down_revision == "20261111_0006"
     assert scripts.get_revision("20261111_0006").down_revision == "20261106_0005"

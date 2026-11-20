@@ -45,11 +45,15 @@ class Order(OrderBase):
                         "AND discount_total <= subtotal AND total = subtotal - discount_total",
                         name="ck_Orders_amounts"),
         CheckConstraint("request_hash ~ '^[0-9a-f]{64}$'", name="ck_Orders_request_hash"),
+        CheckConstraint("guest_tracking_token IS NULL OR (account_id IS NULL AND "
+                        "guest_tracking_token ~ '^[A-Za-z0-9_-]{43}$')", name="ck_Orders_guest_tracking_token"),
     )
 
     order_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     idempotency_key: Mapped[UUID] = mapped_column(Uuid, unique=True)
     request_hash: Mapped[str] = mapped_column(String(64))
+    # Acceso privado recuperable en reintentos idempotentes; nunca incluir en URLs o logs.
+    guest_tracking_token: Mapped[str | None] = mapped_column(String(43), unique=True)
     account_id: Mapped[int | None] = mapped_column(ForeignKey(PersonalAccount.account_id, ondelete="RESTRICT"))
     modality: Mapped[str] = mapped_column(String(20))
     requester_name: Mapped[str] = mapped_column(String(100))
