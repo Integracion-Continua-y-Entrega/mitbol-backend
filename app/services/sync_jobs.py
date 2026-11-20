@@ -8,7 +8,7 @@ from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.connection import DatabaseTargetError
-from app.db.schema_compatibility import validate_bridge_schema
+from app.db.schema_compatibility import BRIDGE_REVISIONS, validate_bridge_schema
 from app.models import Product, ProductComplement, ProductModifier, ProductVariant
 from app.models.sync_run import SyncRun
 from app.services.catalog_errors import (
@@ -20,7 +20,7 @@ from app.services.loyverse_client import (
 from app.services.sync_service import CATALOG_SYNC_LOCK_KEY
 
 SYNC_JOBS_REVISION = "20261115_0008"
-SYNC_JOBS_COMPATIBLE_REVISIONS = frozenset({"20261114_0007", SYNC_JOBS_REVISION})
+SYNC_JOBS_COMPATIBLE_REVISIONS = BRIDGE_REVISIONS
 QUEUE_LOCK_KEY = 0x4D4954424F50
 WORKER_LOCK_KEY = 0x4D4954424F51
 ACTIVE = ("queued", "running", "retry_wait")
@@ -51,7 +51,7 @@ def inspect_queue(db, *, expected_database, expected_host, permission="read"):
     try:
         validate_bridge_schema(connection)
     except DatabaseTargetError:
-        raise CatalogTargetError("HU-010 requiere un esquema puente 0007/0008 completo y verificado.") from None
+        raise CatalogTargetError("HU-010 requiere un esquema compatible 0007–0012 completo y verificado.") from None
     valid = db.scalar(text("""
         SELECT c.relkind = 'r' AND NOT c.relrowsecurity
            AND pg_catalog.has_table_privilege(current_user, c.oid, 'SELECT')

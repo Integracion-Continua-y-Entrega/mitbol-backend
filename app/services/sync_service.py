@@ -23,20 +23,20 @@ from app.services.catalog_errors import (
 from app.services.catalog_probe import CatalogSnapshot, fetch_catalog
 from app.services.catalog_transform import CatalogPlan, transform_catalog
 from app.services.loyverse_client import LoyverseAPIClient
-from app.db.schema_compatibility import validate_bridge_schema
+from app.db.schema_compatibility import BRIDGE_REVISIONS, CATEGORY_REVISIONS, validate_bridge_schema
 
 # Un catálogo por base: todas las instancias del servicio usan la misma clave.
 CATALOG_SYNC_LOCK_KEY = 0x4D4954424F4C
 CATALOG_SCHEMA_REVISION = "20261102_0003"
 CATEGORIES_REVISION = "20261115_0008"
-CATALOG_COMPATIBLE_REVISIONS = frozenset({CATALOG_SCHEMA_REVISION, "20261105_0004", "20261106_0005", "20261111_0006", "20261114_0007", CATEGORIES_REVISION})
+CATALOG_COMPATIBLE_REVISIONS = frozenset({CATALOG_SCHEMA_REVISION, "20261105_0004", "20261106_0005", "20261111_0006", *BRIDGE_REVISIONS})
 
 
 def validate_catalog_revision(connection) -> str:
     heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
     if len(heads) != 1 or heads[0] not in CATALOG_COMPATIBLE_REVISIONS:
-        raise CatalogTargetError("La sincronización requiere 20261102_0003 o una revisión explícitamente compatible hasta 20261115_0008.")
-    if heads[0] == CATEGORIES_REVISION:
+        raise CatalogTargetError("La sincronización requiere 20261102_0003 o una revisión explícitamente compatible hasta 20261119_0012.")
+    if heads[0] in CATEGORY_REVISIONS:
         validate_bridge_schema(connection)
     return heads[0]
 
@@ -117,7 +117,7 @@ class SyncService:
         """
         with self._transaction() as session:
             snapshot = await fetch_catalog(client, self.store_id, include_deleted=True,
-                include_categories=validate_catalog_revision(session.connection()) == CATEGORIES_REVISION)
+                include_categories=validate_catalog_revision(session.connection()) in CATEGORY_REVISIONS)
             result = self._validated_write(session, snapshot)
         return result
 
@@ -129,11 +129,11 @@ class SyncService:
         """
         with self._transaction(read_only=True) as session:
             snapshot = await fetch_catalog(client, self.store_id, include_deleted=True,
-                include_categories=validate_catalog_revision(session.connection()) == CATEGORIES_REVISION)
+                include_categories=validate_catalog_revision(session.connection()) in CATEGORY_REVISIONS)
             return inspect_plan(session, snapshot, self._plan(snapshot))
 
     def _validated_write(self, session: Session, snapshot: CatalogSnapshot) -> dict:
-        if snapshot.categories is not None and validate_catalog_revision(session.connection()) != CATEGORIES_REVISION:
+        if snapshot.categories is not None and validate_catalog_revision(session.connection()) not in CATEGORY_REVISIONS:
             raise CatalogTargetError("Las categorías requieren la migración 20261115_0008 antes de escribir.")
         plan = self._plan(snapshot)
         if self.before_write is not None:

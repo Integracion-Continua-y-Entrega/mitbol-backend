@@ -19,12 +19,12 @@ from app.services.discount_quarantine import DiscountQuarantineError, write_quar
 from app.services.discount_transform import DiscountValidationError, discount_identity
 from app.services.discount_writer import write_discount_batch
 from app.services.loyverse_client import LoyverseAPIClient
-from app.db.schema_compatibility import validate_bridge_schema
+from app.db.schema_compatibility import BRIDGE_REVISIONS, CATEGORY_REVISIONS, validate_bridge_schema
 from app.services.sync_service import CATALOG_SYNC_LOCK_KEY
 
 
 DISCOUNT_SCHEMA_REVISION = "20261111_0006"
-DISCOUNT_COMPATIBLE_REVISIONS = frozenset({DISCOUNT_SCHEMA_REVISION, "20261114_0007", "20261115_0008"})
+DISCOUNT_COMPATIBLE_REVISIONS = frozenset({DISCOUNT_SCHEMA_REVISION, *BRIDGE_REVISIONS})
 
 
 class DiscountSyncError(ValueError):
@@ -77,8 +77,8 @@ class DiscountSyncService:
                 raise DiscountSyncError("La conexión real no coincide con la base autorizada.")
             heads = MigrationContext.configure(connection, opts={"version_table_schema": "public"}).get_current_heads()
             if len(heads) != 1 or heads[0] not in DISCOUNT_COMPATIBLE_REVISIONS:
-                raise DiscountSyncError("La sincronización requiere 20261111_0006 o su extensión explícitamente compatible 20261114_0007/20261115_0008.")
-            if self.cloud_target is None and heads[0] == "20261115_0008":
+                raise DiscountSyncError("La sincronización requiere una revisión explícitamente compatible entre 0006 y 0012.")
+            if self.cloud_target is None and heads[0] in CATEGORY_REVISIONS:
                 validate_bridge_schema(connection)
             # Compartido con catálogo: impide importar fotografías comerciales
             # concurrentes en distinto orden. Se libera al cerrar la transacción.

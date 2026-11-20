@@ -1,4 +1,4 @@
-"""Contrato del backend puente. Sólo consulta catálogos PostgreSQL, nunca categorías."""
+"""Contratos por revisión. Sólo consulta catálogos del sistema PostgreSQL."""
 
 import re
 
@@ -8,7 +8,9 @@ from sqlalchemy.dialects import postgresql
 from app.db.connection import DatabaseTargetError
 
 
-BRIDGE_REVISIONS = frozenset({"20261114_0007", "20261115_0008"})
+RECENT_REVISIONS = tuple(f"20261119_{number:04d}" for number in range(9, 13))
+CATEGORY_REVISIONS = frozenset({"20261115_0008", *RECENT_REVISIONS})
+BRIDGE_REVISIONS = frozenset({"20261114_0007", *CATEGORY_REVISIONS})
 
 
 def _type(value):
@@ -19,13 +21,16 @@ def validate_bridge_schema(connection):
     """Valida revisión, columnas, claves e índices mediante la misma conexión.
 
     Admite Connection SQLAlchemy o conexión DBAPI ya contrastada por el cliente.
-    El perfil histórico 0007 se valida aparte de los modelos actuales de 0008.
-    No necesita SELECT sobre datos de Categories ni registra otro modelo ORM.
+    Conserva los perfiles históricos y agrega únicamente las entidades de cada
+    revisión. No necesita SELECT sobre datos personales ni registra otro ORM.
     """
     driver = (connection.connection.driver_connection
               if hasattr(connection, "engine") else connection)
     from app.models import AuthBase, pre_categories_metadata
     from app.models.sync_run import SyncBase
+    from app.models.order import OrderBase
+    from app.models.password_recovery import PasswordRecoveryBase
+    from app.models.coupon import CouponBase
 
     tables = [table for metadata in (pre_categories_metadata, AuthBase.metadata, SyncBase.metadata)
               for table in metadata.tables.values()]
@@ -36,12 +41,20 @@ def validate_bridge_schema(connection):
         cursor.execute("SELECT version_num FROM public.alembic_version")
         heads = cursor.fetchall()
         if len(heads) != 1 or heads[0][0] not in BRIDGE_REVISIONS:
-            raise DatabaseTargetError("El backend puente requiere exactamente 20261114_0007 o 20261115_0008.")
+            raise DatabaseTargetError("El backend requiere exactamente una revisión aprobada: 20261114_0007, 20261115_0008 o 20261119_0009–0012.")
         revision = heads[0][0]
+        if revision in RECENT_REVISIONS:
+            tables.extend(OrderBase.metadata.tables.values())
+        if revision in RECENT_REVISIONS[2:]:
+            tables.extend(PasswordRecoveryBase.metadata.tables.values())
+        if revision == RECENT_REVISIONS[3]:
+            tables.extend(CouponBase.metadata.tables.values())
         expected = {(table.name, col.name): (_type(str(col.type.compile(dialect=postgresql.dialect()))), not col.nullable)
                     for table in tables for col in table.columns}
+        if revision == RECENT_REVISIONS[0]:
+            del expected[("Orders", "guest_tracking_token")]
         expected[("alembic_version", "version_num")] = ("charactervarying(32)", True)
-        if revision == "20261115_0008":
+        if revision in CATEGORY_REVISIONS:
             expected.update({("Categories", name): (_type(kind), required) for name, kind, required in (
                 ("category_id", "integer", True), ("loyverse_id", "varchar(100)", True),
                 ("name", "varchar(64)", True), ("color", "varchar(20)", False),
@@ -72,6 +85,10 @@ def validate_bridge_schema(connection):
         delete_codes = {None: "a", "NO ACTION": "a", "RESTRICT": "r", "CASCADE": "c", "SET NULL": "n", "SET DEFAULT": "d"}
         for table in tables:
             for constraint in table.constraints:
+                if revision == RECENT_REVISIONS[0] and table.name == "Orders" and constraint.name in {
+                    "uq_Orders_guest_tracking_token", "ck_Orders_guest_tracking_token",
+                }:
+                    continue
                 row = constraints.get((table.name, str(constraint.name)))
                 kind = ("f" if isinstance(constraint, ForeignKeyConstraint) else
                         "p" if isinstance(constraint, PrimaryKeyConstraint) else
@@ -97,7 +114,7 @@ def validate_bridge_schema(connection):
             for index in table.indexes:
                 if indexes.get((table.name, index.name)) != (True, bool(index.unique), list(index.columns.keys())):
                     raise DatabaseTargetError("Falta un índice válido del esquema puente.")
-        if revision == "20261115_0008":
+        if revision in CATEGORY_REVISIONS:
             fk = constraints.get(("Products", "fk_Products_category_id"))
             if (fk != ("f", True, True, ["category_id"], "Categories", "r", ["category_id"])
                     or constraints.get(("Categories", "pk_Categories"), ())[:4] != ("p", True, True, ["category_id"])

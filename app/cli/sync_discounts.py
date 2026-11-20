@@ -15,7 +15,7 @@ from app.db.connection import (
     CloudDatabaseTarget, DatabaseTargetError, create_database_engine, environment_mode,
     local_database_url, validate_local_connection,
 )
-from app.db.schema_compatibility import validate_bridge_schema
+from app.db.schema_compatibility import CATEGORY_REVISIONS, validate_bridge_schema
 from app.db.discount_worker_policy import (
     PRODUCTION_DATABASE, PRODUCTION_HOST, validate_discount_worker_connection,
 )
@@ -48,8 +48,8 @@ def preflight(engine, *, expected_database: str, cloud_target=None) -> dict:
         context = MigrationContext.configure(connection, opts={"version_table_schema": "public"})
         heads = context.get_current_heads()
         if len(heads) != 1 or heads[0] not in DISCOUNT_COMPATIBLE_REVISIONS:
-            raise DiscountSyncError("La sincronización requiere 20261111_0006 o su extensión explícitamente compatible 20261114_0007/20261115_0008.")
-        if cloud_target is None and heads[0] == "20261115_0008":
+            raise DiscountSyncError("La sincronización requiere una revisión explícitamente compatible entre 0006 y 0012.")
+        if cloud_target is None and heads[0] in CATEGORY_REVISIONS:
             validate_bridge_schema(connection)
         valid = connection.scalar(text("""
             SELECT relkind = 'r' AND NOT relrowsecurity FROM pg_catalog.pg_class
