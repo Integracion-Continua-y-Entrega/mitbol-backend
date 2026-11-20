@@ -90,7 +90,7 @@ class AuthRequestGuard:
         request = Request(scope)
         try:
             validate_auth_request(request, self.config)
-            if request.method == "POST":
+            if request.method in {"POST", "PATCH"}:
                 if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
                     raise AuthError(415, "La autenticación requiere JSON.", code="JSON_REQUIRED")
                 if scope["path"] == "/api/auth/login" and request.headers.get("x-csrf-protection") != "1":
