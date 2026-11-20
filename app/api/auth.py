@@ -8,7 +8,10 @@ from fastapi import APIRouter, Depends, Request, Response
 
 from app.api.auth_dependencies import get_auth_service, get_current_user
 from app.core.auth_http import clear_session_cookie, cookie_name, login_rate_address, partition_session_cookie
-from app.schemas.auth import CsrfResponse, LoginInput, LoginResponse, PasswordChangeInput, SessionResponse
+from app.schemas.auth import (
+    CsrfResponse, CustomerRegistrationInput, CustomerRegistrationResponse,
+    LoginInput, LoginResponse, PasswordChangeInput, SessionResponse,
+)
 from app.services.auth_service import Principal
 
 router = APIRouter(prefix="/api/auth", tags=["Autenticación"])
@@ -19,6 +22,28 @@ def user_response(user):
     data = asdict(user)
     data["roles"], data["permissions"] = sorted(user.roles), sorted(user.permissions)
     return data
+
+
+@router.post(
+    "/register", response_model=CustomerRegistrationResponse, status_code=201,
+    summary="Registrar una cuenta personal de cliente",
+    description=(
+        "Público, sin sesión previa. Requiere JSON, origen de autenticación autorizado y X-CSRF-Protection: 1. "
+        "Recibe name, phone, email y password (15 a 1024 caracteres, sin recortar ni normalizar la contraseña). "
+        "Normaliza correo y teléfono; crea persona y cuenta activa en una transacción. "
+        "No crea empleado ni asigna roles o permisos administrativos. "
+        "No inicia sesión automáticamente; continuar mediante /api/auth/login."
+    ),
+    responses={409: {"description": "El correo ya tiene una cuenta, incluso si está inactiva."},
+               422: {"description": "Datos inválidos o campos no admitidos."},
+               429: {"description": "Límite de intentos o trabajo de contraseñas alcanzado."},
+               503: {"description": "No pudo confirmarse el registro."}},
+)
+def register(payload: CustomerRegistrationInput, request: Request, response: Response):
+    config = request.app.state.settings
+    user = get_auth_service(request).register(payload, ip=login_rate_address(request, config), request_id=uuid4())
+    response.headers["Cache-Control"] = "no-store"
+    return {"user": user_response(user)}
 
 
 @router.post("/login", response_model=LoginResponse)
