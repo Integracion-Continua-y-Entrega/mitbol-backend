@@ -6,6 +6,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
+from app.core.auth_errors import AuthError
 from app.db.database import get_db
 from app.schemas.cart import CartValidationInput, CartValidationResponse
 from app.schemas.order_summary import OrderSummaryResponse
@@ -19,6 +20,8 @@ router = APIRouter(prefix="/api/cart", tags=["Carrito"])
 def _handle_cart_errors():
     try:
         yield
+    except AuthError:
+        raise
     except cart_service.CartItemError as error:
         raise HTTPException(error.status_code, {"item_index": error.item_index, "message": str(error)},
                             headers={"Cache-Control": "no-store"}) from None
