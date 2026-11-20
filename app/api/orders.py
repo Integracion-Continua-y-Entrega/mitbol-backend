@@ -1,4 +1,4 @@
-"""Envío público con autenticación opcional y confirmación posterior al commit."""
+"""Envío, seguimiento y cancelación privada; escrituras confirmadas antes de responder."""
 
 from dataclasses import dataclass
 import logging
@@ -13,8 +13,10 @@ from sqlalchemy.orm import Session
 from app.api.auth_dependencies import get_auth_service
 from app.core.auth_http import cookie_name
 from app.db.connection import DatabaseTargetError
-from app.schemas.orders import OrderSubmissionInput, OrderSubmissionResponse, OrderTrackingResponse
-from app.services import cart_service, menu_service, order_submission_service, order_tracking_service
+from app.schemas.orders import (
+    OrderCancellationInput, OrderCancellationResponse, OrderSubmissionInput, OrderSubmissionResponse, OrderTrackingResponse,
+)
+from app.services import cart_service, menu_service, order_cancellation_service, order_submission_service, order_tracking_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/orders", tags=["Solicitudes de pedido"])
@@ -31,7 +33,7 @@ class SubmissionContext:
 def submission_context(request: Request):
     config = request.app.state.settings
     if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
-        raise HTTPException(415, "El envío de pedidos requiere JSON.", headers=NO_STORE)
+        raise HTTPException(415, "Esta operación de pedido requiere JSON.", headers=NO_STORE)
     origins = config.cors_origins + (config.auth_origins if config.auth_enabled else [])
     origin = request.headers.get("origin")
     if origin is not None and origin not in origins:
@@ -53,8 +55,10 @@ def submission_context(request: Request):
                 yield SubmissionContext(db)
     except (SQLAlchemyError, DatabaseTargetError) as error:
         logger.error("Falló la transacción de pedido (%s).", type(error).__name__)
-        raise HTTPException(503, "No fue posible confirmar la solicitud. Reintenta con la misma clave de idempotencia.",
-                            headers=NO_STORE) from None
+        message = ("No fue posible confirmar la cancelación. Consulta el estado del pedido antes de reintentar."
+                   if request.url.path.endswith("/cancel") else
+                   "No fue posible confirmar la solicitud. Reintenta con la misma clave de idempotencia.")
+        raise HTTPException(503, message, headers=NO_STORE) from None
 
 
 @router.post(
@@ -128,3 +132,39 @@ def track_order(
     except (SQLAlchemyError, DatabaseTargetError) as error:
         logger.error("Falló la consulta de seguimiento (%s).", type(error).__name__)
         raise HTTPException(503, "El seguimiento no está disponible temporalmente.", headers=TRACKING_HEADERS) from None
+
+
+@router.post(
+    "/{order_id}/cancel", response_model=OrderCancellationResponse,
+    summary="Cancelar una solicitud propia pendiente de aceptación",
+    description=(
+        "Enviar JSON vacío {}. Sin cookie, requiere Authorization: Bearer <tracking.token> del pedido invitado. "
+        "Con cookie, requiere una sesión válida, X-CSRF-Token y origen de autenticación autorizado; "
+        "la cuenta debe ser propietaria del pedido, independientemente de sus roles. "
+        "Sólo cambia Solicitud recibida a Cancelado mediante una actualización condicional transaccional. "
+        "Conserva todos los datos históricos. Rechaza pedidos aceptados, procesados o ya cancelados."
+    ),
+    responses={
+        401: {"description": "Sesión inválida o expirada."},
+        403: {"description": "Origen o CSRF no autorizado."},
+        404: {"description": "Pedido o acceso privado no válidos."},
+        409: {"description": "El pedido ya no está pendiente de aceptación."},
+        422: {"description": "Identificador o cuerpo inválidos; enviar {}."},
+        503: {"description": "No pudo confirmarse la cancelación; consultar el estado antes de reintentar."},
+    },
+)
+def cancel_order(
+    order_id: UUID, payload: OrderCancellationInput, response: Response,
+    context: Annotated[SubmissionContext, Depends(submission_context, scope="function")],
+    authorization: Annotated[str | None, Header(description="Bearer del pedido invitado, sin cookie de sesión.")] = None,
+) -> OrderCancellationResponse:
+    response.headers.update(TRACKING_HEADERS)
+    scheme, _, token = (authorization or "").partition(" ")
+    try:
+        return order_cancellation_service.cancel_order(
+            context.db, order_id, account_id=context.account_id, guest_token=token if scheme.lower() == "bearer" else None,
+        )
+    except order_tracking_service.GuestOrderAccessError:
+        raise HTTPException(404, "Pedido o acceso privado no válidos.", headers=TRACKING_HEADERS) from None
+    except order_cancellation_service.OrderNotPendingError:
+        raise HTTPException(409, "El pedido ya no está pendiente de aceptación y no puede cancelarse.", headers=TRACKING_HEADERS) from None

@@ -71,8 +71,10 @@ def test_public_config_is_available_with_auth_disabled_and_database_unavailable(
         assert set(schema["paths"]["/api/cart/summary"]) == {"post"}
         assert set(schema["paths"]["/api/order-modality/validate"]) == {"post"}
         assert set(schema["paths"]["/api/orders"]) == {"post"}
+        assert set(schema["paths"]["/api/orders/{order_id}/cancel"]) == {"post"}
         assert all(set(methods) == {"get"} for path, methods in schema["paths"].items()
-                   if path not in {"/api/cart/validate", "/api/cart/summary", "/api/order-modality/validate", "/api/orders"})
+                   if path not in {"/api/cart/validate", "/api/cart/summary", "/api/order-modality/validate", "/api/orders",
+                                   "/api/orders/{order_id}/cancel"})
         assert "PRIVATE_PASSWORD" not in json.dumps(schema) + response.text
 
 
