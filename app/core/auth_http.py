@@ -97,6 +97,9 @@ class AuthRequestGuard:
                     raise AuthError(403, "Protección de inicio de sesión requerida.", code="LOGIN_CSRF")
                 if scope["path"] == "/api/auth/register" and request.headers.get("x-csrf-protection") != "1":
                     raise AuthError(403, "Protección de registro requerida.", code="REGISTER_CSRF")
+                if (scope["path"] in {"/api/auth/password-recovery", "/api/auth/reset-password"}
+                        and request.headers.get("x-csrf-protection") != "1"):
+                    raise AuthError(403, "Protección de recuperación requerida.", code="RECOVERY_CSRF")
         except AuthError as error:
             await auth_error_response(error, self.config)(scope, receive, send)
             return

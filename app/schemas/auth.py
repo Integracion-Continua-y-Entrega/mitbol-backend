@@ -13,14 +13,26 @@ class AuthInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
 
 
-class LoginInput(AuthInput):
+class PasswordRecoveryInput(AuthInput):
     email: str = Field(min_length=3, max_length=254)
-    password: SecretStr = Field(min_length=1, max_length=1024)
 
     @field_validator("email")
     @classmethod
     def canonical_email(cls, value):
         return normalize_email(value)
+
+
+class PasswordRecoveryResponse(BaseModel):
+    detail: str
+
+
+class PasswordResetInput(AuthInput):
+    token: SecretStr = Field(min_length=43, max_length=43)
+    new_password: SecretStr = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+
+
+class LoginInput(PasswordRecoveryInput):
+    password: SecretStr = Field(min_length=1, max_length=1024)
 
 
 class CustomerRegistrationInput(LoginInput):
