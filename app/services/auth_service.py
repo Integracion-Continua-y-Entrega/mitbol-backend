@@ -22,6 +22,7 @@ from app.db.connection import DatabaseTargetError, validate_local_connection
 from app.models import AccountSession, AuditEvent, Person, PersonalAccount, PasswordResetToken
 from app.repositories import auth as repo
 from app.services.admin_transaction import recover_image_storages
+from app.services.password_recovery_message import build_recovery_message
 
 
 @dataclass(frozen=True)
@@ -50,13 +51,6 @@ class AuthContext:
 class IssuedSession:
     expires_at: datetime
     idle_expires_at: datetime
-
-
-@dataclass(frozen=True)
-class PasswordRecoveryNotice:
-    email: str = field(repr=False)
-    token: str = field(repr=False)
-    expires_at: datetime
 
 
 def csrf_for_context(token, account, employee, roles, permissions):
@@ -91,6 +85,7 @@ class AuthService:
         # Sin transporte de correo configurado. El adaptador recibe el secreto
         # sólo después del commit; nunca se devuelve por HTTP ni se registra.
         self.recovery_delivery = recovery_delivery
+        self.recovery_url = config.auth_recovery_url
 
     def now(self):
         return utc_datetime(self.clock())
@@ -158,7 +153,8 @@ class AuthService:
                     db.add(row)
                 row.token_hash, row.auth_version = token.digest, account.auth_version
                 row.created_at, row.expires_at = now, now + timedelta(minutes=30)
-                notice = PasswordRecoveryNotice(account.email, token.value, row.expires_at)
+                if self.recovery_url is not None:
+                    notice = build_recovery_message(account.email, token.value, row.expires_at, self.recovery_url)
             # Solicitud procesada; no afirma que se haya enviado correo.
             self.audit(db, "auth.password_recovery", "success", request_id)
         if notice is not None and self.recovery_delivery is not None:
