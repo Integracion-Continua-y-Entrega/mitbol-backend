@@ -10,7 +10,8 @@ from app.api.auth_dependencies import get_auth_service, get_current_user
 from app.core.auth_http import clear_session_cookie, cookie_name, login_rate_address, partition_session_cookie
 from app.schemas.auth import (
     CsrfResponse, CustomerRegistrationInput, CustomerRegistrationResponse,
-    LoginInput, LoginResponse, PasswordChangeInput, SessionResponse,
+    LoginInput, LoginResponse, PasswordChangeInput, PasswordRecoveryInput,
+    PasswordRecoveryResponse, PasswordResetInput, SessionResponse,
 )
 from app.services.auth_service import Principal
 
@@ -44,6 +45,25 @@ def register(payload: CustomerRegistrationInput, request: Request, response: Res
     user = get_auth_service(request).register(payload, ip=login_rate_address(request, config), request_id=uuid4())
     response.headers["Cache-Control"] = "no-store"
     return {"user": user_response(user)}
+
+
+@router.post("/password-recovery", response_model=PasswordRecoveryResponse, status_code=202,
+             summary="Solicitar recuperación sin revelar la existencia de la cuenta",
+             description="Requiere Origin autorizado y X-CSRF-Protection: 1. La entrega de correo está pendiente de integración.")
+def request_password_recovery(payload: PasswordRecoveryInput, request: Request, response: Response):
+    get_auth_service(request).request_password_recovery(payload.email,
+        ip=login_rate_address(request, request.app.state.settings), request_id=uuid4())
+    response.headers["Cache-Control"] = "no-store"
+    return {"detail": "Si la cuenta está habilitada y la entrega está disponible, recibirás instrucciones de recuperación."}
+
+
+@router.post("/reset-password", status_code=204, summary="Restablecer contraseña con un token privado de un solo uso",
+             description="Token válido durante 30 minutos. Requiere Origin autorizado y X-CSRF-Protection: 1. Revoca todas las sesiones.")
+def reset_password(payload: PasswordResetInput, request: Request, response: Response):
+    get_auth_service(request).reset_password(payload.token.get_secret_value(), payload.new_password.get_secret_value(),
+        ip=login_rate_address(request, request.app.state.settings), request_id=uuid4())
+    clear_session_cookie(response, request.app.state.settings)
+    response.headers["Cache-Control"] = "no-store"
 
 
 @router.post("/login", response_model=LoginResponse)

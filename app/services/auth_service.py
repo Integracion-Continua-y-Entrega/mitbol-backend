@@ -19,7 +19,7 @@ from app.core.permissions import permissions_for_roles
 from app.core.session_policy import SessionPolicy, session_is_valid, utc_datetime
 from app.core.session_tokens import generate_session_token, hash_session_token
 from app.db.connection import DatabaseTargetError, validate_local_connection
-from app.models import AccountSession, AuditEvent, Person, PersonalAccount
+from app.models import AccountSession, AuditEvent, Person, PersonalAccount, PasswordResetToken
 from app.repositories import auth as repo
 from app.services.admin_transaction import recover_image_storages
 
@@ -52,6 +52,13 @@ class IssuedSession:
     idle_expires_at: datetime
 
 
+@dataclass(frozen=True)
+class PasswordRecoveryNotice:
+    email: str = field(repr=False)
+    token: str = field(repr=False)
+    expires_at: datetime
+
+
 def csrf_for_context(token, account, employee, roles, permissions):
     # La clave es el secreto de sesión; el contexto liga la sesión a la seguridad
     # vigente. Un cambio observado invalida el hash emitido sin añadir columnas.
@@ -65,7 +72,7 @@ def csrf_for_context(token, account, employee, roles, permissions):
 
 
 class AuthService:
-    def __init__(self, session_factory, config, *, clock=None):
+    def __init__(self, session_factory, config, *, clock=None, recovery_delivery=None):
         self.sessions = session_factory
         self.cloud_target = config.cloud_target if config.app_env == "cloud" else None
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -81,6 +88,9 @@ class AuthService:
             self.limiter = PostgresAttemptLimiter(self.transaction, config)
         self.password_work = PasswordWorkGate(config.auth_hash_concurrency)
         self._dummy_hash = hash_password(token_urlsafe(32))
+        # Sin transporte de correo configurado. El adaptador recibe el secreto
+        # sólo después del commit; nunca se devuelve por HTTP ni se registra.
+        self.recovery_delivery = recovery_delivery
 
     def now(self):
         return utc_datetime(self.clock())
@@ -132,6 +142,60 @@ class AuthService:
                 raise
             self.audit(db, "auth.register", "success", request_id, actor_id=account.account_id)
             return self.principal(db, account, (), frozenset())
+
+    def request_password_recovery(self, email, *, ip, request_id):
+        self.limiter.admit(email, ip, operation="password_recovery")
+        token = generate_session_token()
+        notice = None
+        with self.transaction() as db:
+            account = repo.account_for_email(db, email)
+            employee, _ = repo.employee_and_roles(db, account.person_id) if account else (None, [])
+            if account and account.is_active and (employee is None or employee.is_active):
+                now = self.now()
+                row = db.get(PasswordResetToken, account.account_id)
+                if row is None:
+                    row = PasswordResetToken(account_id=account.account_id)
+                    db.add(row)
+                row.token_hash, row.auth_version = token.digest, account.auth_version
+                row.created_at, row.expires_at = now, now + timedelta(minutes=30)
+                notice = PasswordRecoveryNotice(account.email, token.value, row.expires_at)
+            # Solicitud procesada; no afirma que se haya enviado correo.
+            self.audit(db, "auth.password_recovery", "success", request_id)
+        if notice is not None and self.recovery_delivery is not None:
+            try:
+                self.recovery_delivery(notice)
+            except Exception:
+                # No propagar errores del transporte que puedan incluir el enlace
+                # ni cambiar la respuesta pública según exista o no la cuenta.
+                with self.transaction() as db:
+                    self.audit(db, "auth.password_recovery_delivery", "failure", request_id,
+                               code="RECOVERY_DELIVERY_FAILED")
+
+    def reset_password(self, token, new_password, *, ip, request_id):
+        # El límite por IP funciona también ante tokens desconocidos o malformados.
+        identity = sha256(token.encode("utf-8")).hexdigest() + "@password-reset.invalid"
+        self.limiter.admit(identity, ip, operation="password_reset")
+        try:
+            digest = hash_session_token(token)
+        except ValueError:
+            raise AuthError(400, "El enlace de recuperación es inválido o expiró.", code="PASSWORD_RESET_INVALID") from None
+        with self.transaction() as db:
+            account_id = db.scalar(select(PasswordResetToken.account_id).where(PasswordResetToken.token_hash == digest))
+            # Mismo orden que login/cambio de contraseña: bloquear primero la cuenta.
+            account = repo.lock_account(db, account_id) if account_id is not None else None
+            row = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == digest)
+                            .with_for_update().execution_options(populate_existing=True)) if account else None
+            employee, _ = repo.employee_and_roles(db, account.person_id) if account else (None, [])
+            now = self.now()
+            if (not row or not account.is_active or (employee is not None and not employee.is_active)
+                    or row.auth_version != account.auth_version or not row.created_at <= now < row.expires_at):
+                raise AuthError(400, "El enlace de recuperación es inválido o expiró.", code="PASSWORD_RESET_INVALID")
+            with self.password_work.acquire():
+                account.password_hash = hash_password(new_password)
+            account.updated_at = now
+            repo.invalidate_locked_account(db, account, now, "password_reset")
+            db.delete(row)
+            self.audit(db, "auth.reset_password", "success", request_id, actor_id=account.account_id)
 
     def login(self, email, password, *, ip, request_id, old_token=None):
         self.limiter.admit(email, ip)

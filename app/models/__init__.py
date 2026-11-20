@@ -42,6 +42,7 @@ for _table in (*catalog_metadata.tables.values(), Discount.__table__):
 from app.db.auth_base import AuthBase
 from app.models.auth import AccountSession, AuditEvent, Employee, EmployeeRole, Person, PersonalAccount, Role
 from app.models.auth_limits import AuthRateLimit, AuthRateLimitPolicy
+from app.models.password_recovery import PasswordRecoveryBase, PasswordResetToken
 from app.models.order import OrderBase, Order, OrderDetail, OrderDetailComplement, RestaurantOrderSettings
 
 __all__ = [
@@ -52,5 +53,6 @@ __all__ = [
     "AuthBase", "Person", "PersonalAccount", "Employee", "Role", "EmployeeRole",
     "AccountSession", "AuditEvent",
     "AuthRateLimit", "AuthRateLimitPolicy",
+    "PasswordRecoveryBase", "PasswordResetToken",
     "OrderBase", "Order", "OrderDetail", "OrderDetailComplement", "RestaurantOrderSettings",
 ]
