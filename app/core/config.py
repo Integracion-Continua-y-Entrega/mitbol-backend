@@ -1,4 +1,5 @@
 from pathlib import Path
+from email.headerregistry import Address
 import os
 import re
 from typing import Literal
@@ -8,6 +9,7 @@ from pydantic import Field, HttpUrl, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.db.connection import CloudDatabaseTarget, environment_mode, local_database_url, postgresql_url
+from app.core.account_identity import normalize_email
 
 
 class Settings(BaseSettings):
@@ -39,6 +41,13 @@ class Settings(BaseSettings):
     auth_cookie_partitioned: bool = False
     auth_public_origin: str | None = None
     auth_recovery_url: str | None = Field(default=None, repr=False)
+    auth_smtp_host: str | None = Field(default=None, repr=False)
+    auth_smtp_port: int = Field(default=587, ge=1, le=65535)
+    auth_smtp_security: Literal["starttls", "ssl"] = "starttls"
+    auth_smtp_username: SecretStr | None = Field(default=None, repr=False)
+    auth_smtp_password: SecretStr | None = Field(default=None, repr=False)
+    auth_smtp_from: str | None = Field(default=None, repr=False)
+    auth_smtp_timeout_seconds: float = Field(default=10, gt=0, le=60, allow_inf_nan=False)
     auth_proxy_mode: Literal["direct", "render"] = "direct"
     auth_absolute_seconds: int = Field(default=28_800, gt=0, le=28_800)
     auth_idle_seconds: int = Field(default=1_800, gt=0, le=28_800)
@@ -83,6 +92,29 @@ class Settings(BaseSettings):
     @classmethod
     def valid_environment(cls, value):
         return environment_mode(value)
+
+    @field_validator("auth_smtp_host")
+    @classmethod
+    def valid_smtp_host(cls, value):
+        if value is None or value == "":
+            return None
+        if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", value):
+            raise ValueError("AUTH_SMTP_HOST requiere un hostname sin URL, credenciales ni espacios.")
+        return value
+
+    @field_validator("auth_smtp_from")
+    @classmethod
+    def valid_smtp_sender(cls, value):
+        if value is None or value == "":
+            return None
+        try:
+            value = normalize_email(value)
+            address = Address(addr_spec=value)
+            if not address.domain:
+                raise ValueError
+        except ValueError:
+            raise ValueError("AUTH_SMTP_FROM requiere una única dirección de correo válida.") from None
+        return value
 
     @field_validator("public_menu_url", "auth_recovery_url")
     @classmethod
