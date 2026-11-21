@@ -30,6 +30,23 @@ def money(value):
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+def _round_components(components):
+    """Redondea la línea una vez y reparte sus centavos por restos mayores.
+
+    Producto y complementos ya incluyen la cantidad, sin redondear precios
+    unitarios. Los empates favorecen al producto; su suma conserva exactamente
+    el subtotal de línea redondeado con HALF_UP.
+    """
+    parts = [value.quantize(CENT, rounding=ROUND_DOWN) for value in components]
+    remaining = int((money(sum(components, ZERO)) - sum(parts, ZERO)) / CENT)
+    for index in sorted(range(len(parts)), key=lambda index: (-(components[index] - parts[index]), index)):
+        if remaining:
+            parts[index] += CENT
+            remaining -= 1
+    assert remaining == 0
+    return parts
+
+
 def _allocate(amount, balances):
     """Prorrateo en centavos: restos mayores, desempate por posición del carrito."""
     total = sum(balances, ZERO)
@@ -105,18 +122,10 @@ def calculate(summary, records):
     with localcontext() as context:
         context.prec = max(50, precision)
         context.rounding = ROUND_HALF_UP
-        original = [[row.selection.base_price * row.quantity, row.selection.complements_total * row.quantity]
-                    for row in summary.items]
-        # No redondear precios unitarios ni perder fracciones acumuladas por
-        # cantidades grandes. Sin una regla adicional, una base fraccionaria
-        # no puede conciliar centavos con los detalles históricos exactos.
-        if any(money(value) != value for components in original for value in components):
-            for discount, _, _ in candidates:
-                defer(discount, "price_precision_pending")
-            return summary.model_copy(update={"pending_discounts": pending, "discounts_status": "rules_pending"})
-        items = [OrderSummaryItem(quantity=row.quantity, selection=row.selection, subtotal=money(row.subtotal))
-                 for row in summary.items]
-        original = [[money(value) for value in components] for components in original]
+        original = [_round_components([row.selection.base_price * row.quantity,
+                                       row.selection.complements_total * row.quantity]) for row in summary.items]
+        items = [OrderSummaryItem(quantity=row.quantity, selection=row.selection, subtotal=sum(components, ZERO))
+                 for row, components in zip(summary.items, original)]
         remaining = [list(value) for value in original]
         applied = []
         for discount, rules, condition in sorted(candidates, key=lambda row: (
@@ -146,14 +155,11 @@ def calculate(summary, records):
                     value=money(discount.value) if discount.discount_type in AMOUNT_TYPES else discount.value,
                     base=sum(bases, ZERO),
                     amount=amount, allocations=allocations))
-        if not applied:
-            return summary.model_copy(update={"pending_discounts": pending,
-                "discounts_status": "rules_pending" if pending else "not_applicable"})
         subtotal = sum((row.subtotal for row in items), ZERO)
-        discount_total = sum((row.amount for row in applied), ZERO)
+        discount_total = money(sum((row.amount for row in applied), ZERO))
         return OrderSummaryResponse(items=items, subtotal=subtotal, discount_total=discount_total,
             total=subtotal-discount_total, applied_discounts=applied, pending_discounts=pending,
-            discounts_status="rules_pending" if pending else "applied")
+            discounts_status="rules_pending" if pending else "applied" if applied else "not_applicable")
 
 
 def discount_records(db):
@@ -179,9 +185,13 @@ def apply_discounts(db, summary):
 
 def persist_snapshot(db, order_id, summary):
     if schema_available(db):
-        db.add(OrderDiscountSnapshot(order_id=order_id, calculation=summary.model_dump(mode="json", include={
+        calculation = summary.model_dump(mode="json", include={
             "applied_discounts", "pending_discounts", "discounts_status", "coupon",
-        })))
+        })
+        # Los detalles conservan precios y multiplicaciones exactos; el historial
+        # existente guarda también los subtotales monetarios usados al descontar.
+        calculation["line_subtotals"] = [str(row.subtotal) for row in summary.items]
+        db.add(OrderDiscountSnapshot(order_id=order_id, calculation=calculation))
         db.flush()
 
 
@@ -192,4 +202,7 @@ def restore_snapshot(order, summary):
     snapshot = db.get(OrderDiscountSnapshot, order.order_id)
     if snapshot is None:
         return summary
-    return OrderSummaryResponse.model_validate_json(json.dumps(summary.model_dump(mode="json") | snapshot.calculation))
+    data = summary.model_dump(mode="json") | snapshot.calculation
+    for item, subtotal in zip(data["items"], data.pop("line_subtotals", [])):
+        item["subtotal"] = subtotal
+    return OrderSummaryResponse.model_validate_json(json.dumps(data))

@@ -11,7 +11,7 @@ from app.schemas.commercial_discounts import AppliedCommercialDiscount, PendingC
 
 
 class OrderSummaryItem(ValidatedCartItem):
-    subtotal: MenuAmount = Field(description="quantity × selection.unit_total; incluye complementos.")
+    subtotal: MenuAmount = Field(description="Precio por cantidad, incluidos complementos; redondeado a centavos al calcular descuentos elegibles.")
 
 
 class CouponApplicationResult(BaseModel):

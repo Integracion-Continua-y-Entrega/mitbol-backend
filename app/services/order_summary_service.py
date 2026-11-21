@@ -7,6 +7,13 @@ from app.schemas.order_summary import OrderSummaryItem, OrderSummaryResponse
 from app.services import cart_service, commercial_discount_service
 
 
+def exact_line_subtotal(row):
+    """Precio histórico por cantidad, sin redondear ni depender del contexto externo."""
+    with localcontext() as context:
+        context.prec = max(context.prec, len(row.selection.unit_total.as_tuple().digits) + len(str(row.quantity)))
+        return row.selection.unit_total * row.quantity
+
+
 def summarize_cart(db, cart: CartValidationInput, *, customer_coupon_id=None, account_id=None,
                    modality=None, now=None) -> OrderSummaryResponse:
     """Revalida HU-016/HU-017 en cada consulta; no persiste ni reserva precios."""
@@ -19,7 +26,7 @@ def summarize_cart(db, cart: CartValidationInput, *, customer_coupon_id=None, ac
     with localcontext() as context:
         context.prec = max(context.prec, precision)
         items = [OrderSummaryItem(quantity=row.quantity, selection=row.selection,
-                                  subtotal=row.selection.unit_total * row.quantity)
+                                  subtotal=exact_line_subtotal(row))
                  for row in validated.items]
         subtotal = sum((row.subtotal for row in items), Decimal("0"))
 
