@@ -72,7 +72,8 @@ def test_public_cloud_starts_without_loyverse_and_publishes_no_writes(monkeypatc
         assert set(schema["paths"]["/api/cart/summary"]) == {"post"}
         assert client.post("/api/cart/summary", json={"items": []}).json() == {
             "currency": "MXN", "items": [], "subtotal": "0.00", "discount_total": "0.00",
-            "total": "0.00", "discounts_status": "not_integrated"}
+            "total": "0.00", "discounts_status": "not_integrated",
+            "applied_discounts": [], "pending_discounts": []}
         assert set(schema["paths"]["/api/order-modality/validate"]) == {"post"}
         assert client.post("/api/order-modality/validate", json={"modality": "dine_in", "name": "Alias"}).json() == {
             "valid": True, "data": {"modality": "dine_in", "name": "Alias"}}
