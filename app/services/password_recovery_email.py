@@ -1,10 +1,12 @@
-"""Entrega SMTP privada; sin conexión hasta invocar el callback de HU-013."""
+"""Transportes privados; sin conexión hasta invocar el callback de HU-013."""
 
 from email.headerregistry import Address
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 import smtplib
 import ssl
+
+import httpx
 
 
 class RecoveryEmailError(RuntimeError):
@@ -56,3 +58,38 @@ def smtp_recovery_delivery(config):
             and config.auth_smtp_password and config.auth_smtp_password.get_secret_value()):
         return None
     return SmtpRecoveryDelivery(config)
+
+
+class BrevoRecoveryDelivery:
+    def __init__(self, config, *, transport=None):
+        self._config = config
+        self._transport = transport
+
+    def __call__(self, notice):
+        config = self._config
+        try:
+            # Destino fijo y sin redirecciones: la clave nunca viaja a otra URL.
+            with httpx.Client(timeout=10, follow_redirects=False, trust_env=False,
+                              transport=self._transport) as client:
+                response = client.post("https://api.brevo.com/v3/smtp/email",
+                    headers={"api-key":config.auth_brevo_api_key.get_secret_value()},
+                    json={"sender":{"email":config.auth_brevo_from_email,
+                                    "name":config.auth_brevo_from_name},
+                          "to":[{"email":notice.email}], "subject":notice.subject,
+                          "textContent":notice.text})
+                if response.status_code != 201:
+                    raise RecoveryEmailError
+        except Exception:
+            # No propagar el cuerpo del proveedor ni excepciones con datos privados.
+            raise RecoveryEmailError("No fue posible entregar el correo de recuperación.") from None
+
+
+def recovery_email_delivery(config, *, transport=None):
+    """Proveedor explícito, sin fallback ni envíos con configuración incompleta."""
+    if config.auth_recovery_email_provider == "smtp":
+        return smtp_recovery_delivery(config)
+    if config.auth_recovery_email_provider == "brevo":
+        if (config.auth_recovery_url and config.auth_brevo_from_email and config.auth_brevo_from_name
+                and config.auth_brevo_api_key and config.auth_brevo_api_key.get_secret_value().strip()):
+            return BrevoRecoveryDelivery(config, transport=transport)
+    return None

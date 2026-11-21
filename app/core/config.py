@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     auth_cookie_partitioned: bool = False
     auth_public_origin: str | None = None
     auth_recovery_url: str | None = Field(default=None, repr=False)
+    auth_recovery_email_provider: Literal["disabled", "smtp", "brevo"] = "disabled"
+    auth_brevo_api_key: SecretStr | None = Field(default=None, repr=False)
+    auth_brevo_from_email: str | None = Field(default=None, repr=False)
+    auth_brevo_from_name: str | None = None
     auth_smtp_host: str | None = Field(default=None, repr=False)
     auth_smtp_port: int = Field(default=587, ge=1, le=65535)
     auth_smtp_security: Literal["starttls", "ssl"] = "starttls"
@@ -102,9 +106,9 @@ class Settings(BaseSettings):
             raise ValueError("AUTH_SMTP_HOST requiere un hostname sin URL, credenciales ni espacios.")
         return value
 
-    @field_validator("auth_smtp_from")
+    @field_validator("auth_smtp_from", "auth_brevo_from_email")
     @classmethod
-    def valid_smtp_sender(cls, value):
+    def valid_email_sender(cls, value, info):
         if value is None or value == "":
             return None
         try:
@@ -113,8 +117,17 @@ class Settings(BaseSettings):
             if not address.domain:
                 raise ValueError
         except ValueError:
-            raise ValueError("AUTH_SMTP_FROM requiere una única dirección de correo válida.") from None
+            raise ValueError(f"{info.field_name.upper()} requiere una única dirección de correo válida.") from None
         return value
+
+    @field_validator("auth_brevo_from_name")
+    @classmethod
+    def valid_brevo_sender_name(cls, value):
+        if value is None or not value.strip():
+            return None
+        if any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("AUTH_BREVO_FROM_NAME no admite caracteres de control.")
+        return value.strip()
 
     @field_validator("public_menu_url", "auth_recovery_url")
     @classmethod
