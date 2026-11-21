@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
 
 from app.schemas.cart import CartValidationInput
 from app.schemas.order_modality import OrderModalityInput
@@ -16,6 +16,7 @@ class OrderSubmissionInput(BaseModel):
 
     cart: CartValidationInput
     data: OrderModalityInput
+    customer_coupon_id: PositiveInt | None = None
 
     @field_validator("cart")
     @classmethod

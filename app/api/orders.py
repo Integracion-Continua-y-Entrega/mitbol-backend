@@ -70,7 +70,8 @@ def submission_context(request: Request):
         "Repetir clave y contenido devuelve la confirmación histórica; cambiar contenido o cuenta produce 409. "
         "Sin cookie se registra como invitado; con cookie válida se asocia la cuenta y se exige X-CSRF-Token y origen de autenticación autorizado. "
         "Revalida HU-017/HU-016 y recalcula HU-019 con los descuentos comerciales elegibles antes de guardar. "
-        "Conserva el desglose histórico en applied_discounts e informa reglas pendientes en pending_discounts; no aplica cupones personales. "
+        "customer_coupon_id es opcional y requiere sesión. Revalida propiedad, vigencia y condiciones; "
+        "un cupón no aplicable devuelve 409 sin registrar el pedido. Conserva coupon y el desglose histórico, sin reservar ni canjear. "
         "Los invitados reciben tracking con path y token privado, estable en reintentos; conservarlo para consultar el pedido. "
         "El estado inicial es Solicitud recibida, pendiente de aceptación; no implica preparación ni pago."
     ),
@@ -84,13 +85,14 @@ def submission_context(request: Request):
     },
 )
 def submit_order(
-    payload: OrderSubmissionInput, response: Response,
+    payload: OrderSubmissionInput, request: Request, response: Response,
     idempotency_key: Annotated[UUID4, Header(alias="Idempotency-Key")],
     context: Annotated[SubmissionContext, Depends(submission_context, scope="function")],
 ) -> OrderSubmissionResponse:
     response.headers.update(NO_STORE)
     try:
-        return order_submission_service.submit_order(context.db, payload, idempotency_key, account_id=context.account_id)
+        return order_submission_service.submit_order(context.db, payload, idempotency_key, account_id=context.account_id,
+            now=request.app.state.auth_service.now() if context.account_id is not None else None)
     except order_submission_service.OrderSubmissionError as error:
         raise HTTPException(error.status_code, error.detail, headers=NO_STORE) from None
     except cart_service.CartItemError as error:

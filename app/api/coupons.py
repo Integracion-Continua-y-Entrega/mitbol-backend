@@ -27,8 +27,8 @@ def list_coupons(request: Request, response: Response, user: User,
              description="Requiere sesión, Origin autorizado y X-CSRF-Token. Selección preliminar sin escrituras de cupones. "
                          "Recibe un solo customer_coupon_id, cart y modality. Recalcula HU-019. "
                          "eligible=false y selected_coupon_id=null impiden la selección. "
-                         "Solo calcula beneficios fijos con alcance order y condiciones explícitas; "
-                         "los porcentajes requieren reglas de redondeo pendientes. No modifica los totales de HU-021.")
+                         "Calcula el beneficio con el motor común de HU-019 y refleja su importe en summary. "
+                         "El envío vuelve a validar el cupón y conserva su beneficio histórico, sin reserva ni canje.")
 def select_coupon(payload: CouponSelectionInput, request: Request, response: Response, user: User):
     response.headers["Cache-Control"] = "no-store"
     with _handle_cart_errors():

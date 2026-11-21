@@ -156,9 +156,9 @@ def calculate(summary, records):
             discounts_status="rules_pending" if pending else "applied")
 
 
-def apply_discounts(db, summary):
-    if not summary.items or not schema_available(db):
-        return summary
+def discount_records(db):
+    if not schema_available(db):
+        return []
     rows = db.execute(select(Discount, CommercialDiscountAssignment).outerjoin(
         CommercialDiscountAssignment, Discount.discount_id == CommercialDiscountAssignment.discount_id,
     ).where(Discount.is_active.is_(True)).order_by(Discount.discount_id, CommercialDiscountAssignment.product_id))
@@ -168,13 +168,19 @@ def apply_discounts(db, summary):
             records[discount.discount_id] = (discount, [])
         if assignment is not None:
             records[discount.discount_id][1].append(assignment)
-    return calculate(summary, records.values())
+    return list(records.values())
+
+
+def apply_discounts(db, summary):
+    if not summary.items or not schema_available(db):
+        return summary
+    return calculate(summary, discount_records(db))
 
 
 def persist_snapshot(db, order_id, summary):
     if schema_available(db):
         db.add(OrderDiscountSnapshot(order_id=order_id, calculation=summary.model_dump(mode="json", include={
-            "applied_discounts", "pending_discounts", "discounts_status",
+            "applied_discounts", "pending_discounts", "discounts_status", "coupon",
         })))
         db.flush()
 

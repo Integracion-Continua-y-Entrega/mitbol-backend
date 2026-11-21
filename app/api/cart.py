@@ -2,13 +2,16 @@
 
 from contextlib import contextmanager
 import logging
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
+from app.api.auth_dependencies import get_auth_service
 from app.core.auth_errors import AuthError
+from app.core.auth_http import cookie_name
 from app.db.database import get_db
-from app.schemas.cart import CartValidationInput, CartValidationResponse
+from app.schemas.cart import CartSummaryInput, CartValidationInput, CartValidationResponse
 from app.schemas.order_summary import OrderSummaryResponse
 from app.services import cart_service, menu_service, order_summary_service
 
@@ -16,7 +19,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/cart", tags=["Carrito"])
 
 
-def summary_database(request: Request, db: Session = Depends(get_db)):
+def summary_database(request: Request, payload: CartSummaryInput, db: Session = Depends(get_db)):
+    if payload.customer_coupon_id is not None:
+        if not request.app.state.settings.auth_enabled:
+            raise AuthError(401, "Inicia sesión para utilizar un cupón personal.")
+        service = get_auth_service(request)
+        with service.authenticated(request.cookies.get(cookie_name(request.app.state.settings)), request_id=uuid4(),
+                csrf_header=request.headers.get("x-csrf-token"), require_csrf=True) as context:
+            yield context.db
+        return
     if not request.app.state.settings.auth_enabled:
         yield db
         return
@@ -77,15 +88,15 @@ def validate_cart(payload: CartValidationInput, response: Response, db: Session 
     "/summary", response_model=OrderSummaryResponse,
     summary="Consultar resumen e importes del carrito",
     description=(
-        "Disponible para invitados y clientes registrados, sin escrituras. Recibe el mismo contrato que /validate: "
-        "items con product_id, product_variant_id, quantity y complement_ids opcionales. "
+        "Disponible para invitados y clientes registrados. Recibe items como /validate. "
+        "Opcionalmente customer_coupon_id y modality: exige sesión, Origin autorizado y X-CSRF-Token. "
         "Revalida disponibilidad y opciones con HU-016/HU-017; rechaza precios o totales del cliente. "
         "Cada selection incluye nombres, precio base, complementos con sus precios y unit_total (precio por unidad). "
         "El subtotal de línea es quantity × selection.unit_total. Devuelve la suma y el total como cadenas decimales exactas. "
         "Aplica sólo asociaciones y condiciones comerciales explícitas del backend: porcentajes sucesivos sobre el saldo "
         "elegible y después cada importe fijo una vez por carrito; orden por application_order e ID dentro de cada tipo, "
         "con Decimal, ROUND_HALF_UP y límites sin saldos negativos. applied_discounts desglosa importes por línea; "
-        "pending_discounts explica las reglas insuficientes que no se aplicaron. No incluye el cupón personal preliminar. "
+        "pending_discounts explica las reglas insuficientes que no se aplicaron. coupon informa la aplicación del cupón; no lo reserva ni canjea. "
         "Un carrito vacío devuelve importes cero. No registra pedidos ni garantiza precios para una solicitud posterior. "
         "Los errores de catálogo identifican detail.item_index (desde cero) y detail.message."
     ),
@@ -97,7 +108,12 @@ def validate_cart(payload: CartValidationInput, response: Response, db: Session 
         503: {"description": "Catálogo temporalmente no disponible."},
     },
 )
-def summarize_cart(payload: CartValidationInput, response: Response, db: Session = Depends(summary_database)) -> OrderSummaryResponse:
+def summarize_cart(payload: CartSummaryInput, request: Request, response: Response,
+                   db: Session = Depends(summary_database, scope="function")) -> OrderSummaryResponse:
     response.headers["Cache-Control"] = "no-store"
     with _handle_cart_errors():
+        if payload.customer_coupon_id is not None:
+            return order_summary_service.summarize_cart(db, payload, customer_coupon_id=payload.customer_coupon_id,
+                account_id=db.info["auth_context"].principal.account_id, modality=payload.modality,
+                now=request.app.state.auth_service.now())
         return order_summary_service.summarize_cart(db, payload)
