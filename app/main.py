@@ -55,9 +55,11 @@ def create_app(config: Settings | None = None) -> FastAPI:
         from app.core.auth_http import AuthRequestGuard, auth_error_response
         from app.db.auth_database import auth_session_factory_for
         from app.services.auth_service import AuthService
+        from app.services.password_recovery_email import smtp_recovery_delivery
 
         application.state.auth_session_factory = auth_session_factory_for(config)
-        application.state.auth_service = AuthService(application.state.auth_session_factory, config)
+        application.state.auth_service = AuthService(application.state.auth_session_factory, config,
+            recovery_delivery=smtp_recovery_delivery(config))
         application.include_router(auth_router)
         application.include_router(coupon_router)
         application.add_middleware(AuthRequestGuard, config=config)
