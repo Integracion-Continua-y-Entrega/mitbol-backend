@@ -169,13 +169,19 @@ def test_missing_or_tied_order_uses_discount_id_and_remaining_base_deterministic
     assert [row.discount_id for row in result.applied_discounts] == [1,2]
 
 
-def test_fractional_cent_bases_preserve_prices_and_report_pending_rounding_rules():
+@pytest.mark.parametrize("include,base,amount,total", [
+    (False, "1.01", "0.10", "1.91"),
+    (True, "2.01", "0.20", "1.81"),
+])
+def test_fractional_cent_bases_round_the_line_once_and_preserve_unit_prices(include, base, amount, total):
     original = summary((1,"0.335","0.335",3))
     assert calculate(original, []).total == original.total
-    result = calculate(original, [discount(rules=conditions(include_complements=True))])
-    assert result.subtotal == result.total == original.subtotal and result.discount_total == 0
-    assert result.items == original.items
-    assert result.pending_discounts[0].reason == "price_precision_pending"
+    result = calculate(original, [discount(rules=conditions(include_complements=include))])
+    assert result.subtotal == result.items[0].subtotal == Decimal("2.01")
+    assert result.items[0].selection == original.items[0].selection
+    assert result.applied_discounts[0].base == Decimal(base)
+    assert result.discount_total == Decimal(amount) and result.total == Decimal(total)
+    assert result.pending_discounts == [] and result.discounts_status == "applied"
 
 
 def test_fractional_unit_prices_with_exact_cent_line_bases_do_not_get_rounded_away():
@@ -189,5 +195,52 @@ def test_fractional_unit_prices_with_exact_cent_line_bases_do_not_get_rounded_aw
 def test_ineligible_fractional_cent_line_cannot_create_an_inconsistent_rounded_total():
     original = summary((1,"10","0",1),(2,"0.0001","0",1))
     result = calculate(original,[discount()])
-    assert result.total == original.total and not result.applied_discounts
-    assert result.pending_discounts[0].reason == "price_precision_pending"
+    assert result.subtotal == sum(row.subtotal for row in result.items) == Decimal("10.00")
+    assert result.discount_total == Decimal("1.00") and result.total == Decimal("9.00")
+    assert result.items[1].subtotal == Decimal("0.00")
+    assert result.items[1].selection == original.items[1].selection
+    assert result.pending_discounts == []
+
+
+@pytest.mark.parametrize("base,extra,subtotal,discounted", [
+    ("0.0044", "0.0044", "0.01", "0.01"),  # Empate: el centavo corresponde al producto.
+    ("0.004", "0.005", "0.01", "0.00"),    # El resto mayor corresponde al complemento excluido.
+    ("0.009", "0.009", "0.02", "0.01"),
+    ("0.001", "0.001", "0.00", "0.00"),
+    ("0.005", "0", "0.01", "0.01"),
+    ("0", "0.005", "0.01", "0.00"),
+])
+def test_fractional_components_preserve_the_rounded_line_and_never_discount_excluded_extras(
+    base, extra, subtotal, discounted,
+):
+    result = calculate(summary((1,base,extra,1)), [discount(value="100")])
+    assert result.subtotal == result.items[0].subtotal == Decimal(subtotal)
+    assert result.discount_total == Decimal(discounted)
+    assert result.total == Decimal(subtotal) - Decimal(discounted) >= 0
+    assert result.discount_total == sum(row.amount for row in result.applied_discounts)
+    assert result.pending_discounts == []
+    assert all(value.as_tuple().exponent == -2 for value in (result.subtotal,result.discount_total,result.total))
+
+
+def test_fractional_lines_successive_discounts_and_caps_reconcile_every_cent():
+    original = summary((1,"0.335","0.335",3),(2,"0.005","0",1),(3,"0.005","0",1))
+    records = [discount(1,value="50",products=(1,2),rules=conditions(compatible_discount_ids=[2,3])),
+               discount(2,value="50",products=(1,2),rules=conditions(compatible_discount_ids=[1,3])),
+               discount(3,"FIXED_AMOUNT","999",products=(1,2),rules=conditions(compatible_discount_ids=[1,2]))]
+    with localcontext() as context:
+        context.prec = 2
+        context.rounding = ROUND_DOWN
+        result = calculate(original,reversed(records))
+        assert context.prec == 2 and context.rounding == ROUND_DOWN
+    assert result.model_dump() == calculate(original,records).model_dump()
+    assert result.subtotal == sum(row.subtotal for row in result.items) == Decimal("2.03")
+    assert [row.amount for row in result.applied_discounts] == [Decimal("0.52"),Decimal("0.25"),Decimal("0.25")]
+    assert result.discount_total == sum(row.amount for row in result.applied_discounts) == Decimal("1.02")
+    assert result.total == result.subtotal - result.discount_total == Decimal("1.01")
+    assert result.pending_discounts == []
+    for applied in result.applied_discounts:
+        assert applied.amount == sum(row.amount for row in applied.allocations)
+    for index, row in enumerate(result.items):
+        amount = sum(allocation.amount for applied in result.applied_discounts
+                     for allocation in applied.allocations if allocation.item_index == index)
+        assert 0 <= amount <= row.subtotal

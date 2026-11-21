@@ -84,7 +84,8 @@ def submit_order(db, payload: OrderSubmissionInput, idempotency_key: UUID, *, ac
             line_index=index, product_id=row.selection.product_id,
             product_variant_id=row.selection.product_variant_id, product_name=row.selection.product_name,
             variant_name=row.selection.variant_name, quantity=row.quantity, base_price=row.selection.base_price,
-            complements_total=row.selection.complements_total, unit_total=row.selection.unit_total, subtotal=row.subtotal,
+            complements_total=row.selection.complements_total, unit_total=row.selection.unit_total,
+            subtotal=order_summary_service.exact_line_subtotal(row),
             complements=[OrderDetailComplement(
                 position=position, product_complement_id=option.product_complement_id,
                 product_modifier_id=option.product_modifier_id, name_snapshot=option.name, unit_price=option.price,

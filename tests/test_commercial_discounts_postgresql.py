@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from app.db.schema_compatibility import validate_bridge_schema
 from app.models import (
     AuthBase, Base, CommercialDiscountAssignment, CommercialDiscountBase, CouponBase, CustomerCoupon,
-    Discount, Order, OrderBase, OrderDiscountSnapshot, PasswordRecoveryBase, ProductVariant, RestaurantOrderSettings,
+    Discount, Order, OrderBase, OrderDiscountSnapshot, PasswordRecoveryBase, ProductComplement, ProductVariant, RestaurantOrderSettings,
 )
 from app.models.sync_run import SyncBase
 from test_auth_persistence import auth_database, config_for
@@ -90,6 +90,63 @@ def test_active_unassigned_discount_is_reported_but_never_applied(order_client, 
     assert response.json()["applied_discounts"] == []
     assert response.json()["pending_discounts"] == [{"discount_id": discount.discount_id,
         "name": discount.name,"reason":"eligibility_pending"}]
+
+
+@pytest.mark.parametrize("base,extra,quantity,expected_subtotal,expected_discount,expected_total", [
+    ("0.335", "0.335", 3, "2.01", "0.58", "1.43"),
+    ("0.335", "0.336", 3, "2.01", "0.58", "1.43"),
+    ("0.0001", "0.0001", 10000, "2.00", "0.58", "1.42"),
+    ("0.001", "0.001", 1, "0.00", "0.00", "0.00"),
+])
+def test_fractional_prices_share_summary_submission_and_history_without_changing_exact_details(
+    order_client, menu_db, detail_catalog, base, extra, quantity, expected_subtotal, expected_discount, expected_total,
+):
+    c = detail_catalog
+    option_id = c.shared.complements[1].product_complement_id
+    variant_id = c.product.variants[0].product_variant_id
+    with menu_db.sessions.begin() as db:
+        db.get(ProductVariant, variant_id).price = Decimal(base)
+        db.get(ProductComplement, option_id).price = Decimal(extra)
+    discounts = [add_discount(menu_db.sessions,[c.product.product_id],value="20"),
+                 add_discount(menu_db.sessions,[c.product.product_id],value="10"),
+                 add_discount(menu_db.sessions,[c.product.product_id],kind="FIXED_AMOUNT",value="0.02")]
+    identifiers = [row.discount_id for row in discounts]
+    with menu_db.sessions.begin() as db:
+        for row in db.scalars(select(CommercialDiscountAssignment)):
+            row.conditions = conditions(include_complements=True,
+                compatible_discount_ids=[identifier for identifier in identifiers if identifier != row.discount_id])
+    body = payload(c)
+    body["cart"]["items"] = [item(c.product,quantity=quantity,complements=[option_id])]
+    response = order_client.post("/api/cart/summary",json=body["cart"])
+    assert response.status_code == 200, response.text
+    summary = response.json()
+    assert summary["subtotal"] == expected_subtotal and summary["discount_total"] == expected_discount
+    assert summary["total"] == expected_total and summary["pending_discounts"] == []
+    assert sum(Decimal(row["subtotal"]) for row in summary["items"]) == Decimal(expected_subtotal)
+    assert sum(Decimal(row["amount"]) for row in summary["applied_discounts"]) == Decimal(expected_discount)
+    key = uuid4()
+    created = submit(order_client,body,key=key)
+    assert created.status_code == 201, created.text
+    receipt = created.json()
+    assert {name:receipt[name] for name in summary} == summary
+    with menu_db.sessions() as db:
+        order = db.get(Order,UUID(receipt["order_id"]))
+        detail, = order.details
+        assert detail.base_price == Decimal(base) and detail.complements_total == Decimal(extra)
+        assert detail.subtotal == detail.unit_total * quantity == (Decimal(base) + Decimal(extra)) * quantity
+        assert order.subtotal == Decimal(expected_subtotal) and order.total == Decimal(expected_total)
+        snapshot = db.get(OrderDiscountSnapshot,order.order_id)
+        assert snapshot.calculation["line_subtotals"] == [expected_subtotal]
+    with menu_db.sessions.begin() as db:
+        db.get(ProductVariant,variant_id).price = Decimal("100")
+        db.get(ProductComplement,option_id).price = Decimal("50")
+        for row in db.scalars(select(Discount)):
+            row.value = Decimal("99")
+    assert submit(order_client,body,key=key).json() == receipt
+    tracked = order_client.get(receipt["tracking"]["path"],
+        headers={"Authorization": f'Bearer {receipt["tracking"]["token"]}'})
+    assert tracked.status_code == 200, tracked.text
+    assert {name:tracked.json()[name] for name in summary} == summary
 
 
 def test_mvp_stacking_is_shared_by_summary_submission_and_historical_snapshot(order_client, menu_db, detail_catalog):
