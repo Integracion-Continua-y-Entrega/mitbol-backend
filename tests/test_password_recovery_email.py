@@ -30,6 +30,7 @@ SENDER = "cuentas@example.test"
 
 def config(**changes):
     values = dict(_env_file=None,app_env="test",database_url="postgresql://unused@localhost/unused",
+        auth_recovery_email_provider="smtp",
         auth_recovery_url=FRONTEND_URL,auth_smtp_host="smtp.example.test",auth_smtp_port=587,
         auth_smtp_security="starttls",auth_smtp_username=USERNAME,auth_smtp_password=PASSWORD,
         auth_smtp_from=SENDER,auth_smtp_timeout_seconds=4.5)
@@ -117,7 +118,8 @@ def test_unsafe_transport_configuration_is_rejected_without_echoing_private_inpu
 @pytest.mark.parametrize("configured", [False,True])
 def test_app_factory_wires_callback_lazily_and_starts_without_smtp(configured, smtp):
     settings = auth_config(**({key:value for key,value in config().model_dump().items()
-                             if key.startswith("auth_smtp_") or key == "auth_recovery_url"} if configured else {}))
+                             if key.startswith("auth_smtp_") or key in {
+                                 "auth_recovery_url","auth_recovery_email_provider"}} if configured else {}))
     app = create_app(settings)
     if configured:
         assert isinstance(app.state.auth_service.recovery_delivery,email_delivery.SmtpRecoveryDelivery)
