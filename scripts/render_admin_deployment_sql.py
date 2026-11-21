@@ -21,7 +21,7 @@ BEGIN
         RAISE EXCEPTION 'NEON_WRITER_NOT_APPROVED: destino, operador, versión o marcas de ejecución no válidos.';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006', '20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')) THEN
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006', '20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014')) THEN
         RAISE EXCEPTION 'NEON_WRITER_SCHEMA';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mitbol_admin_writer') THEN
@@ -83,7 +83,7 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
        (SELECT 1 FROM public.alembic_version WHERE version_num IN
-        ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013')) THEN
+        ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014')) THEN
         RAISE EXCEPTION 'RECENT_WRONG_SCHEMA';
     END IF;
     SELECT oid INTO writer FROM pg_roles WHERE rolname='mitbol_admin_writer'

@@ -11,7 +11,9 @@ from app.db.connection import DatabaseTargetError
 RECENT_REVISIONS = tuple(f"20261119_{number:04d}" for number in range(9, 13))
 CATEGORY_REVISIONS = frozenset({"20261115_0008", *RECENT_REVISIONS})
 COMMERCIAL_DISCOUNTS_REVISION = "20261120_0013"
-CATEGORY_REVISIONS = CATEGORY_REVISIONS | {COMMERCIAL_DISCOUNTS_REVISION}
+ORDER_MANAGEMENT_REVISION = "20261121_0014"
+LATEST_REVISIONS = {COMMERCIAL_DISCOUNTS_REVISION,ORDER_MANAGEMENT_REVISION}
+CATEGORY_REVISIONS = CATEGORY_REVISIONS | LATEST_REVISIONS
 BRIDGE_REVISIONS = frozenset({"20261114_0007", *CATEGORY_REVISIONS})
 
 
@@ -34,6 +36,7 @@ def validate_bridge_schema(connection):
     from app.models.password_recovery import PasswordRecoveryBase
     from app.models.coupon import CouponBase
     from app.models.commercial_discount import CommercialDiscountBase
+    from app.models.order_status_history import OrderStateBase
 
     tables = [table for metadata in (pre_categories_metadata, AuthBase.metadata, SyncBase.metadata)
               for table in metadata.tables.values()]
@@ -44,16 +47,18 @@ def validate_bridge_schema(connection):
         cursor.execute("SELECT version_num FROM public.alembic_version")
         heads = cursor.fetchall()
         if len(heads) != 1 or heads[0][0] not in BRIDGE_REVISIONS:
-            raise DatabaseTargetError("El backend requiere exactamente una revisión aprobada: 20261114_0007, 20261115_0008, 20261119_0009–0012 o 20261120_0013.")
+            raise DatabaseTargetError("El backend requiere exactamente una revisión aprobada: 20261114_0007, 20261115_0008, 20261119_0009–0012, 20261120_0013 o 20261121_0014.")
         revision = heads[0][0]
-        if revision in RECENT_REVISIONS or revision == COMMERCIAL_DISCOUNTS_REVISION:
+        if revision in RECENT_REVISIONS or revision in LATEST_REVISIONS:
             tables.extend(OrderBase.metadata.tables.values())
-        if revision in RECENT_REVISIONS[2:] or revision == COMMERCIAL_DISCOUNTS_REVISION:
+        if revision in RECENT_REVISIONS[2:] or revision in LATEST_REVISIONS:
             tables.extend(PasswordRecoveryBase.metadata.tables.values())
-        if revision in {RECENT_REVISIONS[3], COMMERCIAL_DISCOUNTS_REVISION}:
+        if revision == RECENT_REVISIONS[3] or revision in LATEST_REVISIONS:
             tables.extend(CouponBase.metadata.tables.values())
-        if revision == COMMERCIAL_DISCOUNTS_REVISION:
+        if revision in LATEST_REVISIONS:
             tables.extend(CommercialDiscountBase.metadata.tables.values())
+        if revision == ORDER_MANAGEMENT_REVISION:
+            tables.extend(OrderStateBase.metadata.tables.values())
         expected = {(table.name, col.name): (_type(str(col.type.compile(dialect=postgresql.dialect()))), not col.nullable)
                     for table in tables for col in table.columns}
         if revision == RECENT_REVISIONS[0]:

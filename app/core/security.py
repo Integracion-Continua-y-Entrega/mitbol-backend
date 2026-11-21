@@ -106,7 +106,8 @@ class AdminRequestGuard:
             return
         request = Request(scope)
         error = None
-        if self.config.auth_enabled and not self.config.auth_catalog_enabled:
+        staff_orders = scope["path"] == "/api/admin/orders" or scope["path"].startswith("/api/admin/orders/")
+        if self.config.auth_enabled and not self.config.auth_catalog_enabled and not staff_orders:
             await JSONResponse({"detail": "Recurso no encontrado."}, status_code=404)(scope, receive, send)
             return
         if self.config.auth_enabled:

@@ -51,6 +51,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     if config.auth_enabled:
         from app.api.auth import router as auth_router
         from app.api.coupons import router as coupon_router
+        from app.api.staff_orders import router as staff_order_router
         from app.core.auth_errors import AuthError
         from app.core.auth_http import AuthRequestGuard, auth_error_response
         from app.db.auth_database import auth_session_factory_for
@@ -62,6 +63,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
             recovery_delivery=smtp_recovery_delivery(config))
         application.include_router(auth_router)
         application.include_router(coupon_router)
+        application.include_router(staff_order_router)
         application.add_middleware(AuthRequestGuard, config=config)
         # CORS exterior resuelve preflight sin credenciales y decora también errores.
         application.add_middleware(ScopedCORSMiddleware, config=config)

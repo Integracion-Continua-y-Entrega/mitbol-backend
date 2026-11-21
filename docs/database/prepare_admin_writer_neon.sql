@@ -16,7 +16,7 @@ BEGIN
         RAISE EXCEPTION 'NEON_WRITER_NOT_APPROVED: destino, operador, versión o marcas de ejecución no válidos.';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006', '20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')) THEN
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006', '20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014')) THEN
         RAISE EXCEPTION 'NEON_WRITER_SCHEMA';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mitbol_admin_writer') THEN
@@ -53,7 +53,7 @@ GRANT SELECT (product_variant_id, tag_id) ON public."ProductTags" TO mitbol_admi
 -- HU-009: lectura administrativa únicamente, sin secuencia ni DML comercial.
 DO $discounts$
 BEGIN
-    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261111_0006', '20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')) THEN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261111_0006', '20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014')) THEN
         GRANT SELECT (discount_id, loyverse_id, name, discount_type, value, scope,
                       is_active, synced_at, created_at) ON public."Discounts" TO mitbol_admin_writer;
     END IF;
@@ -63,7 +63,7 @@ $discounts$;
 -- HU-010: únicamente consulta y encolado, nunca consumo ni DML comercial.
 DO $sync$
 BEGIN
-    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')) THEN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014')) THEN
         GRANT SELECT ON public."SyncRuns" TO mitbol_admin_writer;
         GRANT INSERT (run_id, store_id, source, requested_by) ON public."SyncRuns" TO mitbol_admin_writer;
         GRANT SELECT (version_num) ON public.alembic_version TO mitbol_admin_writer;
@@ -120,7 +120,7 @@ ALTER ROLE mitbol_admin_writer SET statement_timeout TO '15s';
 ALTER ROLE mitbol_admin_writer SET lock_timeout TO '5s';
 DO $categories$
 BEGIN
-    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')) THEN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014')) THEN
         GRANT SELECT (category_id) ON public."Products" TO mitbol_admin_writer;
     END IF;
 END
@@ -131,7 +131,7 @@ DO $recent$
 DECLARE
     revision text := (SELECT version_num FROM public.alembic_version);
 BEGIN
-    IF revision IN ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013') THEN
+    IF revision IN ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014') THEN
         GRANT SELECT (phone,created_at,updated_at), INSERT (name,phone,updated_at), UPDATE (name,phone,updated_at)
             ON public."Persons" TO mitbol_admin_writer;
         GRANT INSERT (person_id,email,password_hash,is_active,email_verified_at,last_login_at,updated_at)
@@ -164,25 +164,30 @@ BEGIN
               INSERT (order_detail_id,product_complement_id,product_modifier_id,position,name_snapshot,unit_price)
             ON public."OrderDetailComplements" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261119_0010','20261119_0011','20261119_0012','20261120_0013') THEN
+    IF revision IN ('20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014') THEN
         GRANT SELECT (guest_tracking_token), INSERT (guest_tracking_token), UPDATE (guest_tracking_token)
             ON public."Orders" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261119_0011','20261119_0012','20261120_0013') THEN
+    IF revision IN ('20261119_0011','20261119_0012','20261120_0013','20261121_0014') THEN
         GRANT SELECT (account_id,token_hash,auth_version,created_at,expires_at),
               INSERT (account_id,token_hash,auth_version,created_at,expires_at),
               UPDATE (token_hash,auth_version,created_at,expires_at), DELETE
             ON public."PasswordResetTokens" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261119_0012','20261120_0013') THEN
+    IF revision IN ('20261119_0012','20261120_0013','20261121_0014') THEN
         GRANT SELECT (customer_coupon_id,account_id,name,description,discount_id,starts_at,expires_at,status,conditions,created_at)
             ON public."CustomerCoupons" TO mitbol_admin_writer;
     END IF;
-    IF revision = '20261120_0013' THEN
+    IF revision IN ('20261120_0013','20261121_0014') THEN
         GRANT SELECT (discount_id,product_id,conditions)
             ON public."CommercialDiscountAssignments" TO mitbol_admin_writer;
         GRANT SELECT (order_id,calculation), INSERT (order_id,calculation)
             ON public."OrderDiscountSnapshots" TO mitbol_admin_writer;
+    END IF;
+    IF revision = '20261121_0014' THEN
+        GRANT SELECT (status_history_id,order_id,previous_status,status,actor_account_id,reason,created_at),
+              INSERT (status_history_id,order_id,previous_status,status,actor_account_id,reason)
+            ON public."OrderStatusHistories" TO mitbol_admin_writer;
     END IF;
 END
 $recent$;
