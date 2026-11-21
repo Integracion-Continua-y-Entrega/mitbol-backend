@@ -55,7 +55,7 @@ def test_metadata_is_separate_and_migration_has_one_new_head():
     assert not set(catalog_metadata.tables) & AUTH_TABLES
     scripts = ScriptDirectory.from_config(config_for())
     assert len(Base.metadata.tables) == 10
-    assert scripts.get_heads() == ["20261120_0013"]
+    assert scripts.get_heads() == ["20261121_0014"]
     assert scripts.get_revision("20261120_0013").down_revision == "20261119_0012"
     assert scripts.get_revision("20261119_0012").down_revision == "20261119_0011"
     assert scripts.get_revision("20261119_0011").down_revision == "20261119_0010"
@@ -218,7 +218,7 @@ def test_identity_relationships_and_database_uniqueness(db, encoded_password):
     assert employee.person_id == account.person_id
     assert account.person.employee is employee and account.person.account is account
     assert permissions_for_roles([link.role.code for link in employee.role_assignments], employee_active=employee.is_active) == {
-        "catalog:read", "availability:write",
+        "catalog:read", "availability:write", "orders:read", "orders:write",
     }
     other = Person(name="Otra persona sintética", phone="0000000001")
     db.add(other)

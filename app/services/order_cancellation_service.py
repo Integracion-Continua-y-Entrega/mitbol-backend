@@ -2,11 +2,11 @@
 
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
-from app.models.order import INITIAL_STATUS, Order
+from app.models.order import Order
 from app.schemas.orders import OrderCancellationResponse
-from app.services import order_tracking_service
+from app.services import order_state_service, order_tracking_service
 
 
 class OrderNotPendingError(ValueError):
@@ -26,9 +26,7 @@ def cancel_order(db, order_id: UUID, *, account_id: int | None = None,
 
     # PostgreSQL bloquea la fila y vuelve a comprobar el estado si esperó otra
     # transacción. No se toma una decisión usando el estado leído al autorizar.
-    identifier = db.scalar(update(Order).where(
-        Order.order_id == order_id, owner, Order.status == INITIAL_STATUS,
-    ).values(status="Cancelado").returning(Order.order_id).execution_options(synchronize_session="fetch"))
+    identifier = order_state_service.transition_pending(db,order_id,"Cancelado",owner=owner,actor_account_id=account_id)
     if identifier is None:
         raise OrderNotPendingError()
     return OrderCancellationResponse(order_id=identifier)

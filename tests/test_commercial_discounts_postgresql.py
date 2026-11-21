@@ -258,3 +258,37 @@ def test_compatible_coupon_summary_and_order_work_with_existing_restricted_write
         assert snapshot.calculation["coupon"]["selected_coupon_id"] == coupon.customer_coupon_id
         assert snapshot.calculation["coupon"]["benefit_amount"] == "10.00"
         assert db.get(CustomerCoupon,coupon.customer_coupon_id).status == "available"
+
+
+def test_staff_order_history_uses_existing_writer_without_private_access_for_readers_or_workers(restricted_backend, compatible_database):
+    b = restricted_backend
+    with b.roles.owner.begin() as db:
+        command.upgrade(config_for(db),"20261121_0014")
+    execute_script(b.roles.owner,approved(DELTA))
+    try:
+        with b.sessions.begin() as db:
+            db.get(RestaurantOrderSettings,1).accepting_orders = True
+        receipt = submit(b.client,{"cart":{"items":[{"product_id":b.product_id,"product_variant_id":b.variant_id,"quantity":1}]},
+            "data":{"modality":"dine_in","name":"Invitado"}}).json()
+        headers = csrf_headers(login(b,"staff"))
+        assert b.client.get("/api/admin/orders").status_code == 200
+        accepted = b.client.post(f'/api/admin/orders/{receipt["order_id"]}/accept',json={},headers=headers)
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["status"] == "Aceptado" and len(accepted.json()["history"]) == 2
+        execute_script(b.roles.writer,VERIFY.read_text(encoding="utf-8"))
+        with b.roles.writer.connect() as db:
+            assert validate_bridge_schema(db) == "20261121_0014"
+        for engine in (b.roles.reader,*compatible_database.workers.values()):
+            denied(engine,'SELECT * FROM "OrderStatusHistories"')
+        for statement in ('UPDATE "OrderStatusHistories" SET status=\'Cancelado\'',
+                          'DELETE FROM "OrderStatusHistories"'):
+            denied(b.roles.writer,statement)
+        for role,filename in (("mitbol_catalog_worker","verify_catalog_worker.sql"),
+                              ("mitbol_discount_worker","verify_discount_worker.sql")):
+            worker = compatible_database.workers[role]
+            execute_script(worker,(SQL/filename).read_text(encoding="utf-8"))
+            with worker.connect() as db:
+                assert validate_bridge_schema(db) == "20261121_0014"
+    finally:
+        with b.roles.owner.begin() as db:
+            command.downgrade(config_for(db),"20261120_0013")
