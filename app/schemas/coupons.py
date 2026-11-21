@@ -4,21 +4,32 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator, model_validator
 
 from app.schemas.auth import AuthInput
 from app.schemas.cart import CartValidationInput
 from app.schemas.menu import MenuAmount
-from app.schemas.order_summary import OrderSummaryResponse
+from app.schemas.order_summary import CouponApplicationResult, OrderSummaryResponse
 
 
 class CouponConditions(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    scope: Literal["order"] = Field(description="Alcance explícito sobre el subtotal completo del carrito.")
+    scope: Literal["order", "products"] = Field(description="order incluye el subtotal completo; products exige productos y alcance de complementos explícitos.")
     minimum_subtotal: MenuAmount | None = None
     minimum_quantity: PositiveInt | None = None
     modalities: list[Literal["dine_in", "pickup"]] | None = Field(default=None, min_length=1)
+    product_ids: list[PositiveInt] | None = Field(default=None, min_length=1)
+    include_complements: bool | None = None
+    compatible_discount_ids: list[PositiveInt] | None = None
+
+    @model_validator(mode="after")
+    def explicit_product_scope(self):
+        if self.scope == "products" and (not self.product_ids or self.include_complements is None):
+            raise ValueError("El alcance por productos requiere productos y tratamiento de complementos.")
+        if self.scope == "order" and self.product_ids is not None:
+            raise ValueError("El alcance order no admite restricciones de productos contradictorias.")
+        return self
 
     @field_validator("minimum_subtotal", mode="before")
     @classmethod
@@ -58,13 +69,8 @@ class CouponSelectionInput(AuthInput):
     modality: Literal["dine_in", "pickup"]
 
 
-class CouponSelectionResponse(BaseModel):
+class CouponSelectionResponse(CouponApplicationResult):
     coupon: CouponRead
-    selected_coupon_id: int | None
-    eligible: bool
-    reason: str | None
-    calculation_status: Literal["calculated", "rules_pending", "not_eligible"]
-    benefit_amount: MenuAmount | None
     preliminary: Literal[True] = True
-    order_integration_status: Literal["not_integrated"] = "not_integrated"
-    summary: OrderSummaryResponse = Field(description="Resumen HU-019 sin aplicar el cupón al total definitivo.")
+    order_integration_status: Literal["integrated"] = "integrated"
+    summary: OrderSummaryResponse = Field(description="Resumen HU-019 con el beneficio aplicable, recalculado al enviar el pedido.")

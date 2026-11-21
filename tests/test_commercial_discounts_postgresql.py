@@ -230,3 +230,31 @@ def test_coupon_preview_keeps_commercial_summary_but_does_not_invent_stacking_or
     assert body["benefit_amount"] is None and body["summary"]["discount_total"]=="9.95"
     with b.sessions() as db:
         assert db.get(CustomerCoupon,coupon.customer_coupon_id).status=="available"
+
+
+def test_compatible_coupon_summary_and_order_work_with_existing_restricted_writer(restricted_backend):
+    b = restricted_backend
+    commercial = add_discount(b.sessions,[b.product_id])
+    personal = add_discount(b.sessions,[],kind="FIXED_AMOUNT",value="10")
+    with b.sessions.begin() as db:
+        db.get(CommercialDiscountAssignment,(commercial.discount_id,b.product_id)).conditions = {
+            "include_complements":False,"compatible_discount_ids":[personal.discount_id]}
+        coupon = CustomerCoupon(account_id=b.ids["customer"][0],name="Cupón sintético integrado",discount_id=personal.discount_id,
+            starts_at=b.now.value-timedelta(days=1),expires_at=b.now.value+timedelta(days=1),
+            conditions={"scope":"order","compatible_discount_ids":[commercial.discount_id]})
+        db.add(coupon)
+        db.get(RestaurantOrderSettings,1).accepting_orders = True
+    headers = csrf_headers(login(b,"customer"))
+    cart = {"items":[{"product_id":b.product_id,"product_variant_id":b.variant_id,"quantity":1}]}
+    summary = b.client.post("/api/cart/summary",headers=headers,
+        json=cart | {"customer_coupon_id":coupon.customer_coupon_id,"modality":"dine_in"})
+    assert summary.status_code == 200 and summary.json()["total"] == "79.55", summary.text
+    created = submit(b.client,{"cart":cart,"data":{"modality":"dine_in","name":"Cliente"},
+        "customer_coupon_id":coupon.customer_coupon_id},headers=headers)
+    assert created.status_code == 201, created.text
+    assert created.json()["coupon"] == summary.json()["coupon"] and created.json()["total"] == "79.55"
+    with b.sessions() as db:
+        snapshot = db.get(OrderDiscountSnapshot,UUID(created.json()["order_id"]))
+        assert snapshot.calculation["coupon"]["selected_coupon_id"] == coupon.customer_coupon_id
+        assert snapshot.calculation["coupon"]["benefit_amount"] == "10.00"
+        assert db.get(CustomerCoupon,coupon.customer_coupon_id).status == "available"

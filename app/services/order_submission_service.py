@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
+from app.core.auth_errors import AuthError
 from app.core.session_tokens import generate_session_token
 from app.models.order import Order, OrderDetail, OrderDetailComplement, RestaurantOrderSettings
 from app.schemas.orders import GuestTrackingAccess, OrderSubmissionInput, OrderSubmissionResponse
@@ -32,10 +33,16 @@ def _response(order: Order) -> OrderSubmissionResponse:
     )
 
 
-def submit_order(db, payload: OrderSubmissionInput, idempotency_key: UUID, *, account_id=None) -> OrderSubmissionResponse:
+def submit_order(db, payload: OrderSubmissionInput, idempotency_key: UUID, *, account_id=None, now=None) -> OrderSubmissionResponse:
     """Reutiliza HU-019 → HU-016 → HU-017; una sesión activa identifica la cuenta."""
+    if payload.customer_coupon_id is not None and account_id is None:
+        raise AuthError(401, "Inicia sesión para utilizar un cupón personal.")
+    content = payload.model_dump(mode="json")
+    # Conserva las claves de idempotencia emitidas antes del campo opcional.
+    if content["customer_coupon_id"] is None:
+        content.pop("customer_coupon_id")
     fingerprint = sha256(json.dumps(
-        {"account_id": account_id, **payload.model_dump(mode="json")},
+        {"account_id": account_id, **content},
         sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")).hexdigest()
     # La misma clave se serializa entre procesos/conexiones hasta commit o rollback.
@@ -57,7 +64,16 @@ def submit_order(db, payload: OrderSubmissionInput, idempotency_key: UUID, *, ac
         RestaurantOrderSettings.settings_id == 1).with_for_update(read=True))
     if settings is None or not settings.accepting_orders:
         raise OrderSubmissionError(409, "El restaurante no está aceptando pedidos.")
-    summary = order_summary_service.summarize_cart(db, payload.cart)
+    if payload.customer_coupon_id is not None:
+        if not commercial_discount_service.schema_available(db):
+            raise OrderSubmissionError(503, "El historial de descuentos no está disponible.")
+        summary = order_summary_service.summarize_cart(db, payload.cart, customer_coupon_id=payload.customer_coupon_id,
+            account_id=account_id, modality=payload.data.modality, now=now)
+        if not summary.coupon.eligible:
+            raise OrderSubmissionError(409, {"message":"El cupón seleccionado no puede aplicarse.",
+                "coupon":summary.coupon.model_dump(mode="json")})
+    else:
+        summary = order_summary_service.summarize_cart(db, payload.cart)
     order = Order(
         order_id=uuid4(), idempotency_key=idempotency_key, request_hash=fingerprint, account_id=account_id,
         guest_tracking_token=generate_session_token().value if account_id is None else None,

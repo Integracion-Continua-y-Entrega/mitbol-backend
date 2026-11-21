@@ -27,7 +27,7 @@ SELECT = PATH + "/select"
 def backend(auth_backend):
     b = auth_backend
     with b.sessions.kw["bind"].begin() as connection:
-        command.upgrade(config_for(connection), "20261119_0012")
+        command.upgrade(config_for(connection), "20261120_0013")
     with b.sessions.begin() as db:
         products = []
         for price in ("50.00", "20.00"):
@@ -97,9 +97,9 @@ def test_owned_wallet_and_selection_calculate_fixed_benefit_without_reserving_or
             body = response.json()
             assert body["eligible"] and body["selected_coupon_id"] == b.coupon.customer_coupon_id
             assert body["benefit_amount"] == "25.00" and body["calculation_status"] == "calculated"
-            assert body["summary"]["subtotal"] == body["summary"]["total"] == "170.00"
-            assert body["summary"]["discount_total"] == "0.00" and body["summary"]["discounts_status"] == "not_integrated"
-            assert body["order_integration_status"] == "not_integrated" and body["preliminary"]
+            assert body["summary"]["subtotal"] == "170.00" and body["summary"]["total"] == "145.00"
+            assert body["summary"]["discount_total"] == "25.00" and body["summary"]["discounts_status"] == "applied"
+            assert body["order_integration_status"] == "integrated" and body["preliminary"]
     finally:
         event.remove(engine, "before_cursor_execute", capture)
     assert wallet.status_code == 200 and len(wallet.json()["coupons"]) == 1
@@ -183,12 +183,10 @@ def test_real_conditions_are_checked_and_unknown_conditions_fail_closed(backend,
 
 
 @pytest.mark.parametrize("kind,value,reason", [
-    ("FIXED_PERCENT", "10", "rounding_rules_pending"),
-    ("VARIABLE_AMOUNT", None, "benefit_rules_pending"),
-    ("DISCOUNT_BY_POINTS", None, "benefit_rules_pending"),
+    ("VARIABLE_AMOUNT", None, "benefit_pending"),
+    ("DISCOUNT_BY_POINTS", None, "benefit_pending"),
     ("FIXED_AMOUNT", "NaN", "benefit_pending"), ("FIXED_AMOUNT", "Infinity", "benefit_pending"),
     ("FIXED_AMOUNT", "-5", "benefit_pending"), ("FIXED_AMOUNT", "0", "benefit_pending"),
-    ("FIXED_AMOUNT", "170.01", "benefit_exceeds_subtotal"),
 ])
 def test_incomplete_or_invalid_benefits_never_produce_fictitious_or_negative_amounts(backend, kind, value, reason):
     b = backend
@@ -258,15 +256,16 @@ def test_exact_decimal_preview_and_current_prices_are_revalidated(backend):
     with localcontext() as context, b.sessions() as db:
         context.prec = 2
         result = coupon_service.select_coupon(db, b.ids["customer"][0], data, now=b.now.value)
-        assert result.benefit_amount == Decimal("0.10") and result.summary.total == Decimal("1.20")
+        assert result.benefit_amount == Decimal("0.10") and result.summary.total == Decimal("1.10")
         assert isinstance(result.benefit_amount, Decimal) and context.prec == 2
     with b.sessions.begin() as db:
         db.get(Discount, b.discount.discount_id).value = Decimal("2.00")
     signed_in = login(b, "customer")
-    assert select_coupon(b, headers=csrf_headers(signed_in)).json()["reason"] == "benefit_exceeds_subtotal"
+    capped = select_coupon(b, headers=csrf_headers(signed_in)).json()
+    assert capped["eligible"] and capped["benefit_amount"] == "1.20" and capped["summary"]["total"] == "0.00"
 
 
-def test_empty_cart_is_not_eligible_and_existing_order_submission_does_not_apply_or_consume_coupon(backend):
+def test_empty_cart_is_not_eligible_and_orders_apply_only_explicit_coupons_without_consuming(backend):
     b = backend
     signed_in = login(b, "customer")
     assert select_coupon(b, changes={"cart": {"items": []}}, headers=csrf_headers(signed_in)).json()["reason"] == "empty_cart"
@@ -282,4 +281,6 @@ def test_empty_cart_is_not_eligible_and_existing_order_submission_does_not_apply
     assert coupon_state(b) == before
     response = b.client.post("/api/orders", json=body | {"customer_coupon_id": b.coupon.customer_coupon_id},
                             headers=csrf_headers(signed_in) | {"Idempotency-Key": str(uuid4())})
-    assert response.status_code == 422
+    assert response.status_code == 201, response.text
+    assert response.json()["total"] == "145.00" and response.json()["coupon"]["selected_coupon_id"] == b.coupon.customer_coupon_id
+    assert coupon_state(b) == before

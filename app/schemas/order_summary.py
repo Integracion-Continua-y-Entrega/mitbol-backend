@@ -14,14 +14,23 @@ class OrderSummaryItem(ValidatedCartItem):
     subtotal: MenuAmount = Field(description="quantity × selection.unit_total; incluye complementos.")
 
 
+class CouponApplicationResult(BaseModel):
+    selected_coupon_id: int | None
+    eligible: bool
+    reason: str | None
+    calculation_status: Literal["calculated", "rules_pending", "not_eligible"]
+    benefit_amount: MenuAmount | None
+
+
 class OrderSummaryResponse(BaseModel):
     currency: Literal["MXN"] = "MXN"
     items: list[OrderSummaryItem]
     subtotal: MenuAmount
     discount_total: MenuAmount = Decimal("0")
-    total: MenuAmount = Field(description="Subtotal menos descuentos comerciales calculados; nunca incluye el cupón preliminar.")
+    total: MenuAmount = Field(description="Subtotal menos descuentos comerciales y el cupón elegible, sin reserva ni canje.")
     applied_discounts: list[AppliedCommercialDiscount] = Field(default_factory=list)
     pending_discounts: list[PendingCommercialDiscount] = Field(default_factory=list)
+    coupon: CouponApplicationResult | None = None
     discounts_status: Literal["not_integrated", "not_applicable", "applied", "rules_pending"] = Field(
         default="not_integrated",
         description="rules_pending indica condiciones comerciales incompletas; los descuentos pendientes no se aplican.",
