@@ -45,6 +45,7 @@ from app.models.auth_limits import AuthRateLimit, AuthRateLimitPolicy
 from app.models.password_recovery import PasswordRecoveryBase, PasswordResetToken
 from app.models.coupon import CouponBase, CustomerCoupon
 from app.models.order import OrderBase, Order, OrderDetail, OrderDetailComplement, RestaurantOrderSettings
+from app.models.commercial_discount import CommercialDiscountBase, CommercialDiscountAssignment, OrderDiscountSnapshot
 
 __all__ = [
     "Base", "catalog_metadata", "runtime_catalog_metadata", "pre_categories_metadata",
@@ -57,4 +58,5 @@ __all__ = [
     "PasswordRecoveryBase", "PasswordResetToken",
     "CouponBase", "CustomerCoupon",
     "OrderBase", "Order", "OrderDetail", "OrderDetailComplement", "RestaurantOrderSettings",
+    "CommercialDiscountBase", "CommercialDiscountAssignment", "OrderDiscountSnapshot",
 ]

@@ -19,7 +19,8 @@ class GuestOrderAccessError(LookupError):
 
 def historical_summary(order: Order) -> OrderSummaryResponse:
     """Mismo resumen persistido de HU-021, sin consultar precios del catálogo."""
-    return OrderSummaryResponse(
+    from app.services.commercial_discount_service import restore_snapshot
+    summary = OrderSummaryResponse(
         subtotal=order.subtotal, discount_total=order.discount_total, total=order.total,
         items=[OrderSummaryItem(
             quantity=int(row.quantity), subtotal=row.subtotal,
@@ -35,6 +36,7 @@ def historical_summary(order: Order) -> OrderSummaryResponse:
             ),
         ) for row in order.details],
     )
+    return restore_snapshot(order, summary)
 
 
 def authorize_guest_order(db, order_id: UUID, token: str | None) -> Order:

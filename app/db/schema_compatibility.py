@@ -10,6 +10,8 @@ from app.db.connection import DatabaseTargetError
 
 RECENT_REVISIONS = tuple(f"20261119_{number:04d}" for number in range(9, 13))
 CATEGORY_REVISIONS = frozenset({"20261115_0008", *RECENT_REVISIONS})
+COMMERCIAL_DISCOUNTS_REVISION = "20261120_0013"
+CATEGORY_REVISIONS = CATEGORY_REVISIONS | {COMMERCIAL_DISCOUNTS_REVISION}
 BRIDGE_REVISIONS = frozenset({"20261114_0007", *CATEGORY_REVISIONS})
 
 
@@ -31,6 +33,7 @@ def validate_bridge_schema(connection):
     from app.models.order import OrderBase
     from app.models.password_recovery import PasswordRecoveryBase
     from app.models.coupon import CouponBase
+    from app.models.commercial_discount import CommercialDiscountBase
 
     tables = [table for metadata in (pre_categories_metadata, AuthBase.metadata, SyncBase.metadata)
               for table in metadata.tables.values()]
@@ -41,14 +44,16 @@ def validate_bridge_schema(connection):
         cursor.execute("SELECT version_num FROM public.alembic_version")
         heads = cursor.fetchall()
         if len(heads) != 1 or heads[0][0] not in BRIDGE_REVISIONS:
-            raise DatabaseTargetError("El backend requiere exactamente una revisión aprobada: 20261114_0007, 20261115_0008 o 20261119_0009–0012.")
+            raise DatabaseTargetError("El backend requiere exactamente una revisión aprobada: 20261114_0007, 20261115_0008, 20261119_0009–0012 o 20261120_0013.")
         revision = heads[0][0]
-        if revision in RECENT_REVISIONS:
+        if revision in RECENT_REVISIONS or revision == COMMERCIAL_DISCOUNTS_REVISION:
             tables.extend(OrderBase.metadata.tables.values())
-        if revision in RECENT_REVISIONS[2:]:
+        if revision in RECENT_REVISIONS[2:] or revision == COMMERCIAL_DISCOUNTS_REVISION:
             tables.extend(PasswordRecoveryBase.metadata.tables.values())
-        if revision == RECENT_REVISIONS[3]:
+        if revision in {RECENT_REVISIONS[3], COMMERCIAL_DISCOUNTS_REVISION}:
             tables.extend(CouponBase.metadata.tables.values())
+        if revision == COMMERCIAL_DISCOUNTS_REVISION:
+            tables.extend(CommercialDiscountBase.metadata.tables.values())
         expected = {(table.name, col.name): (_type(str(col.type.compile(dialect=postgresql.dialect()))), not col.nullable)
                     for table in tables for col in table.columns}
         if revision == RECENT_REVISIONS[0]:

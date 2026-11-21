@@ -26,7 +26,7 @@ BEGIN
         RAISE EXCEPTION 'HU010_WRONG_TARGET_OR_OPERATOR';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')) THEN
         RAISE EXCEPTION 'HU010_WRONG_SCHEMA';
     END IF;
     SELECT oid INTO writer FROM pg_roles WHERE rolname = 'mitbol_admin_writer'

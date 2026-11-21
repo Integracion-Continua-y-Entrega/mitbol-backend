@@ -24,7 +24,7 @@ BEGIN
         RAISE EXCEPTION 'WORKER_WRONG_TARGET_OR_OPERATOR';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')) THEN
         RAISE EXCEPTION 'WORKER_WRONG_SCHEMA';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='mitbol_catalog_worker') THEN
@@ -73,7 +73,7 @@ ALTER ROLE mitbol_catalog_worker SET lock_timeout TO '5s';
 -- El operador coordina los timeouts del proceso con la duración del catálogo.
 DO $categories$
 BEGIN
-    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')) THEN
         GRANT SELECT ON public."Categories" TO mitbol_catalog_worker;
         GRANT INSERT (loyverse_id,name,color,is_active,synced_at), UPDATE (name,color,is_active,synced_at)
             ON public."Categories" TO mitbol_catalog_worker;

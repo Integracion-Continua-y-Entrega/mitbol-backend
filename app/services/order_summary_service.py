@@ -4,7 +4,7 @@ from decimal import Decimal, localcontext
 
 from app.schemas.cart import CartValidationInput
 from app.schemas.order_summary import OrderSummaryItem, OrderSummaryResponse
-from app.services import cart_service
+from app.services import cart_service, commercial_discount_service
 
 
 def summarize_cart(db, cart: CartValidationInput) -> OrderSummaryResponse:
@@ -22,5 +22,5 @@ def summarize_cart(db, cart: CartValidationInput) -> OrderSummaryResponse:
                  for row in validated.items]
         subtotal = sum((row.subtotal for row in items), Decimal("0"))
 
-    # No existen reglas de aplicación de descuentos a ventas en los servicios actuales.
-    return OrderSummaryResponse(items=items, subtotal=subtotal, total=subtotal)
+    summary = OrderSummaryResponse(items=items, subtotal=subtotal, total=subtotal)
+    return commercial_discount_service.apply_discounts(db, summary)

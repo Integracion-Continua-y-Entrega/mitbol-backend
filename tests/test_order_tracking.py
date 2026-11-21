@@ -37,7 +37,7 @@ def test_guest_receives_private_access_and_tracking_excludes_personal_data(order
         response = order_client.get(access["path"], headers=authorization(access["token"]))
     assert response.status_code == 200, response.text
     result = response.json()
-    assert set(result) == {"order_id", "status", "created_at", "modality", "currency", "items", "subtotal", "discount_total", "total", "discounts_status"}
+    assert set(result) == {"order_id", "status", "created_at", "modality", "currency", "items", "subtotal", "discount_total", "total", "discounts_status", "applied_discounts", "pending_discounts"}
     assert result["order_id"] == receipt["order_id"] and result["status"] == "Solicitud recibida"
     assert result["created_at"] == receipt["created_at"] and result["modality"] == "pickup"
     assert result["items"] == receipt["items"] and result["total"] == receipt["total"] == "344.00"
