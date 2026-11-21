@@ -130,10 +130,11 @@ def test_coordinator_requires_discount_revision_before_provider(empty_postgresql
         expected_database=connection.engine.url.database,
         store_id="a3a56a06-d40c-4c07-931c-41abcbaaba12",
     )
-    client = SimpleNamespace(get_discounts=AsyncMock())
-    with pytest.raises(DiscountSyncError, match="20261111_0006"):
+    client = SimpleNamespace(get_discounts=AsyncMock(), get_stores=AsyncMock())
+    with pytest.raises(DiscountSyncError, match="revisión explícitamente compatible"):
         asyncio.run(service.synchronize(client))
     client.get_discounts.assert_not_awaited()
+    client.get_stores.assert_not_awaited()
 
 
 def test_coordinator_invalid_provider_batch_preserves_data(discount_service):

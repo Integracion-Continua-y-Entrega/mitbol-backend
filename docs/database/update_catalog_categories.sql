@@ -21,7 +21,7 @@ BEGIN
         RAISE EXCEPTION 'CATEGORIES_WRONG_TARGET_OR_OPERATOR';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version)<>1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008')
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012'))
        OR to_regclass('public."Categories"') IS NULL THEN
         RAISE EXCEPTION 'CATEGORIES_WRONG_SCHEMA';
     END IF;

@@ -19,8 +19,8 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1
        OR NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN
-            ('20261102_0003', '20261105_0004', '20261106_0005', '20261111_0006', '20261114_0007', '20261115_0008')) THEN
-        RAISE EXCEPTION 'La base requiere 20261102_0003 o una revision compatible hasta 20261115_0008.';
+            ('20261102_0003', '20261105_0004', '20261106_0005', '20261111_0006', '20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
+        RAISE EXCEPTION 'La base requiere 20261102_0003 o una revision compatible hasta 20261119_0012.';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'mitbol_render_reader') THEN
         RAISE EXCEPTION 'El rol ya existe; revisar sus permisos antes de modificarlo.';
@@ -49,7 +49,7 @@ TO mitbol_render_reader;
 
 DO $categories$
 BEGIN
-    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
         GRANT SELECT (category_id,name,color,is_active) ON public."Categories" TO mitbol_render_reader;
     END IF;
 END

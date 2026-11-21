@@ -295,7 +295,7 @@ def test_reader_is_rejected_before_connecting(cli, monkeypatch):
     cli.factory.assert_not_called()
 
 
-@pytest.mark.parametrize("revision", ["20261102_0003", "20261115_0008"])
+@pytest.mark.parametrize("revision", ["20261102_0003", "20261115_0008", *(f"20261119_{n:04d}" for n in range(9, 13))])
 def test_initial_preflight_never_calls_persistence(cli, monkeypatch, capsys, revision):
     monkeypatch.setenv("LOYVERSE_ACCESS_TOKEN", "PRIVATE_TOKEN")
     monkeypatch.setenv("LOYVERSE_STORE_ID", "test-store")
@@ -305,7 +305,7 @@ def test_initial_preflight_never_calls_persistence(cli, monkeypatch, capsys, rev
     assert cli.preflight.call_count == 2
     assert all(call.kwargs == {"require_empty": True} for call in cli.preflight.call_args_list)
     cli.preview.assert_awaited_once()
-    assert cli.preview.call_args.kwargs == ({"include_categories": True} if revision == "20261115_0008" else {})
+    assert cli.preview.call_args.kwargs == ({} if revision == "20261102_0003" else {"include_categories": True})
     cli.synchronize.assert_not_called()
     output = capsys.readouterr().out
     assert '"status": "ready_for_initial_sync"' in output

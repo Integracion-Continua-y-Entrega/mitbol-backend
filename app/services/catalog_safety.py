@@ -45,8 +45,9 @@ def inspect_catalog_operator(connection) -> dict:
         "AND pg_catalog.has_schema_privilege(current_user, 'public', 'USAGE')"
     )):
         raise DatabaseTargetError("Falta CONNECT o USAGE para el catálogo autorizado.")
-    from app.services.sync_service import CATEGORIES_REVISION, validate_catalog_revision
-    categories_enabled = validate_catalog_revision(connection) == CATEGORIES_REVISION
+    from app.db.schema_compatibility import CATEGORY_REVISIONS
+    from app.services.sync_service import validate_catalog_revision
+    categories_enabled = validate_catalog_revision(connection) in CATEGORY_REVISIONS
     metadata = runtime_catalog_metadata if categories_enabled else catalog_metadata
     for name in (*metadata.tables, "alembic_version"):
         relation = f'public."{name}"'

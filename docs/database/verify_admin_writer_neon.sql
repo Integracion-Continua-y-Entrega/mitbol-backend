@@ -16,7 +16,9 @@ DECLARE
     expected boolean;
     allowed jsonb;
     queue_installed boolean := to_regclass('public."SyncRuns"') IS NOT NULL;
-    queue_permissions CONSTANT jsonb := '{
+    permitted_sequences text[] := ARRAY['Tags_tag_id_seq','ProductImages_product_image_id_seq','AuditEvents_audit_event_id_seq'];
+    revision text;
+    queue_permissions jsonb := '{
       "SyncRuns": {"SELECT":["run_id","catalog_key","store_id","source","status","requested_by","created_at","started_at","finished_at","available_at","attempts","attempt_token","result","error_code"], "INSERT":["run_id","store_id","source","requested_by"]},
       "alembic_version": {"SELECT":["version_num"]},
       "ProductModifiers": {"SELECT":["synced_at"]},
@@ -46,7 +48,7 @@ BEGIN
         RAISE EXCEPTION 'WRITER_NEON_IDENTITY';
     END IF;
     IF to_regclass('public."Categories"') IS NOT NULL THEN
-        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
+        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
             RAISE EXCEPTION 'WRITER_CATEGORIES_SCHEMA';
         END IF;
     END IF;
@@ -84,18 +86,53 @@ BEGIN
             RAISE EXCEPTION 'WRITER_QUEUE_PERMISSIONS';
         END IF;
         IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-           (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007','20261115_0008')) THEN
+           (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007','20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
             RAISE EXCEPTION 'WRITER_QUEUE_SCHEMA';
         END IF;
         -- El puente no consulta la columna y admite el SELECT revisado del delta.
-        IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008')
+        IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012'))
            AND has_column_privilege(writer,'public."Products"','category_id','SELECT') THEN
             policy := jsonb_set(policy,'{Products,SELECT}',(policy->'Products'->'SELECT') || '["category_id"]'::jsonb);
         END IF;
     END IF;
+    IF queue_installed THEN
+        SELECT version_num INTO STRICT revision FROM public.alembic_version;
+    END IF;
+    IF revision IN ('20261119_0009','20261119_0010','20261119_0011','20261119_0012') THEN
+        policy := jsonb_set(policy,'{Persons}', '{"SELECT":["person_id","name","phone","created_at","updated_at"],"INSERT":["name","phone","updated_at"],"UPDATE":["name","phone","updated_at"]}'::jsonb);
+        policy := jsonb_set(policy,'{PersonalAccounts,INSERT}', '["person_id","email","password_hash","is_active","email_verified_at","last_login_at","updated_at"]'::jsonb);
+        policy := policy || '{
+          "RestaurantOrderSettings":{"SELECT":["settings_id","accepting_orders"],"UPDATE":["settings_id"]},
+          "Orders":{"SELECT":["order_id","idempotency_key","request_hash","account_id","modality","requester_name","requester_phone","status","created_at","subtotal","discount_total","total"],"INSERT":["order_id","idempotency_key","request_hash","account_id","modality","requester_name","requester_phone","subtotal","discount_total","total"],"UPDATE":["status"]},
+          "OrderDetails":{"SELECT":["order_detail_id","order_id","line_index","product_id","product_variant_id","product_name","variant_name","quantity","base_price","complements_total","unit_total","subtotal"],"INSERT":["order_id","line_index","product_id","product_variant_id","product_name","variant_name","quantity","base_price","complements_total","unit_total","subtotal"]},
+          "OrderDetailComplements":{"SELECT":["order_detail_complement_id","order_detail_id","product_complement_id","product_modifier_id","position","name_snapshot","unit_price"],"INSERT":["order_detail_id","product_complement_id","product_modifier_id","position","name_snapshot","unit_price"]},
+          "ProductModifierAssignments":{"SELECT":["product_variant_id","product_modifier_id"]}
+        }'::jsonb;
+        queue_permissions := queue_permissions || '{
+          "ProductModifiers":{"SELECT":["product_modifier_id","loyverse_id","name","display_order","synced_at"]},
+          "ProductComplements":{"SELECT":["product_complement_id","product_modifier_id","loyverse_id","name","price","is_active","synced_at","display_order"]}
+        }'::jsonb;
+        permitted_sequences := permitted_sequences || ARRAY['Persons_person_id_seq','PersonalAccounts_account_id_seq',
+            'OrderDetails_order_detail_id_seq','OrderDetailComplements_order_detail_complement_id_seq'];
+    END IF;
+    IF revision IN ('20261119_0010','20261119_0011','20261119_0012') THEN
+        FOREACH operation IN ARRAY ARRAY['SELECT','INSERT','UPDATE'] LOOP
+            policy := jsonb_set(policy,ARRAY['Orders',operation],(policy->'Orders'->operation) || '["guest_tracking_token"]'::jsonb);
+        END LOOP;
+    END IF;
+    IF revision IN ('20261119_0011','20261119_0012') THEN
+        policy := policy || '{"PasswordResetTokens":{"SELECT":["account_id","token_hash","auth_version","created_at","expires_at"],"INSERT":["account_id","token_hash","auth_version","created_at","expires_at"],"UPDATE":["token_hash","auth_version","created_at","expires_at"],"DELETE":true}}'::jsonb;
+    END IF;
+    IF revision = '20261119_0012' THEN
+        policy := policy || '{"CustomerCoupons":{"SELECT":["customer_coupon_id","account_id","name","description","discount_id","starts_at","expires_at","status","conditions","created_at"]}}'::jsonb;
+    END IF;
+    IF EXISTS (SELECT 1 FROM jsonb_object_keys(policy) k(name)
+               WHERE to_regclass(format('public.%I',k.name)) IS NULL) THEN
+        RAISE EXCEPTION 'WRITER_MISSING_RELATIONS';
+    END IF;
     IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relname IN
-        ('Tags_tag_id_seq','ProductImages_product_image_id_seq','AuditEvents_audit_event_id_seq')) <> 3 THEN
+        (SELECT unnest(permitted_sequences))) <> cardinality(permitted_sequences) THEN
         RAISE EXCEPTION 'WRITER_MISSING_SEQUENCES';
     END IF;
     FOR rel IN SELECT c.*, n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -125,8 +162,7 @@ BEGIN
                 RAISE EXCEPTION 'WRITER_TABLE: %', rel.relname;
             END IF;
         ELSIF rel.relkind = 'S' THEN
-            expected := rel.nspname = 'public' AND rel.relname IN
-                ('Tags_tag_id_seq','ProductImages_product_image_id_seq','AuditEvents_audit_event_id_seq');
+            expected := rel.nspname = 'public' AND rel.relname = ANY(permitted_sequences);
             IF has_sequence_privilege(writer, rel.oid, 'USAGE') <> expected
                OR has_sequence_privilege(writer, rel.oid, 'SELECT,UPDATE') THEN
                 RAISE EXCEPTION 'WRITER_SEQUENCE: %', rel.relname;

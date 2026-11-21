@@ -15,8 +15,8 @@ BEGIN
         RAISE EXCEPTION 'WRITER_LOCAL_TARGET: sólo PostgreSQL 18 temporal del ejecutor.';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006', '20261114_0007', '20261115_0008')) THEN
-        RAISE EXCEPTION 'WRITER_SCHEMA: se requiere una revisión entre 0005 y 0008.';
+       (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261106_0005', '20261111_0006', '20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
+        RAISE EXCEPTION 'WRITER_SCHEMA: se requiere una revisión entre 0005 y 0012.';
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mitbol_admin_writer') THEN
         RAISE EXCEPTION 'WRITER_EXISTS: revisar, no sobrescribir permisos existentes.';
@@ -52,7 +52,7 @@ GRANT SELECT (product_variant_id, tag_id) ON public."ProductTags" TO mitbol_admi
 -- HU-009: lectura administrativa únicamente, sin secuencia ni DML comercial.
 DO $discounts$
 BEGIN
-    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261111_0006', '20261114_0007', '20261115_0008')) THEN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261111_0006', '20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
         GRANT SELECT (discount_id, loyverse_id, name, discount_type, value, scope,
                       is_active, synced_at, created_at) ON public."Discounts" TO mitbol_admin_writer;
     END IF;
@@ -62,7 +62,7 @@ $discounts$;
 -- HU-010: únicamente consulta y encolado, nunca consumo ni DML comercial.
 DO $sync$
 BEGIN
-    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007', '20261115_0008')) THEN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007', '20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
         GRANT SELECT ON public."SyncRuns" TO mitbol_admin_writer;
         GRANT INSERT (run_id, store_id, source, requested_by) ON public."SyncRuns" TO mitbol_admin_writer;
         GRANT SELECT (version_num) ON public.alembic_version TO mitbol_admin_writer;
@@ -119,9 +119,64 @@ ALTER ROLE mitbol_admin_writer SET statement_timeout TO '15s';
 ALTER ROLE mitbol_admin_writer SET lock_timeout TO '5s';
 DO $categories$
 BEGIN
-    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num='20261115_0008') THEN
+    IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
         GRANT SELECT (category_id) ON public."Products" TO mitbol_admin_writer;
     END IF;
 END
 $categories$;
+
+-- Funcionalidades recientes: permisos por columna, sin roles ni DML de cupones.
+DO $recent$
+DECLARE
+    revision text := (SELECT version_num FROM public.alembic_version);
+BEGIN
+    IF revision IN ('20261119_0009','20261119_0010','20261119_0011','20261119_0012') THEN
+        GRANT SELECT (phone,created_at,updated_at), INSERT (name,phone,updated_at), UPDATE (name,phone,updated_at)
+            ON public."Persons" TO mitbol_admin_writer;
+        GRANT INSERT (person_id,email,password_hash,is_active,email_verified_at,last_login_at,updated_at)
+            ON public."PersonalAccounts" TO mitbol_admin_writer;
+        GRANT USAGE ON SEQUENCE public."Persons_person_id_seq", public."PersonalAccounts_account_id_seq",
+            public."OrderDetails_order_detail_id_seq", public."OrderDetailComplements_order_detail_complement_id_seq"
+            TO mitbol_admin_writer;
+        GRANT SELECT (product_modifier_id,loyverse_id,name,display_order,synced_at)
+            ON public."ProductModifiers" TO mitbol_admin_writer;
+        GRANT SELECT (product_complement_id,product_modifier_id,loyverse_id,name,price,is_active,synced_at,display_order)
+            ON public."ProductComplements" TO mitbol_admin_writer;
+        GRANT SELECT (product_variant_id,product_modifier_id)
+            ON public."ProductModifierAssignments" TO mitbol_admin_writer;
+        GRANT SELECT (settings_id,accepting_orders), UPDATE (settings_id)
+            ON public."RestaurantOrderSettings" TO mitbol_admin_writer;
+        -- FOR SHARE requiere UPDATE en alguna columna. La PK singleton no permite
+        -- cambiar el identificador; no se autoriza UPDATE de accepting_orders.
+        GRANT SELECT (order_id,idempotency_key,request_hash,account_id,modality,requester_name,requester_phone,
+                      status,created_at,subtotal,discount_total,total),
+              INSERT (order_id,idempotency_key,request_hash,account_id,modality,requester_name,requester_phone,
+                      subtotal,discount_total,total), UPDATE (status)
+            ON public."Orders" TO mitbol_admin_writer;
+        GRANT SELECT (order_detail_id,order_id,line_index,product_id,product_variant_id,product_name,variant_name,
+                      quantity,base_price,complements_total,unit_total,subtotal),
+              INSERT (order_id,line_index,product_id,product_variant_id,product_name,variant_name,
+                      quantity,base_price,complements_total,unit_total,subtotal)
+            ON public."OrderDetails" TO mitbol_admin_writer;
+        GRANT SELECT (order_detail_complement_id,order_detail_id,product_complement_id,product_modifier_id,
+                      position,name_snapshot,unit_price),
+              INSERT (order_detail_id,product_complement_id,product_modifier_id,position,name_snapshot,unit_price)
+            ON public."OrderDetailComplements" TO mitbol_admin_writer;
+    END IF;
+    IF revision IN ('20261119_0010','20261119_0011','20261119_0012') THEN
+        GRANT SELECT (guest_tracking_token), INSERT (guest_tracking_token), UPDATE (guest_tracking_token)
+            ON public."Orders" TO mitbol_admin_writer;
+    END IF;
+    IF revision IN ('20261119_0011','20261119_0012') THEN
+        GRANT SELECT (account_id,token_hash,auth_version,created_at,expires_at),
+              INSERT (account_id,token_hash,auth_version,created_at,expires_at),
+              UPDATE (token_hash,auth_version,created_at,expires_at), DELETE
+            ON public."PasswordResetTokens" TO mitbol_admin_writer;
+    END IF;
+    IF revision = '20261119_0012' THEN
+        GRANT SELECT (customer_coupon_id,account_id,name,description,discount_id,starts_at,expires_at,status,conditions,created_at)
+            ON public."CustomerCoupons" TO mitbol_admin_writer;
+    END IF;
+END
+$recent$;
 COMMIT;
