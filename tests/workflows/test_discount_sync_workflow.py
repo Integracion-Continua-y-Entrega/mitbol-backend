@@ -33,7 +33,7 @@ def report(**changes):
 class DiscountWorkflowTests(unittest.TestCase):
     def test_existing_catalog_job_is_byte_for_byte_unchanged(self):
         catalog = SOURCE.split('  synchronize:\n', 1)[1].split('  discounts:\n', 1)[0]
-        self.assertEqual(hashlib.sha256(catalog.encode()).hexdigest(), '8eb4ec56fbcaed0273c8e93703f77b138fac250f73fdaf84f74f8a697c32737e')
+        self.assertEqual(hashlib.sha256(catalog.encode()).hexdigest(), '80e9dfb26f8ce8cfea7dfba74dbe45b036608992a1a1f1e0112b8fbf27b22986')
 
     def test_flag_defaults_disabled_and_manual_preflight_remains_explicit(self):
         self.assertIn("vars.MITBOL_DISCOUNT_SYNC_ENABLED || 'false'", JOB)

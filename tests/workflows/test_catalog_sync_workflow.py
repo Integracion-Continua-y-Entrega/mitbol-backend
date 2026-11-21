@@ -15,7 +15,10 @@ WORKER_SCRIPT = SOURCE.split('          python - <<\'PY\'\n', 1)[1].split('     
 PREFLIGHT = compile(textwrap.dedent(WORKER_SCRIPT), '<catalog-sync-preflight>', 'exec')
 REPOSITORY = 'Integracion-Continua-y-Entrega/mitbol-backend'
 HOST = 'ep-green-hill-bddfbmgh.c-8.us-east-2.aws.neon.tech'
-REVISION = '20261115_0008'
+CATEGORIES_REVISION = '20261115_0008'
+REVISION = '20261121_0014'
+CATEGORY_REVISIONS = frozenset({CATEGORIES_REVISION,
+    *(f'20261119_{number:04d}' for number in range(9, 13)), '20261120_0013', REVISION})
 BRANCH = 'br-snowy-king-bd0n9w42'
 SENTINEL = 'SYNTHETIC_PRIVATE_TEST_SENTINEL'
 
@@ -33,7 +36,8 @@ class DiagnosticTests(unittest.TestCase):
     def run_preflight(self, expected=None, *, missing=(), env_updates=None,
                       branch=BRANCH, heads=None, schema=REVISION, username='mitbol_catalog_worker',
                       host=HOST, database='mitbol_cloud_dev', query=None,
-                      fault=None, error=None, runtime_revision=REVISION):
+                      fault=None, error=None, runtime_revision=CATEGORIES_REVISION,
+                      compatible_revisions=CATEGORY_REVISIONS):
         env = {
             'APP_ENV': 'cloud', 'ADMIN_ENABLED': 'false', 'MITBOL_SYNC_ENABLED': 'false',
             'SYNC_MODE': 'dry-run', 'GITHUB_REPOSITORY': REPOSITORY, 'GITHUB_REF': 'refs/heads/main',
@@ -105,7 +109,8 @@ class DiagnosticTests(unittest.TestCase):
         module('sqlalchemy.engine', make_url=parse)
         module('app.cli.sync_catalog_recurrent', configuration=configuration)
         module('app.db.connection', create_database_engine=create)
-        module('app.db.schema_compatibility', validate_bridge_schema=structural_check)
+        module('app.db.schema_compatibility', validate_bridge_schema=structural_check,
+               CATEGORY_REVISIONS=compatible_revisions)
         module('app.db.worker_policy', validate_worker_connection=worker)
         module('app.services.sync_service', CATEGORIES_REVISION=runtime_revision)
         if fault == 'runtime':
@@ -140,6 +145,20 @@ class DiagnosticTests(unittest.TestCase):
         self.assertLess(run.events.index('identity'), run.events.index('revision'))
         self.assertLess(run.events.index('revision'), run.events.index('schema'))
         self.assertLess(run.events.index('schema'), run.events.index('permissions'))
+
+    def test_backend_approved_category_revisions_reach_schema_and_permission_checks(self):
+        for revision in sorted(CATEGORY_REVISIONS):
+            with self.subTest(revision=revision):
+                run = self.run_preflight(heads=[(revision,)], schema=revision)
+                run.worker.assert_called_once()
+                self.assertLess(run.events.index('schema'), run.events.index('permissions'))
+
+    def test_revision_eligibility_comes_from_the_backend_compatibility_set(self):
+        for allowed in (frozenset(), frozenset({CATEGORIES_REVISION})):
+            with self.subTest(allowed=allowed):
+                run = self.run_preflight('SYNC_ALEMBIC_REVISION_INVALID', compatible_revisions=allowed)
+                self.assertNotIn('schema', run.events)
+                run.worker.assert_not_called()
 
     def test_missing_configuration_names_never_values_are_reported(self):
         for name in ('APP_ENV', 'ADMIN_ENABLED', 'EXPECTED_DATABASE', 'EXPECTED_DATABASE_HOST',
@@ -186,6 +205,7 @@ class DiagnosticTests(unittest.TestCase):
             with self.subTest(fault=fault):
                 self.run_preflight(code, fault=fault)
         self.run_preflight('SYNC_RUNTIME_CODE_INVALID', runtime_revision='20261114_0007')
+        self.run_preflight('SYNC_RUNTIME_CODE_INVALID', runtime_revision=REVISION)
 
     def test_tls_settings_cannot_be_weakened(self):
         for query in ({}, {'sslmode': 'require'},
@@ -212,12 +232,16 @@ class DiagnosticTests(unittest.TestCase):
                 run.worker.assert_not_called()
 
     def test_revision_and_schema_failures_are_separate(self):
-        for heads in ([], [('20261114_0007',)], [('20261116_0009',)],
-                      [(REVISION,), (REVISION,)]):
+        for heads in ([], [('20261114_0007',)], [('20261116_0009',)], [('20261121_0015',)],
+                      [(REVISION,), (REVISION,)], [(CATEGORIES_REVISION,), (REVISION,)]):
             with self.subTest(heads=heads):
-                self.run_preflight('SYNC_ALEMBIC_REVISION_INVALID', heads=heads)
+                run = self.run_preflight('SYNC_ALEMBIC_REVISION_INVALID', heads=heads)
+                self.assertNotIn('schema', run.events)
+                run.worker.assert_not_called()
         self.run_preflight('SYNC_SCHEMA_CONTRACT_INVALID', fault='schema')
         self.run_preflight('SYNC_ALEMBIC_REVISION_INVALID', schema='20261114_0007')
+        run = self.run_preflight('SYNC_ALEMBIC_REVISION_INVALID', schema=CATEGORIES_REVISION)
+        run.worker.assert_not_called()
 
     def test_each_exception_stage_hides_sensitive_error_text(self):
         cases = [('engine', 'SYNC_CONNECTION_TLS_FAILED'), ('connect', 'SYNC_CONNECTION_TLS_FAILED'),

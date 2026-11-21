@@ -115,7 +115,7 @@ jobs:
               from sqlalchemy.engine import make_url
               from app.cli.sync_catalog_recurrent import configuration
               from app.db.connection import create_database_engine
-              from app.db.schema_compatibility import validate_bridge_schema
+              from app.db.schema_compatibility import CATEGORY_REVISIONS, validate_bridge_schema
               from app.db.worker_policy import validate_worker_connection
               from app.services.sync_service import CATEGORIES_REVISION
 
@@ -170,9 +170,9 @@ jobs:
                   require(branch == 'br-snowy-king-bd0n9w42', 'SYNC_NEON_BRANCH_MISMATCH')
                   stage = 'SYNC_ALEMBIC_REVISION_INVALID'
                   heads = connection.exec_driver_sql('SELECT version_num FROM public.alembic_version').all()
-                  require(heads == [('20261115_0008',)], 'SYNC_ALEMBIC_REVISION_INVALID')
+                  require(len(heads) == 1 and heads[0][0] in CATEGORY_REVISIONS, 'SYNC_ALEMBIC_REVISION_INVALID')
                   stage = 'SYNC_SCHEMA_CONTRACT_INVALID'
-                  require(validate_bridge_schema(connection) == '20261115_0008',
+                  require(validate_bridge_schema(connection) == heads[0][0],
                           'SYNC_ALEMBIC_REVISION_INVALID')
                   stage = 'SYNC_WORKER_PERMISSIONS_INVALID'
                   validate_worker_connection(connection, target)

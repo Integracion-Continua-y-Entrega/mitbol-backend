@@ -1,0 +1,17 @@
+{
+  ".env.example": "f14692de9bc245507f348602445e8547e5db40d1d96515265e912f15a56c8d0d",
+  "app/api/media.py": "02695b96ed9c54511453618a4bda6e02b8d82bdc5a64d1ae1ad9be9efe0138c0",
+  "app/core/config.py": "bee456dd8bcbaefdcb361f13a27672a91f6d2877c538f5e04bb7c715b3dc636f",
+  "app/main.py": "0cd2925c3b9f5af44c8730b328a1dac124eef418dd188042056bef3f100c888e",
+  "app/services/admin_transaction.py": "05feb9e43ebabc56a56495ce2ba4a38a2f0fc6fe467e23d1664b103399945a01",
+  "app/services/image_storage.py": "4a6c98331f8824873df5ffd2390cf8bfa0cff44ad30462467eef926a71468a01",
+  "app/services/product_enrichment_service.py": "1de7b12281f9b34188681e92180cba11811f3ec65573aa110e72039096be401b",
+  "docs/learning/hu005/README.md": "ae5698bf0b85d7ee0f7fc2b65bb2ba0e10b84198182f99c2b208069869cbb064",
+  "requirements.txt": "37bcad7fbc831b3cb03766d690c67ace9cfc769e29fae6b67161d7944e36e3df",
+  "scripts/test_auth_phase1.py": "745cee4b414f51f8958c6e3e3764845e8c7a0b3013526d6abbb423e1a51d0ef4",
+  "app/cli/inventory_images.py": "d40254a93b59eb8796b6101a6103ecfe44d9f47572b03130f6601d53b34f0b59",
+  "app/services/r2_image_storage.py": "ba03ebe5cadd72accd74e047ffb817733ae98cf82f439163cf975f8a49bd80bf",
+  "tests/test_image_inventory.py": "d2013a1dff41361b2b5ff0a3105f1eb31665e223964d8c2b87003fe652a9e7da",
+  "tests/test_r2_image_storage.py": "19354f7e7ae2da47fbf4cc0fe03348f13d11e0848cbafcb8e3e5f56884ef90e6",
+  "tests/test_r2_images_api.py": "e26eb15d6e48a4002cd8a2e10d0a7c3ac6619df739416d4cef3ce91796459e8e"
+}
