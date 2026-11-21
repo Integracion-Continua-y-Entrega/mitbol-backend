@@ -40,12 +40,12 @@ BEGIN
         RAISE EXCEPTION 'WORKER_IDENTITY';
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-       (SELECT 1 FROM public.alembic_version WHERE ((NOT categories_installed AND version_num='20261114_0007') OR (categories_installed AND version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')))) THEN
+       (SELECT 1 FROM public.alembic_version WHERE ((NOT categories_installed AND version_num='20261114_0007') OR (categories_installed AND version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')))) THEN
         RAISE EXCEPTION 'WORKER_SCHEMA';
     END IF;
     SELECT oid INTO worker FROM pg_roles WHERE rolname = current_user;
     IF categories_installed THEN
-        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012')) THEN
+        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013')) THEN
             RAISE EXCEPTION 'WORKER_CATEGORIES_SCHEMA';
         END IF;
         category_grants := has_any_column_privilege(worker,'public."Categories"','SELECT,INSERT,UPDATE')

@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.session_tokens import generate_session_token
 from app.models.order import Order, OrderDetail, OrderDetailComplement, RestaurantOrderSettings
 from app.schemas.orders import GuestTrackingAccess, OrderSubmissionInput, OrderSubmissionResponse
-from app.services import order_summary_service, order_tracking_service
+from app.services import commercial_discount_service, order_summary_service, order_tracking_service
 
 
 class OrderSubmissionError(ValueError):
@@ -77,4 +77,5 @@ def submit_order(db, payload: OrderSubmissionInput, idempotency_key: UUID, *, ac
     )
     db.add(order)
     db.flush()
+    commercial_discount_service.persist_snapshot(db, order.order_id, summary)
     return _response(order)

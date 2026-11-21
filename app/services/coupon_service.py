@@ -79,6 +79,8 @@ def select_coupon(db, account_id, payload, *, now):
         return result(reason, pending=True)
     if info.discount_value is None or info.discount_value <= 0:
         return result("benefit_pending", pending=True)
+    if summary.applied_discounts:
+        return result("commercial_compatibility_pending", pending=True)
     # No inventar un tope ni reducir silenciosamente el beneficio comercial.
     if info.discount_value > summary.subtotal:
         return result("benefit_exceeds_subtotal")

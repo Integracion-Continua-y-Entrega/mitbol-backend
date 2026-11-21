@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas.cart import ValidatedCartItem
 from app.schemas.menu import MenuAmount
+from app.schemas.commercial_discounts import AppliedCommercialDiscount, PendingCommercialDiscount
 
 
 class OrderSummaryItem(ValidatedCartItem):
@@ -18,8 +19,10 @@ class OrderSummaryResponse(BaseModel):
     items: list[OrderSummaryItem]
     subtotal: MenuAmount
     discount_total: MenuAmount = Decimal("0")
-    total: MenuAmount = Field(description="Igual al subtotal mientras no se integren descuentos comerciales.")
-    discounts_status: Literal["not_integrated"] = Field(
+    total: MenuAmount = Field(description="Subtotal menos descuentos comerciales calculados; nunca incluye el cupón preliminar.")
+    applied_discounts: list[AppliedCommercialDiscount] = Field(default_factory=list)
+    pending_discounts: list[PendingCommercialDiscount] = Field(default_factory=list)
+    discounts_status: Literal["not_integrated", "not_applicable", "applied", "rules_pending"] = Field(
         default="not_integrated",
-        description="El catálogo sincroniza descuentos, pero aún no determina su aplicación ni su desglose.",
+        description="rules_pending indica condiciones comerciales incompletas; los descuentos pendientes no se aplican.",
     )

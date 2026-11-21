@@ -61,7 +61,7 @@ def test_empty_summary_is_zero_without_queries(api_app):
         response = client.post(PATH, json={"items": []})
     assert response.status_code == 200
     assert response.json() == {"currency": "MXN", "items": [], "subtotal": "0.00", "discount_total": "0.00",
-                               "total": "0.00", "discounts_status": "not_integrated"}
+                               "total": "0.00", "discounts_status": "not_integrated", "applied_discounts": [], "pending_discounts": []}
     assert db.mock_calls == []
 
 

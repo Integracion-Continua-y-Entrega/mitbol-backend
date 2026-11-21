@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.auth_errors import AuthError
@@ -14,6 +14,18 @@ from app.services import cart_service, menu_service, order_summary_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/cart", tags=["Carrito"])
+
+
+def summary_database(request: Request, db: Session = Depends(get_db)):
+    if not request.app.state.settings.auth_enabled:
+        yield db
+        return
+    # El lector público conserva sólo el catálogo. El pool existente permite
+    # leer reglas comerciales sin exponer tablas privadas ni exigir una sesión.
+    factory = request.app.state.auth_session_factory
+    readonly = factory.kw["bind"].execution_options(postgresql_readonly=True)
+    with factory(bind=readonly) as session, session.begin():
+        yield session
 
 
 @contextmanager
@@ -70,7 +82,10 @@ def validate_cart(payload: CartValidationInput, response: Response, db: Session 
         "Revalida disponibilidad y opciones con HU-016/HU-017; rechaza precios o totales del cliente. "
         "Cada selection incluye nombres, precio base, complementos con sus precios y unit_total (precio por unidad). "
         "El subtotal de línea es quantity × selection.unit_total. Devuelve la suma y el total como cadenas decimales exactas. "
-        "Los descuentos comerciales aún no están integrados: discounts_status=not_integrated, discount_total=0 y total=subtotal. "
+        "Aplica sólo asociaciones y condiciones comerciales explícitas del backend: porcentajes sucesivos sobre el saldo "
+        "elegible y después cada importe fijo una vez por carrito; orden por application_order e ID dentro de cada tipo, "
+        "con Decimal, ROUND_HALF_UP y límites sin saldos negativos. applied_discounts desglosa importes por línea; "
+        "pending_discounts explica las reglas insuficientes que no se aplicaron. No incluye el cupón personal preliminar. "
         "Un carrito vacío devuelve importes cero. No registra pedidos ni garantiza precios para una solicitud posterior. "
         "Los errores de catálogo identifican detail.item_index (desde cero) y detail.message."
     ),
@@ -82,7 +97,7 @@ def validate_cart(payload: CartValidationInput, response: Response, db: Session 
         503: {"description": "Catálogo temporalmente no disponible."},
     },
 )
-def summarize_cart(payload: CartValidationInput, response: Response, db: Session = Depends(get_db)) -> OrderSummaryResponse:
+def summarize_cart(payload: CartValidationInput, response: Response, db: Session = Depends(summary_database)) -> OrderSummaryResponse:
     response.headers["Cache-Control"] = "no-store"
     with _handle_cart_errors():
         return order_summary_service.summarize_cart(db, payload)

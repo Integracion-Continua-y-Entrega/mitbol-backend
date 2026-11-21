@@ -69,7 +69,8 @@ def submission_context(request: Request):
         "Requiere Idempotency-Key (UUID v4 generado una vez por intento de compra). "
         "Repetir clave y contenido devuelve la confirmación histórica; cambiar contenido o cuenta produce 409. "
         "Sin cookie se registra como invitado; con cookie válida se asocia la cuenta y se exige X-CSRF-Token y origen de autenticación autorizado. "
-        "Revalida HU-017/HU-016 y recalcula HU-019 antes de guardar. Los descuentos siguen sin integrar. "
+        "Revalida HU-017/HU-016 y recalcula HU-019 con los descuentos comerciales elegibles antes de guardar. "
+        "Conserva el desglose histórico en applied_discounts e informa reglas pendientes en pending_discounts; no aplica cupones personales. "
         "Los invitados reciben tracking con path y token privado, estable en reintentos; conservarlo para consultar el pedido. "
         "El estado inicial es Solicitud recibida, pendiente de aceptación; no implica preparación ni pago."
     ),
