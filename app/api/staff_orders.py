@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.api.auth_dependencies import require_permission
-from app.schemas.orders import OrderAcceptanceInput, OrderPreparationInput, OrderRejectionInput, StaffOrderDetail, StaffOrderListResponse
+from app.schemas.orders import OrderAcceptanceInput, OrderFulfillmentInput, OrderPreparationInput, OrderRejectionInput, StaffOrderDetail, StaffOrderListResponse
 from app.services import staff_order_service
 from app.services.auth_service import Principal
 
@@ -56,3 +56,24 @@ def mark_ready_for_pickup(order_id: UUID, payload: OrderPreparationInput, reques
     """Solo pickup en preparación. No significa que el cliente lo haya recogido o pagado."""
     response.headers["Cache-Control"] = "no-store"
     return staff_order_service.mark_ready_for_pickup(request.state.auth_context.db, order_id, actor_account_id=user.account_id)
+
+
+@router.post("/{order_id}/serve", response_model=StaffOrderDetail, summary="Confirmar que un pedido local fue servido")
+def mark_served(order_id: UUID, payload: OrderFulfillmentInput, request: Request, response: Response, user: Writer):
+    """Solo consumo local en preparación, con orders:write y CSRF. Recibe {} y conserva el historial."""
+    response.headers["Cache-Control"] = "no-store"
+    return staff_order_service.mark_served(request.state.auth_context.db, order_id, actor_account_id=user.account_id)
+
+
+@router.post("/{order_id}/deliver", response_model=StaffOrderDetail, summary="Confirmar la entrega de un pedido para recoger")
+def mark_delivered(order_id: UUID, payload: OrderFulfillmentInput, request: Request, response: Response, user: Writer):
+    """Solo recogida desde Listo para recoger; es una confirmación manual independiente del pago."""
+    response.headers["Cache-Control"] = "no-store"
+    return staff_order_service.mark_delivered(request.state.auth_context.db, order_id, actor_account_id=user.account_id)
+
+
+@router.post("/{order_id}/complete", response_model=StaffOrderDetail, summary="Finalizar la atención de un pedido servido o entregado")
+def complete_order(order_id: UUID, payload: OrderFulfillmentInput, request: Request, response: Response, user: Writer):
+    """Requiere Servido en local o Entregado en recogida. No verifica cobros ni registra ventas o beneficios."""
+    response.headers["Cache-Control"] = "no-store"
+    return staff_order_service.complete_order(request.state.auth_context.db, order_id, actor_account_id=user.account_id)
