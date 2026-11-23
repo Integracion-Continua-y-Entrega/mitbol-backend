@@ -4,7 +4,7 @@
 
 MITBOL es un proyecto web para modernizar la atención de un restaurante que utiliza **Loyverse** como punto de venta. Su API permite consultar un menú actualizado desde el celular, con productos, precios, variantes y complementos, sin necesidad de iniciar sesión.
 
-> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. La API ya permite preparar, registrar, consultar y decidir solicitudes de pedido. Preparación y entrega, pagos, conciliación de ventas y fidelización completa corresponden a etapas posteriores.
+> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. La API ya permite preparar, registrar, consultar y decidir solicitudes de pedido, iniciar su preparación y marcar pedidos de recogida como listos. Entrega, finalización, pagos, conciliación de ventas y fidelización completa corresponden a etapas posteriores.
 
 ## ✨ Funcionalidades principales
 
@@ -17,7 +17,7 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 - 👤 **Cuentas personales:** registro, inicio/cierre de sesión, perfil y recuperación de contraseña mediante SMTP o Brevo cuando se configura el proveedor.
 - 🛒 **Carrito y solicitudes:** validación de selecciones, modalidades local/recogida, cálculo de importes y descuentos compatibles, registro idempotente e información histórica.
 - 🎟️ **Cupones personales:** selección y cálculo de beneficios elegibles; no se reservan ni canjean al registrar la solicitud.
-- 📋 **Atención de solicitudes:** seguimiento privado de invitados, cancelación pendiente, aceptación/rechazo por el personal e historial de estados.
+- 📋 **Atención de solicitudes:** seguimiento privado de invitados, cancelación pendiente, aceptación/rechazo, preparación, pedidos listos para recoger e historial de estados.
 - 🧾 **Mis pedidos:** historial paginado y detalle privado de solicitudes asociadas a la cuenta autenticada, con importes históricos y estado actual.
 
 **Validación independiente:** integración del frontend, configuración y funcionamiento de los servicios desplegados y ejecuciones programadas. La implementación de endpoints y sus pruebas de backend no acredita esos entornos.
@@ -112,6 +112,37 @@ sin recalcularlos con el catálogo actual ni reservar o canjear beneficios.
 informativo: `POST /api/orders/{order_id}/cancel` sigue exigiendo propiedad,
 sesión, Origin y CSRF, y revalida el estado al ejecutar. Después de cancelar,
 el pedido permanece en el historial con su información original.
+
+## Preparación de pedidos
+
+Este bloque aplica los estados de preparación del Prompt Maestro v2.1, sección
+6.4, manteniendo `Aceptado` como nombre del estado confirmado que ya utiliza la
+API. No renombra registros históricos ni cambia el contrato de aceptación.
+
+| Método | Ruta | Transición permitida |
+| --- | --- | --- |
+| `POST` | `/api/admin/orders/{order_id}/prepare` | `Aceptado` → `En preparación`, en ambas modalidades. |
+| `POST` | `/api/admin/orders/{order_id}/ready` | `En preparación` → `Listo para recoger`, únicamente para `pickup`. |
+
+Ambas acciones reciben JSON vacío `{}` y requieren sesión de Admin o Staff con
+`orders:write`, Origin autorizado y CSRF. Devuelven el detalle administrativo con
+el historial actualizado y `Cache-Control: no-store`. Requieren el historial
+instalado por la migración existente `20261121_0014`; no necesitan una migración
+ni permisos adicionales. Un pedido inexistente devuelve 404; un estado o una
+modalidad incompatibles, 409; campos como `status` o `actor_account_id`, 422.
+
+El estado anterior y, al marcar listo, la modalidad se comprueban en el mismo
+UPDATE. Intentos duplicados concurrentes producen una sola transición: el otro
+recibe 409. Estado, fecha y responsable del historial se confirman en la misma
+transacción; si falla el historial, se revierte el cambio. Ante una respuesta
+perdida o incierta, consultar el detalle antes de repetir.
+
+La preparación conserva productos, precios y descuentos históricos. Cerrar la
+recepción no impide atender pedidos ya aceptados. El seguimiento de invitados
+y el historial personal muestran el nuevo estado; la cancelación directa del
+cliente sigue limitada a `Solicitud recibida`. Marcar listo no confirma entrega,
+pago, venta, reserva ni canje de cupones. Consumo local permanece en preparación
+hasta la futura acción de servido; este bloque no implementa entrega o finalización.
 
 ## 🚀 Inicio rápido (Windows)
 

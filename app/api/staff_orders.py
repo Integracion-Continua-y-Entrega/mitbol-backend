@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.api.auth_dependencies import require_permission
-from app.schemas.orders import OrderAcceptanceInput, OrderRejectionInput, StaffOrderDetail, StaffOrderListResponse
+from app.schemas.orders import OrderAcceptanceInput, OrderPreparationInput, OrderRejectionInput, StaffOrderDetail, StaffOrderListResponse
 from app.services import staff_order_service
 from app.services.auth_service import Principal
 
@@ -42,3 +42,17 @@ def reject_order(order_id: UUID, payload: OrderRejectionInput, request: Request,
     response.headers["Cache-Control"] = "no-store"
     return staff_order_service.decide_order(request.state.auth_context.db,order_id,accepted=False,
                                            actor_account_id=user.account_id,reason=payload.reason)
+
+
+@router.post("/{order_id}/prepare", response_model=StaffOrderDetail, summary="Iniciar preparación de un pedido aceptado")
+def start_preparation(order_id: UUID, payload: OrderPreparationInput, request: Request, response: Response, user: Writer):
+    """Admin o Staff con orders:write, Origin y CSRF; recibe únicamente JSON vacío {}."""
+    response.headers["Cache-Control"] = "no-store"
+    return staff_order_service.start_preparation(request.state.auth_context.db, order_id, actor_account_id=user.account_id)
+
+
+@router.post("/{order_id}/ready", response_model=StaffOrderDetail, summary="Marcar un pedido de recogida como listo")
+def mark_ready_for_pickup(order_id: UUID, payload: OrderPreparationInput, request: Request, response: Response, user: Writer):
+    """Solo pickup en preparación. No significa que el cliente lo haya recogido o pagado."""
+    response.headers["Cache-Control"] = "no-store"
+    return staff_order_service.mark_ready_for_pickup(request.state.auth_context.db, order_id, actor_account_id=user.account_id)
