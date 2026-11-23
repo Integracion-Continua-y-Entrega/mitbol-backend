@@ -4,7 +4,7 @@
 
 MITBOL es un proyecto web para modernizar la atención de un restaurante que utiliza **Loyverse** como punto de venta. Su API permite consultar un menú actualizado desde el celular, con productos, precios, variantes y complementos, sin necesidad de iniciar sesión.
 
-> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. Las funcionalidades de pedidos, pagos, promociones y fidelización forman parte de la visión del proyecto, pero **aún no están implementadas como flujos completos en este backend**.
+> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. La API ya permite preparar, registrar, consultar y decidir solicitudes de pedido. Preparación y entrega, pagos, conciliación de ventas y fidelización completa corresponden a etapas posteriores.
 
 ## ✨ Funcionalidades principales
 
@@ -14,8 +14,13 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 - 🏷️ **Descuentos comerciales:** importación y consulta de descuentos compatibles; los registros desconocidos se tratan de forma controlada, sin inventar valores.
 - 🖼️ **Imágenes persistentes:** fotografías almacenadas en **Cloudflare R2** y consultadas a través de la API.
 - 🔐 **Acceso administrativo:** autenticación por sesiones, roles y permisos para proteger las operaciones internas.
+- 👤 **Cuentas personales:** registro, inicio/cierre de sesión, perfil y recuperación de contraseña mediante SMTP o Brevo cuando se configura el proveedor.
+- 🛒 **Carrito y solicitudes:** validación de selecciones, modalidades local/recogida, cálculo de importes y descuentos compatibles, registro idempotente e información histórica.
+- 🎟️ **Cupones personales:** selección y cálculo de beneficios elegibles; no se reservan ni canjean al registrar la solicitud.
+- 📋 **Atención de solicitudes:** seguimiento privado de invitados, cancelación pendiente, aceptación/rechazo por el personal e historial de estados.
+- 🧾 **Mis pedidos:** historial paginado y detalle privado de solicitudes asociadas a la cuenta autenticada, con importes históricos y estado actual.
 
-**En desarrollo o por validar:** integración completa del frontend, flujo administrativo de sincronización manual y comprobación de las ejecuciones programadas de descuentos. El carrito, los pedidos, el cobro y la fidelización corresponden a etapas posteriores.
+**Validación independiente:** integración del frontend, configuración y funcionamiento de los servicios desplegados y ejecuciones programadas. La implementación de endpoints y sus pruebas de backend no acredita esos entornos.
 
 ## 🧭 Arquitectura
 
@@ -73,6 +78,40 @@ Las dependencias se encuentran en [`requirements.txt`](requirements.txt).
 | `GET / POST` | `/api/admin/sync/...`    | Estado, solicitudes e historial de sincronización; acceso protegido. |
 
 La administración de productos y la autenticación se encuentran bajo `/api/admin/` y `/api/auth/`. Consulta la documentación OpenAPI (`/docs`) del entorno correspondiente para ver sus contratos completos. **El QR se genera desde el frontend; el backend proporciona la URL del menú.**
+
+## Historial personal de pedidos
+
+El seguimiento desde la cuenta implementa el alcance del Prompt Maestro v2.1,
+sección 6.8. No requiere roles administrativos ni permisos nuevos de PostgreSQL.
+
+| Método | Ruta | Resultado |
+| --- | --- | --- |
+| `GET` | `/api/auth/orders?limit=25&offset=0` | `items`, `total`, `limit` y `offset`, solo de la cuenta autenticada. |
+| `GET` | `/api/auth/orders/{order_id}` | Estado actual, modalidad, productos e importes históricos y `can_cancel`. |
+
+El listado admite `status` opcional, `limit` de 1 a 100 y `offset` desde cero.
+Ordena por fecha descendente y UUID descendente como desempate. Un historial
+vacío devuelve 200 con `items: []` y `total: 0`. La paginación no congela el
+conjunto de pedidos entre consultas.
+
+La cookie de sesión determina la cuenta. No se acepta un token de invitado como
+sustituto de la sesión ni se vinculan pedidos anteriores de invitado por nombre
+o teléfono. Admin y Staff consultan aquí únicamente sus pedidos propios; la
+consulta operativa del restaurante conserva su endpoint y permiso separados.
+Pedidos inexistentes, ajenos o de invitado devuelven el mismo 404. Sesiones
+ausentes, expiradas o revocadas devuelven 401; parámetros inválidos, 422, y
+errores de base de datos, 503 sin datos internos.
+
+Las respuestas incluyen `Cache-Control: no-store`; el detalle no expone contacto,
+tokens, claves de idempotencia ni identidades internas del personal. Las lecturas
+no alteran pedidos, beneficios ni precios; la sesión conserva su renovación normal.
+El detalle recupera los descuentos y cupones históricos cuando existe su snapshot,
+sin recalcularlos con el catálogo actual ni reservar o canjear beneficios.
+
+`can_cancel` es true solo mientras el estado sea `Solicitud recibida`. Es
+informativo: `POST /api/orders/{order_id}/cancel` sigue exigiendo propiedad,
+sesión, Origin y CSRF, y revalida el estado al ejecutar. Después de cancelar,
+el pedido permanece en el historial con su información original.
 
 ## 🚀 Inicio rápido (Windows)
 
