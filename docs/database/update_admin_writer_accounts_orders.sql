@@ -99,6 +99,11 @@ BEGIN
               INSERT (status_history_id,order_id,previous_status,status,actor_account_id,reason)
             ON public."OrderStatusHistories" TO mitbol_admin_writer;
     END IF;
+    IF revision = '20261124_0015' THEN
+        GRANT SELECT (payment_id,order_id,amount,method,verified_at,verified_by_account_id),
+              INSERT (payment_id,order_id,amount,method,verified_by_account_id)
+            ON public."OrderPayments" TO mitbol_admin_writer;
+    END IF;
 END
 $recent$;
 COMMIT;

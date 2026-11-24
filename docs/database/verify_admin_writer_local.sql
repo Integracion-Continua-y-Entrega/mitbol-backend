@@ -134,6 +134,11 @@ BEGIN
           "SELECT":["status_history_id","order_id","previous_status","status","actor_account_id","reason","created_at"],
           "INSERT":["status_history_id","order_id","previous_status","status","actor_account_id","reason"]}}'::jsonb;
     END IF;
+    IF revision = '20261124_0015' THEN
+        policy := policy || '{"OrderPayments":{
+          "SELECT":["payment_id","order_id","amount","method","verified_at","verified_by_account_id"],
+          "INSERT":["payment_id","order_id","amount","method","verified_by_account_id"]}}'::jsonb;
+    END IF;
     IF EXISTS (SELECT 1 FROM jsonb_object_keys(policy) k(name)
                WHERE to_regclass(format('public.%I',k.name)) IS NULL) THEN
         RAISE EXCEPTION 'WRITER_MISSING_RELATIONS';

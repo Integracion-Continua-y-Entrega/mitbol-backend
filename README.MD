@@ -4,7 +4,7 @@
 
 MITBOL es un proyecto web para modernizar la atención de un restaurante que utiliza **Loyverse** como punto de venta. Su API permite consultar un menú actualizado desde el celular, con productos, precios, variantes y complementos, sin necesidad de iniciar sesión.
 
-> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. La API permite preparar, registrar y consultar solicitudes y gestionar su atención por modalidad hasta completarla. Pagos, conciliación de ventas y fidelización completa corresponden a etapas posteriores.
+> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. La API permite registrar solicitudes, gestionar su atención por modalidad y verificar manualmente su pago. La venta y conciliación en Loyverse y la fidelización completa corresponden a etapas posteriores.
 
 ## ✨ Funcionalidades principales
 
@@ -19,6 +19,7 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 - 🎟️ **Cupones personales:** selección y cálculo de beneficios elegibles; no se reservan ni canjean al registrar la solicitud.
 - 📋 **Atención de solicitudes:** seguimiento privado de invitados, cancelación pendiente, aceptación/rechazo, preparación, servido/entrega y finalización por modalidad, con historial de estados.
 - 🧾 **Mis pedidos:** historial paginado y detalle privado de solicitudes asociadas a la cuenta autenticada, con importes históricos y estado actual.
+- **Pago verificado:** confirmación manual del total histórico por personal autorizado, consulta separada del estado operativo y protección contra duplicados.
 
 **Validación independiente:** integración del frontend, configuración y funcionamiento de los servicios desplegados y ejecuciones programadas. La implementación de endpoints y sus pruebas de backend no acredita esos entornos.
 
@@ -37,18 +38,18 @@ frontend ni el cierre completo de las historias.
 | HU-025 · Aceptar solicitudes | Backend implementado: revalidación local, estado `Confirmado`, responsable e historial transaccional. | Sin pendiente identificado en este bloque de backend; reserva y canje de beneficios quedan fuera de este corte. |
 | HU-026 · Rechazar solicitudes | Backend implementado: rechazo de pendientes con motivo obligatorio, fecha, responsable e historial transaccional. | Sin pendiente identificado en este bloque de backend. |
 | HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial; acepta `Confirmado` y `Aceptado` legado. | Sin pendiente identificado en este bloque de backend. |
-| HU-028 · Servicio o entrega | Acciones `serve`, `deliver` y `complete`, sin inferir cobros. | Incorporar la dimensión de pago independiente mediante HU-031. |
+| HU-028 · Servicio o entrega | Acciones `serve`, `deliver` y `complete`; el cobro se consulta y confirma por separado mediante HU-031. | Sin pendiente identificado en este bloque de backend. |
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
-| HU-031 · Pago verificado | Persistencia implementada: migración 0015, importe, método, fecha y responsable; unicidad por pedido. | Endpoint protegido, validación contra el pedido y consulta separada del estado operativo. Aún no se puede confirmar un pago desde la API. |
+| HU-031 · Pago verificado | Backend implementado: confirmación manual protegida del total exacto, evidencia persistente y consulta independiente; duplicados y concurrencia controlados. | Sin pendiente identificado en este bloque de backend. Uso académico con datos sintéticos; ventas y conciliación en Loyverse quedan fuera. |
 
-Orden de continuidad del backend: completar el endpoint y permisos de HU-031 y comprobar su consulta
-independiente del estado operativo de HU-028; después, avanzar con fidelización.
+Orden de continuidad del backend: comenzar HU-046, configuración de niveles y
+recompensas, y continuar con las seis historias de fidelización indicadas abajo.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
 servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
 (HU-038), que permanece conservado en `feature/order-reception-settings` para
-una integración posterior. Este corte no cambia los perfiles SQL ni requiere
-los permisos de recepción añadidos por aquella rama.
+una integración posterior. Este corte conserva los permisos de recepción
+anteriores; HU-031 añade únicamente consulta e inserción de pagos al escritor web.
 
 Las seis historias de fidelización también forman parte del alcance acordado y
 se implementarán después del flujo de pedidos, en este orden:
@@ -321,7 +322,7 @@ después de completar. Se puede atender un pedido ya aceptado con la recepción
 cerrada. Servir, entregar o completar no verifica pagos, registra ventas, genera
 visitas ni reserva o canjea beneficios; esos acontecimientos permanecen separados.
 
-## HU-031: persistencia de pago verificado
+## HU-031: confirmación manual de pago verificado
 
 La migración aditiva `20261124_0015` incorpora `OrderPayments`, separada del
 estado operativo. Guarda un identificador, pedido, importe decimal positivo y
@@ -330,16 +331,56 @@ responsable. Una restricción única impide dos confirmaciones para el mismo ped
 Las referencias protegidas impiden borrar el pedido o la cuenta mientras exista
 su registro de pago. Cambiar el estado de atención no modifica ese registro.
 
-Este primer bloque solo incorpora persistencia. La migración no genera pagos
-para pedidos anteriores, no cambia sus estados ni concede permisos sobre la
-tabla nueva. Los perfiles SQL reconocen la revisión 0015 conservando sus permisos
-anteriores; lectores públicos y workers continúan sin acceso a pagos. Tampoco
-el escritor web puede confirmarlos hasta completar el siguiente bloque.
+| Método | Ruta | Resultado |
+| --- | --- | --- |
+| `GET` | `/api/admin/orders/{order_id}/payment` | Consulta `total`, `currency`, `payment_status` y `payment`; no registra cobros. |
+| `POST` | `/api/admin/orders/{order_id}/payment` | Confirma manualmente el pago completo; devuelve 201 con la evidencia guardada. |
 
-Quedan pendientes el endpoint protegido, sus validaciones contra el importe y
-estado del pedido y la consulta de cobro separada de la atención. HU-031 todavía
-no está terminada. El registro se demostrará con datos sintéticos y no sustituye
-una venta o recibo de Loyverse; HU-032, HU-033 y HU-035 siguen pendientes.
+Ambas rutas requieren sesión de Admin o Staff activo con los permisos específicos
+`payments:read` y `payments:write`, respectivamente. El POST exige Origin autorizado
+y CSRF. El cuerpo recibe únicamente importe y método:
+
+```json
+{"amount":"170.00","method":"cash"}
+```
+
+El importe se envía como cadena decimal positiva, sin exponentes ni redondeo.
+Debe coincidir exactamente con el total histórico, incluidos sus descuentos;
+no se recalcula con precios actuales. Se rechazan números JSON, booleanos,
+importes no finitos y campos administrativos con 422. El método puede ser
+`cash`, `card`, `transfer` u `other`; todos representan comprobaciones manuales.
+La fecha la genera PostgreSQL y el responsable se toma de la sesión autenticada.
+
+Solo se cobra desde `Confirmado` (o `Aceptado` legado), preparación, listo para
+recoger, servido, entregado o completado. Una solicitud aún no confirmada,
+cancelada o rechazada devuelve 409. Un importe distinto del total, un pedido de
+total cero o una segunda confirmación también devuelven 409. No se admiten pagos
+parciales, sobrepagos ni correcciones en este bloque. Un pedido inexistente da
+404; sin migración 0015 o ante un fallo de base de datos, 503.
+
+La consulta devuelve `payment_status: unverified` y `payment: null` mientras no
+exista confirmación; `verified` incluye `payment_id`, `amount`, `method`,
+`verified_at` y `verified_by_account_id`. Para un total cero sin pago devuelve
+`not_required`, que no acredita un cobro. El seguimiento público y el historial
+personal mantienen sus contratos actuales sin exponer la identidad del empleado.
+Las respuestas de las rutas de pagos incluyen `Cache-Control: no-store`.
+
+Confirmar bloquea el pedido hasta el commit y revalida su estado después de
+esperar. Intentos simultáneos generan una única evidencia; un fallo del commit
+no responde con éxito. Ante una respuesta incierta, consultar el GET antes de
+repetir. Confirmar el cobro no cambia estados ni crea eventos de preparación,
+visitas, ventas o canjes; servir, entregar o completar tampoco crea un pago.
+
+La migración no genera cobros históricos ni concede privilegios. Tras aplicar
+0015, un operador debe actualizar las ACL con los scripts revisados de
+`docs/database`: `update_admin_writer_accounts_orders.sql` para un escritor
+existente o el perfil de preparación para uno nuevo. El escritor tiene SELECT e
+INSERT por columna sobre pagos, sin UPDATE, DELETE ni inserción de `verified_at`.
+Lectores públicos y workers continúan sin acceso. No hay otra migración para
+este bloque del endpoint; estos scripts no se ejecutan automáticamente.
+
+El registro se demostrará con datos sintéticos y no sustituye una venta o recibo
+de Loyverse; HU-032, HU-033 y HU-035 siguen pendientes.
 
 ## 🚀 Inicio rápido (Windows)
 

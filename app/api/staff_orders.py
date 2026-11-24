@@ -7,13 +7,32 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.api.auth_dependencies import require_permission
 from app.schemas.orders import OrderAcceptanceInput, OrderFulfillmentInput, OrderPreparationInput, OrderRejectionInput, StaffOrderDetail, StaffOrderListResponse
-from app.services import staff_order_service
+from app.schemas.order_payments import OrderPaymentInput, OrderPaymentResponse
+from app.services import order_payment_service, staff_order_service
 from app.services.auth_service import Principal
 
 
 router = APIRouter(prefix="/api/admin/orders",tags=["Gestión de solicitudes"])
 Reader = Annotated[Principal,Depends(require_permission("orders:read"))]
 Writer = Annotated[Principal,Depends(require_permission("orders:write"))]
+PaymentReader = Annotated[Principal, Depends(require_permission("payments:read"))]
+PaymentWriter = Annotated[Principal, Depends(require_permission("payments:write"))]
+
+
+@router.get("/{order_id}/payment", response_model=OrderPaymentResponse, summary="Consultar verificación de pago")
+def get_payment(order_id: UUID, request: Request, response: Response, user: PaymentReader):
+    """Consulta protegida del cobro, independiente del estado de preparación o entrega."""
+    response.headers["Cache-Control"] = "no-store"
+    return order_payment_service.get_payment(request.state.auth_context.db, order_id)
+
+
+@router.post("/{order_id}/payment", response_model=OrderPaymentResponse, status_code=201,
+             summary="Registrar un pago verificado manualmente")
+def confirm_payment(order_id: UUID, payload: OrderPaymentInput, request: Request, response: Response, user: PaymentWriter):
+    """Exige importe total exacto, sesión de personal, Origin y CSRF; no registra una venta en Loyverse."""
+    response.headers["Cache-Control"] = "no-store"
+    return order_payment_service.confirm_payment(request.state.auth_context.db, order_id, payload,
+                                                 actor_account_id=user.account_id)
 
 
 @router.get("",response_model=StaffOrderListResponse,summary="Consultar solicitudes del restaurante")

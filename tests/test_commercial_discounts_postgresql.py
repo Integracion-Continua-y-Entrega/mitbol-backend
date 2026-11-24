@@ -351,8 +351,8 @@ def test_staff_order_history_uses_existing_writer_without_private_access_for_rea
             command.downgrade(config_for(db),"20261120_0013")
 
 
-def test_payment_persistence_revision_keeps_existing_roles_without_payment_access(restricted_backend, compatible_database):
-    """El esquema nuevo no concede privilegios de pagos hasta implementar el endpoint autorizado."""
+def test_payment_verification_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database):
+    """El escritor consulta e inserta pagos; no modifica evidencia ni puede asignar la fecha del servidor."""
     b = restricted_backend
     with b.roles.owner.begin() as db:
         command.upgrade(config_for(db), "20261124_0015")
@@ -364,7 +364,25 @@ def test_payment_persistence_revision_keeps_existing_roles_without_payment_acces
             execute_script(engine, (SQL / filename).read_text(encoding="utf-8"))
             with engine.connect() as db:
                 assert validate_bridge_schema(db) == "20261124_0015"
-        for engine in (b.roles.reader, b.roles.writer, *compatible_database.workers.values()):
+        with b.sessions.begin() as db:
+            db.get(RestaurantOrderSettings, 1).accepting_orders = True
+        created = submit(b.client, {"cart": {"items": [{"product_id": b.product_id,
+            "product_variant_id": b.variant_id, "quantity": 1}]}, "data": {"modality": "dine_in", "name": "Invitado"}})
+        assert created.status_code == 201, created.text
+        receipt = created.json()
+        headers = csrf_headers(login(b, "staff"))
+        base = f'/api/admin/orders/{receipt["order_id"]}'
+        assert b.client.post(base + "/accept", headers=headers, json={}).status_code == 200
+        assert b.client.get(base + "/payment").json()["payment_status"] == "unverified"
+        paid = b.client.post(base + "/payment", headers=headers, json={"amount": receipt["total"], "method": "cash"})
+        assert paid.status_code == 201, paid.text
+        assert b.client.get(base + "/payment").json() == paid.json()
+        assert b.client.post(base + "/prepare", headers=headers, json={}).status_code == 200
+        assert b.client.get(base + "/payment").json() == paid.json()
+        for statement in ('UPDATE "OrderPayments" SET method=\'other\'', 'DELETE FROM "OrderPayments"',
+                          'INSERT INTO "OrderPayments" (verified_at) VALUES (now())'):
+            denied(b.roles.writer, statement)
+        for engine in (b.roles.reader, *compatible_database.workers.values()):
             with engine.connect() as db:
                 assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."OrderPayments"',
                     'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."OrderPayments"',
