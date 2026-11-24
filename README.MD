@@ -35,13 +35,13 @@ frontend ni el cierre completo de las historias.
 | --- | --- | --- |
 | HU-024 · Consultar solicitudes | Backend implementado: listado protegido con prioridad de pendientes, detalle, tiempo de espera y aviso configurable. | Sin pendiente identificado en este bloque de backend. |
 | HU-025 · Aceptar solicitudes | Aceptación condicional, responsable e historial. | Revalidar disponibilidad, precios y beneficios antes de confirmar, sin cambiar los importes históricos. Alinear `Aceptado` con el nombre contractual `Confirmado`. |
-| HU-026 · Rechazar solicitudes | Rechazo condicional e historial con motivo opcional. | Exigir el motivo conforme al plan final y conservar las garantías de concurrencia. |
+| HU-026 · Rechazar solicitudes | Backend implementado: rechazo de pendientes con motivo obligatorio, fecha, responsable e historial transaccional. | Sin pendiente identificado en este bloque de backend. |
 | HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial. | Alinear el estado de origen con el contrato definitivo de HU-025. |
 | HU-028 · Servicio o entrega | Acciones `serve`, `deliver` y `complete`, sin inferir cobros. | Incorporar la dimensión de pago independiente mediante HU-031. |
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual; acceso restringido por propietario. | Mantener compatibilidad con el contrato de estados de HU-025. |
 | HU-031 · Pago verificado | No implementado. | Registro manual de importe, método, fecha y responsable; permisos, prevención de duplicados y consulta separada del estado operativo. |
 
-Orden de continuidad del backend: completar HU-026; resolver la
+Orden de continuidad del backend: resolver la
 revalidación y el contrato de estados de HU-025; comprobar HU-027, HU-028 y
 HU-041 con ese contrato; implementar HU-031. No se considera terminada la
 aceptación solo porque exista `/accept`: actualmente no revalida el catálogo
@@ -162,6 +162,40 @@ mucho tiempo pendientes. Al salir de `Solicitud recibida`, el aviso desaparece
 y la espera pendiente se devuelve como `null`; no representa el tiempo total
 de preparación o entrega. Las respuestas mantienen `Cache-Control: no-store`.
 No se requieren migraciones, permisos nuevos, Web Push ni avisos externos.
+
+## HU-026: rechazo con motivo obligatorio
+
+`POST /api/admin/orders/{order_id}/reject` requiere Admin o Staff con
+`orders:write`, sesión, Origin autorizado y CSRF. El cuerpo es:
+
+```json
+{"reason":"No contamos con disponibilidad para atender la solicitud"}
+```
+
+El motivo es obligatorio, tiene de 1 a 500 caracteres después de recortar los
+espacios exteriores y no admite controles internos. Se rechazan con 422 los
+motivos ausentes, nulos, vacíos, de otro tipo o demasiado largos, y los campos
+administrativos adicionales. La misma validación se aplica en el servicio para
+evitar rechazos sin motivo en llamadas internas. Clientes que antes enviaban
+`{}` o `{"reason":null}` deben actualizar su solicitud.
+
+Solo `Solicitud recibida` puede pasar a `Rechazado`. Pedidos ya aceptados,
+cancelados, rechazados o en atención devuelven 409; un UUID inexistente con
+cuerpo válido devuelve 404. La comprobación de estado forma parte del UPDATE:
+una aceptación, cancelación o segundo rechazo concurrente no puede sobrescribir
+una decisión ya confirmada.
+
+Motivo normalizado, fecha y responsable se guardan en el historial dentro de la
+misma transacción que el estado. Si falla el historial, se revierte el rechazo.
+Ante una respuesta perdida o incierta, consultar el detalle antes de repetir.
+No se cambian productos, importes históricos ni beneficios. La respuesta contiene
+el detalle administrativo y `Cache-Control: no-store`. El personal puede leer
+el motivo en el historial; el seguimiento de invitados y el historial personal
+conservan el estado `Rechazado` sin publicar notas internas ni identidades del
+empleado.
+
+No se requieren migraciones ni permisos nuevos. Los eventos antiguos con motivo
+nulo se conservan; no se inventan motivos ni se modifican registros históricos.
 
 ## Historial personal de pedidos
 

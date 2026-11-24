@@ -43,8 +43,10 @@ def accept_order(order_id: UUID, payload: OrderAcceptanceInput, request: Request
 
 
 @router.post("/{order_id}/reject",response_model=StaffOrderDetail,summary="Rechazar una solicitud pendiente",
-             description="Motivo opcional de hasta 500 caracteres. No altera los productos ni importes históricos.")
+             description="Motivo obligatorio de 1 a 500 caracteres, sin espacios exteriores ni controles internos. "
+                         "No altera los productos ni importes históricos.")
 def reject_order(order_id: UUID, payload: OrderRejectionInput, request: Request, response: Response, user: Writer):
+    """Guarda motivo, fecha y responsable junto al rechazo; no permite rechazar pedidos ya confirmados."""
     response.headers["Cache-Control"] = "no-store"
     return staff_order_service.decide_order(request.state.auth_context.db,order_id,accepted=False,
                                            actor_account_id=user.account_id,reason=payload.reason)

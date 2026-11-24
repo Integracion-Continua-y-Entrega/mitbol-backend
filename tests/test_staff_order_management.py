@@ -38,7 +38,10 @@ def guest_order(b):
 
 
 def decide(b, receipt, headers, action="accept", body=None):
-    return b.client.post(f'{PATH}/{receipt["order_id"]}/{action}',headers=headers,json=body or {})
+    """Usa un motivo válido por defecto al rechazar y conserva los cuerpos inválidos explícitos."""
+    if body is None:
+        body = {"reason": "Motivo sintético de rechazo"} if action == "reject" else {}
+    return b.client.post(f'{PATH}/{receipt["order_id"]}/{action}',headers=headers,json=body)
 
 
 @pytest.mark.parametrize("role", ["admin","staff"])
@@ -132,7 +135,9 @@ def test_only_received_requests_can_be_decided(backend, status, action):
         assert len(db.scalars(select(OrderStatusHistory)).all()) == 1
 
 
-@pytest.mark.parametrize("body", [{"reason":" "},{"reason":"x"*501},{"reason":"nul\x00"},
+@pytest.mark.parametrize("body", [{}, {"reason":None}, {"reason":" "}, {"reason":"x"*501},
+                                {"reason":"nul\x00"}, {"reason":"No\nhay"}, {"reason":False},
+                                {"reason":123}, {"reason":[]}, {"reason":{}},
                                 {"status":"Aceptado"},{"actor_account_id":1}])
 def test_invalid_reason_or_administrative_fields_do_not_change_the_order(backend, body):
     b = backend
@@ -143,11 +148,14 @@ def test_invalid_reason_or_administrative_fields_do_not_change_the_order(backend
         assert db.get(Order,UUID(receipt["order_id"])).status == "Solicitud recibida"
 
 
-def test_optional_rejection_reason_and_query_validation(backend):
+def test_required_rejection_reason_and_query_validation(backend):
     b = backend
     receipt = guest_order(b)
     headers = csrf_headers(login(b,"admin"))
-    assert decide(b,receipt,headers,"reject").json()["history"][-1]["reason"] is None
+    assert decide(b,receipt,headers,"reject",{}).status_code == 422
+    assert decide(b,receipt,headers,"reject",{"reason":None}).status_code == 422
+    rejected = decide(b,receipt,headers,"reject",{"reason":"  Sin capacidad  "})
+    assert rejected.status_code == 200 and rejected.json()["history"][-1]["reason"] == "Sin capacidad"
     assert b.client.get(f"{PATH}/{uuid4()}").status_code == 404
     assert decide(b,{"order_id":str(uuid4())},headers).status_code == 404
     for query in ({"limit":0},{"limit":101},{"offset":-1},{"status":""}):
@@ -225,7 +233,9 @@ def test_concurrent_staff_decisions_and_customer_cancellation_have_one_winner(ba
                 if action is None:
                     order_cancellation_service.cancel_order(db,identifier,guest_token=receipt["tracking"]["token"])
                     return "Cancelado"
-                staff_order_service.decide_order(db,identifier,accepted=action,actor_account_id=b.ids["staff" if index else "admin"][0])
+                staff_order_service.decide_order(db,identifier,accepted=action,
+                    actor_account_id=b.ids["staff" if index else "admin"][0],
+                    reason="Motivo sintético de rechazo" if action is False else None)
                 return "Aceptado" if action else "Rechazado"
         except (AuthError,order_cancellation_service.OrderNotPendingError) as error:
             assert not isinstance(error,AuthError) or error.status_code == 409

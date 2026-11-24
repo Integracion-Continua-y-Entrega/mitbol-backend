@@ -70,12 +70,13 @@ class OrderFulfillmentInput(OrderCancellationInput):
 
 
 class OrderRejectionInput(OrderCancellationInput):
-    reason: Annotated[str,StringConstraints(strip_whitespace=True,min_length=1,max_length=500)] | None = None
+    """Exige un motivo legible y lo normaliza sin aceptar campos administrativos."""
+    reason: Annotated[str,StringConstraints(strip_whitespace=True,min_length=1,max_length=500)]
 
     @field_validator("reason")
     @classmethod
     def visible_reason(cls, value):
-        if value is not None and not value.isprintable():
+        if not value.isprintable():
             raise ValueError("El motivo debe contener texto visible.")
         return value
 

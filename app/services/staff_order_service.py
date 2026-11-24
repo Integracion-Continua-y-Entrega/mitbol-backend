@@ -2,13 +2,14 @@
 
 from datetime import datetime, timezone
 
+from pydantic import ValidationError
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.auth_errors import AuthError
 from app.models import Order, OrderDetail, OrderStatusHistory
 from app.models.order import INITIAL_STATUS
-from app.schemas.orders import OrderStateRead, StaffOrderDetail, StaffOrderListItem, StaffOrderListResponse
+from app.schemas.orders import OrderRejectionInput, OrderStateRead, StaffOrderDetail, StaffOrderListItem, StaffOrderListResponse
 from app.services import order_state_service, order_tracking_service
 
 
@@ -64,6 +65,12 @@ def order_detail(db, order_id, *, now=None, pending_warning_seconds=600):
 
 
 def decide_order(db, order_id, *, accepted, actor_account_id, reason=None):
+    """Decide solo solicitudes pendientes; rechazar exige motivo válido incluso sin pasar por HTTP."""
+    if not accepted:
+        try:
+            reason = OrderRejectionInput(reason=reason).reason
+        except ValidationError:
+            raise AuthError(422, "El rechazo requiere un motivo válido de 1 a 500 caracteres.") from None
     _require_history(db)
     if db.scalar(select(Order.order_id).where(Order.order_id == order_id)) is None:
         raise AuthError(404,"Pedido no encontrado.")
