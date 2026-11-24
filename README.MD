@@ -24,14 +24,16 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 
 ## Corte académico y backlog vigente
 
-La planificación vigente es **Por hacer FINAL.pdf**, páginas 1–6. Parte de
-HU-001 a HU-023 ya trabajadas y prioriza las siete historias siguientes. La
-tabla describe el backend disponible; no acredita la integración del frontend
-ni el cierre completo de las historias.
+La planificación vigente es **Por hacer FINAL.pdf**, páginas 1–10. Parte de
+HU-001 a HU-023 ya trabajadas. Por acuerdo de trabajo, el alcance de implementación
+comprende **13 historias**: las siete del flujo de pedidos y las seis de
+fidelización. Se desarrollan por bloques, priorizando primero el flujo de pedidos.
+Las tablas describen el backend disponible; no acreditan la integración del
+frontend ni el cierre completo de las historias.
 
 | Historia | Base disponible | Pendiente del backend según el plan final |
 | --- | --- | --- |
-| HU-024 · Consultar solicitudes | Listado protegido, detalle y fechas. | Priorizar solicitudes pendientes y facilitar la identificación de espera prolongada. |
+| HU-024 · Consultar solicitudes | Backend implementado: listado protegido con prioridad de pendientes, detalle, tiempo de espera y aviso configurable. | Sin pendiente identificado en este bloque de backend. |
 | HU-025 · Aceptar solicitudes | Aceptación condicional, responsable e historial. | Revalidar disponibilidad, precios y beneficios antes de confirmar, sin cambiar los importes históricos. Alinear `Aceptado` con el nombre contractual `Confirmado`. |
 | HU-026 · Rechazar solicitudes | Rechazo condicional e historial con motivo opcional. | Exigir el motivo conforme al plan final y conservar las garantías de concurrencia. |
 | HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial. | Alinear el estado de origen con el contrato definitivo de HU-025. |
@@ -39,7 +41,7 @@ ni el cierre completo de las historias.
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual; acceso restringido por propietario. | Mantener compatibilidad con el contrato de estados de HU-025. |
 | HU-031 · Pago verificado | No implementado. | Registro manual de importe, método, fecha y responsable; permisos, prevención de duplicados y consulta separada del estado operativo. |
 
-Orden de continuidad del backend: completar HU-024 y HU-026; resolver la
+Orden de continuidad del backend: completar HU-026; resolver la
 revalidación y el contrato de estados de HU-025; comprobar HU-027, HU-028 y
 HU-041 con ese contrato; implementar HU-031. No se considera terminada la
 aceptación solo porque exista `/accept`: actualmente no revalida el catálogo
@@ -51,11 +53,21 @@ servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
 una integración posterior. Este corte no cambia los perfiles SQL ni requiere
 los permisos de recepción añadidos por aquella rama.
 
-Después del flujo obligatorio, y solo si queda tiempo, el plan propone la
-demostración de fidelización en este orden: HU-046 → HU-042 → HU-043 → HU-045 →
-HU-047 → HU-049. Se limita a configuración, visitas, generación y consulta de
+Las seis historias de fidelización también forman parte del alcance acordado y
+se implementarán después del flujo de pedidos, en este orden:
+
+| Historia | Estado del backend |
+| --- | --- |
+| HU-046 · Configurar niveles y recompensas | Pendiente. |
+| HU-042 · Identificación QR/PIN | Pendiente. |
+| HU-043 · Registrar visita presencial | Pendiente. |
+| HU-045 · Acumular visitas y otorgar recompensas | Pendiente. |
+| HU-047 · Consultar progreso de lealtad | Pendiente. |
+| HU-049 · Consultar billetera digital | Existe consulta de cupones; falta integrar las recompensas de fidelización y la presentación de estados de billetera. |
+
+Este bloque se limita a configuración, visitas, generación y consulta de
 recompensas; no incluye reserva ni canje. Ventas en Loyverse, vinculación,
-conciliación y correcciones de pagos quedan fuera de esta entrega.
+conciliación y correcciones de pagos permanecen fuera del alcance actual.
 
 Los cupones y cobros se demuestran únicamente con datos de prueba. No habilitar
 su uso comercial antes de completar los mecanismos posteriores de reserva,
@@ -118,6 +130,38 @@ Las dependencias se encuentran en [`requirements.txt`](requirements.txt).
 | `GET / POST` | `/api/admin/sync/...`    | Estado, solicitudes e historial de sincronización; acceso protegido. |
 
 La administración de productos y la autenticación se encuentran bajo `/api/admin/` y `/api/auth/`. Consulta la documentación OpenAPI (`/docs`) del entorno correspondiente para ver sus contratos completos. **El QR se genera desde el frontend; el backend proporciona la URL del menú.**
+
+## HU-024: recepción y consulta operativa
+
+`GET /api/admin/orders` y `GET /api/admin/orders/{order_id}` conservan el acceso
+protegido por `orders:read`, disponible para Admin y Staff. El UUID `order_id`
+identifica la solicitud; se devuelven modalidad, fecha, estado, importes y los
+datos necesarios para atenderla. El detalle incluye productos, variantes,
+complementos, cantidades e historial, sin publicar tokens o claves de idempotencia.
+
+El listado coloca primero `Solicitud recibida`. Dentro del grupo pendiente y
+del resto, ordena por fecha ascendente y UUID ascendente como desempate. La
+prioridad se aplica antes de paginar y se mantienen los filtros `status`,
+`limit` y `offset`. Las páginas no congelan la cola entre consultas: nuevos
+pedidos o cambios de estado pueden mover posiciones.
+
+Lista y detalle añaden dos campos informativos:
+
+| Campo | Significado |
+| --- | --- |
+| `pending_wait_seconds` | Segundos enteros desde la creación de una solicitud pendiente, con mínimo cero; `null` para otros estados. |
+| `needs_attention` | `true` cuando la solicitud sigue pendiente y alcanzó el umbral de espera configurado. |
+
+`ORDER_PENDING_WARNING_SECONDS` configura el umbral del aviso, entre 1 y 86400
+segundos. El valor inicial es 600 segundos (10 minutos); puede ajustarse para
+la demostración sin cambiar datos. El reloj del backend calcula la espera y
+usa una misma referencia temporal para todos los elementos de una página.
+
+Consultar repetidamente no atiende, rechaza ni cancela pedidos, aunque lleven
+mucho tiempo pendientes. Al salir de `Solicitud recibida`, el aviso desaparece
+y la espera pendiente se devuelve como `null`; no representa el tiempo total
+de preparación o entrega. Las respuestas mantienen `Cache-Control: no-store`.
+No se requieren migraciones, permisos nuevos, Web Push ni avisos externos.
 
 ## Historial personal de pedidos
 

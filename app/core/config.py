@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     auth_catalog_enabled: bool = False
     auth_images_enabled: bool = False
     auth_sync_enabled: bool = False
+    order_pending_warning_seconds: int = Field(default=600, ge=1, le=86_400,
+        description="Umbral informativo de espera de solicitudes; no cancela ni modifica pedidos.")
     auth_database_url: str | None = Field(default=None, repr=False)
     auth_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     auth_cookie_secure: bool = True

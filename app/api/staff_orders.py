@@ -20,14 +20,20 @@ Writer = Annotated[Principal,Depends(require_permission("orders:write"))]
 def list_orders(request: Request, response: Response, user: Reader,
                 status: Annotated[str | None,Query(min_length=1,max_length=50)] = None,
                 limit: Annotated[int,Query(ge=1,le=100)] = 25, offset: Annotated[int,Query(ge=0)] = 0):
+    """Pendientes primero, de mayor a menor espera; filtros y paginación conservan ese orden."""
     response.headers["Cache-Control"] = "no-store"
-    return staff_order_service.list_orders(request.state.auth_context.db,status=status,limit=limit,offset=offset)
+    return staff_order_service.list_orders(request.state.auth_context.db,status=status,limit=limit,offset=offset,
+        now=request.app.state.auth_service.now(),
+        pending_warning_seconds=request.app.state.settings.order_pending_warning_seconds)
 
 
 @router.get("/{order_id}",response_model=StaffOrderDetail,summary="Consultar pedido e historial de estados")
 def order_detail(order_id: UUID, request: Request, response: Response, user: Reader):
+    """Incluye aviso de espera informativo; consultar no atiende ni cancela la solicitud."""
     response.headers["Cache-Control"] = "no-store"
-    return staff_order_service.order_detail(request.state.auth_context.db,order_id)
+    return staff_order_service.order_detail(request.state.auth_context.db,order_id,
+        now=request.app.state.auth_service.now(),
+        pending_warning_seconds=request.app.state.settings.order_pending_warning_seconds)
 
 
 @router.post("/{order_id}/accept",response_model=StaffOrderDetail,summary="Aceptar una solicitud pendiente")

@@ -97,6 +97,9 @@ class StaffOrderListItem(BaseModel):
     subtotal: MenuAmount
     discount_total: MenuAmount
     total: MenuAmount
+    pending_wait_seconds: int | None = Field(default=None, ge=0,
+        description="Segundos de espera actuales; null cuando la solicitud ya fue atendida.")
+    needs_attention: bool = Field(default=False, description="Solicitud pendiente que alcanzó el umbral de aviso.")
 
 
 class StaffOrderListResponse(BaseModel):
@@ -112,3 +115,6 @@ class StaffOrderDetail(OrderSummaryResponse):
     created_at: datetime
     data: OrderModalityInput
     history: list[OrderStateRead]
+    pending_wait_seconds: int | None = Field(default=None, ge=0,
+        description="Segundos de espera actuales; null cuando la solicitud ya fue atendida.")
+    needs_attention: bool = Field(default=False, description="Solicitud pendiente que alcanzó el umbral de aviso.")

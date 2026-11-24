@@ -1,10 +1,13 @@
 """Consulta y decisión del personal; conserva precios y datos históricos."""
 
-from sqlalchemy import func, select
+from datetime import datetime, timezone
+
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.auth_errors import AuthError
 from app.models import Order, OrderDetail, OrderStatusHistory
+from app.models.order import INITIAL_STATUS
 from app.schemas.orders import OrderStateRead, StaffOrderDetail, StaffOrderListItem, StaffOrderListResponse
 from app.services import order_state_service, order_tracking_service
 
@@ -21,18 +24,33 @@ def _data(order):
     return data
 
 
-def list_orders(db, *, status=None, limit=25, offset=0):
+def _attention(order, now, pending_warning_seconds):
+    """Calcula espera solo para solicitudes pendientes, sin persistir ni cambiar su estado."""
+    if order.status != INITIAL_STATUS:
+        return {"pending_wait_seconds": None, "needs_attention": False}
+    seconds = max(0, int((now - order.created_at).total_seconds()))
+    return {"pending_wait_seconds": seconds, "needs_attention": seconds >= pending_warning_seconds}
+
+
+def list_orders(db, *, status=None, limit=25, offset=0, now=None, pending_warning_seconds=600):
+    """Prioriza pendientes antes de paginar; cada grupo conserva primero las solicitudes más antiguas."""
     _require_history(db)
+    now = now or datetime.now(timezone.utc)
     filters = [Order.status == status] if status is not None else []
     total = db.scalar(select(func.count(Order.order_id)).where(*filters))
-    rows = db.scalars(select(Order).where(*filters).order_by(Order.created_at,Order.order_id).limit(limit).offset(offset))
+    priority = case((Order.status == INITIAL_STATUS, 0), else_=1)
+    rows = db.scalars(select(Order).where(*filters).order_by(priority, Order.created_at, Order.order_id)
+                      .limit(limit).offset(offset))
     return StaffOrderListResponse(total=total,limit=limit,offset=offset,items=[StaffOrderListItem(
         order_id=row.order_id,status=row.status,created_at=row.created_at,data=_data(row),
-        subtotal=row.subtotal,discount_total=row.discount_total,total=row.total) for row in rows])
+        subtotal=row.subtotal,discount_total=row.discount_total,total=row.total,
+        **_attention(row, now, pending_warning_seconds)) for row in rows])
 
 
-def order_detail(db, order_id):
+def order_detail(db, order_id, *, now=None, pending_warning_seconds=600):
+    """Devuelve precios e historial originales junto a la espera actual de una solicitud pendiente."""
     _require_history(db)
+    now = now or datetime.now(timezone.utc)
     row = db.scalar(select(Order).where(Order.order_id == order_id).options(
         selectinload(Order.details).selectinload(OrderDetail.complements)))
     if row is None:
@@ -41,7 +59,8 @@ def order_detail(db, order_id):
                          .order_by(OrderStatusHistory.created_at,OrderStatusHistory.status_history_id))
     return StaffOrderDetail(**order_tracking_service.historical_summary(row).model_dump(),order_id=row.order_id,
         status=row.status,created_at=row.created_at,data=_data(row),
-        history=[OrderStateRead.model_validate(event,from_attributes=True) for event in history])
+        history=[OrderStateRead.model_validate(event,from_attributes=True) for event in history],
+        **_attention(row, now, pending_warning_seconds))
 
 
 def decide_order(db, order_id, *, accepted, actor_account_id, reason=None):
