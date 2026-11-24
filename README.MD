@@ -4,7 +4,7 @@
 
 MITBOL es un proyecto web para modernizar la atención de un restaurante que utiliza **Loyverse** como punto de venta. Su API permite consultar un menú actualizado desde el celular, con productos, precios, variantes y complementos, sin necesidad de iniciar sesión.
 
-> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. Las funcionalidades de pedidos, pagos, promociones y fidelización forman parte de la visión del proyecto, pero **aún no están implementadas como flujos completos en este backend**.
+> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. La API permite preparar, registrar y consultar solicitudes y gestionar su atención por modalidad hasta completarla. Pagos, conciliación de ventas y fidelización completa corresponden a etapas posteriores.
 
 ## ✨ Funcionalidades principales
 
@@ -14,8 +14,53 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 - 🏷️ **Descuentos comerciales:** importación y consulta de descuentos compatibles; los registros desconocidos se tratan de forma controlada, sin inventar valores.
 - 🖼️ **Imágenes persistentes:** fotografías almacenadas en **Cloudflare R2** y consultadas a través de la API.
 - 🔐 **Acceso administrativo:** autenticación por sesiones, roles y permisos para proteger las operaciones internas.
+- 👤 **Cuentas personales:** registro, inicio/cierre de sesión, perfil y recuperación de contraseña mediante SMTP o Brevo cuando se configura el proveedor.
+- 🛒 **Carrito y solicitudes:** validación de selecciones, modalidades local/recogida, cálculo de importes y descuentos compatibles, registro idempotente e información histórica.
+- 🎟️ **Cupones personales:** selección y cálculo de beneficios elegibles; no se reservan ni canjean al registrar la solicitud.
+- 📋 **Atención de solicitudes:** seguimiento privado de invitados, cancelación pendiente, aceptación/rechazo, preparación, servido/entrega y finalización por modalidad, con historial de estados.
+- 🧾 **Mis pedidos:** historial paginado y detalle privado de solicitudes asociadas a la cuenta autenticada, con importes históricos y estado actual.
 
-**En desarrollo o por validar:** integración completa del frontend, flujo administrativo de sincronización manual y comprobación de las ejecuciones programadas de descuentos. El carrito, los pedidos, el cobro y la fidelización corresponden a etapas posteriores.
+**Validación independiente:** integración del frontend, configuración y funcionamiento de los servicios desplegados y ejecuciones programadas. La implementación de endpoints y sus pruebas de backend no acredita esos entornos.
+
+## Corte académico y backlog vigente
+
+La planificación vigente es **Por hacer FINAL.pdf**, páginas 1–6. Parte de
+HU-001 a HU-023 ya trabajadas y prioriza las siete historias siguientes. La
+tabla describe el backend disponible; no acredita la integración del frontend
+ni el cierre completo de las historias.
+
+| Historia | Base disponible | Pendiente del backend según el plan final |
+| --- | --- | --- |
+| HU-024 · Consultar solicitudes | Listado protegido, detalle y fechas. | Priorizar solicitudes pendientes y facilitar la identificación de espera prolongada. |
+| HU-025 · Aceptar solicitudes | Aceptación condicional, responsable e historial. | Revalidar disponibilidad, precios y beneficios antes de confirmar, sin cambiar los importes históricos. Alinear `Aceptado` con el nombre contractual `Confirmado`. |
+| HU-026 · Rechazar solicitudes | Rechazo condicional e historial con motivo opcional. | Exigir el motivo conforme al plan final y conservar las garantías de concurrencia. |
+| HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial. | Alinear el estado de origen con el contrato definitivo de HU-025. |
+| HU-028 · Servicio o entrega | Acciones `serve`, `deliver` y `complete`, sin inferir cobros. | Incorporar la dimensión de pago independiente mediante HU-031. |
+| HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual; acceso restringido por propietario. | Mantener compatibilidad con el contrato de estados de HU-025. |
+| HU-031 · Pago verificado | No implementado. | Registro manual de importe, método, fecha y responsable; permisos, prevención de duplicados y consulta separada del estado operativo. |
+
+Orden de continuidad del backend: completar HU-024 y HU-026; resolver la
+revalidación y el contrato de estados de HU-025; comprobar HU-027, HU-028 y
+HU-041 con ese contrato; implementar HU-031. No se considera terminada la
+aceptación solo porque exista `/accept`: actualmente no revalida el catálogo
+ni los beneficios antes de cambiar el estado.
+
+La rama académica reutiliza los bloques de historial personal, preparación y
+servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
+(HU-038), que permanece conservado en `feature/order-reception-settings` para
+una integración posterior. Este corte no cambia los perfiles SQL ni requiere
+los permisos de recepción añadidos por aquella rama.
+
+Después del flujo obligatorio, y solo si queda tiempo, el plan propone la
+demostración de fidelización en este orden: HU-046 → HU-042 → HU-043 → HU-045 →
+HU-047 → HU-049. Se limita a configuración, visitas, generación y consulta de
+recompensas; no incluye reserva ni canje. Ventas en Loyverse, vinculación,
+conciliación y correcciones de pagos quedan fuera de esta entrega.
+
+Los cupones y cobros se demuestran únicamente con datos de prueba. No habilitar
+su uso comercial antes de completar los mecanismos posteriores de reserva,
+canje y conciliación. El registro de un pago simulado no acredita una venta
+real en Loyverse.
 
 ## 🧭 Arquitectura
 
@@ -73,6 +118,103 @@ Las dependencias se encuentran en [`requirements.txt`](requirements.txt).
 | `GET / POST` | `/api/admin/sync/...`    | Estado, solicitudes e historial de sincronización; acceso protegido. |
 
 La administración de productos y la autenticación se encuentran bajo `/api/admin/` y `/api/auth/`. Consulta la documentación OpenAPI (`/docs`) del entorno correspondiente para ver sus contratos completos. **El QR se genera desde el frontend; el backend proporciona la URL del menú.**
+
+## Historial personal de pedidos
+
+El seguimiento desde la cuenta implementa el alcance del Prompt Maestro v2.1,
+sección 6.8. No requiere roles administrativos ni permisos nuevos de PostgreSQL.
+
+| Método | Ruta | Resultado |
+| --- | --- | --- |
+| `GET` | `/api/auth/orders?limit=25&offset=0` | `items`, `total`, `limit` y `offset`, solo de la cuenta autenticada. |
+| `GET` | `/api/auth/orders/{order_id}` | Estado actual, modalidad, productos e importes históricos y `can_cancel`. |
+
+El listado admite `status` opcional, `limit` de 1 a 100 y `offset` desde cero.
+Ordena por fecha descendente y UUID descendente como desempate. Un historial
+vacío devuelve 200 con `items: []` y `total: 0`. La paginación no congela el
+conjunto de pedidos entre consultas.
+
+La cookie de sesión determina la cuenta. No se acepta un token de invitado como
+sustituto de la sesión ni se vinculan pedidos anteriores de invitado por nombre
+o teléfono. Admin y Staff consultan aquí únicamente sus pedidos propios; la
+consulta operativa del restaurante conserva su endpoint y permiso separados.
+Pedidos inexistentes, ajenos o de invitado devuelven el mismo 404. Sesiones
+ausentes, expiradas o revocadas devuelven 401; parámetros inválidos, 422, y
+errores de base de datos, 503 sin datos internos.
+
+Las respuestas incluyen `Cache-Control: no-store`; el detalle no expone contacto,
+tokens, claves de idempotencia ni identidades internas del personal. Las lecturas
+no alteran pedidos, beneficios ni precios; la sesión conserva su renovación normal.
+El detalle recupera los descuentos y cupones históricos cuando existe su snapshot,
+sin recalcularlos con el catálogo actual ni reservar o canjear beneficios.
+
+`can_cancel` es true solo mientras el estado sea `Solicitud recibida`. Es
+informativo: `POST /api/orders/{order_id}/cancel` sigue exigiendo propiedad,
+sesión, Origin y CSRF, y revalida el estado al ejecutar. Después de cancelar,
+el pedido permanece en el historial con su información original.
+
+## Preparación de pedidos
+
+Este bloque aplica los estados de preparación del Prompt Maestro v2.1, sección
+6.4, manteniendo `Aceptado` como nombre del estado confirmado que ya utiliza la
+API. No renombra registros históricos ni cambia el contrato de aceptación.
+
+| Método | Ruta | Transición permitida |
+| --- | --- | --- |
+| `POST` | `/api/admin/orders/{order_id}/prepare` | `Aceptado` → `En preparación`, en ambas modalidades. |
+| `POST` | `/api/admin/orders/{order_id}/ready` | `En preparación` → `Listo para recoger`, únicamente para `pickup`. |
+
+Ambas acciones reciben JSON vacío `{}` y requieren sesión de Admin o Staff con
+`orders:write`, Origin autorizado y CSRF. Devuelven el detalle administrativo con
+el historial actualizado y `Cache-Control: no-store`. Requieren el historial
+instalado por la migración existente `20261121_0014`; no necesitan una migración
+ni permisos adicionales. Un pedido inexistente devuelve 404; un estado o una
+modalidad incompatibles, 409; campos como `status` o `actor_account_id`, 422.
+
+El estado anterior y, al marcar listo, la modalidad se comprueban en el mismo
+UPDATE. Intentos duplicados concurrentes producen una sola transición: el otro
+recibe 409. Estado, fecha y responsable del historial se confirman en la misma
+transacción; si falla el historial, se revierte el cambio. Ante una respuesta
+perdida o incierta, consultar el detalle antes de repetir.
+
+La preparación conserva productos, precios y descuentos históricos. Cerrar la
+recepción no impide atender pedidos ya aceptados. El seguimiento de invitados
+y el historial personal muestran el nuevo estado; la cancelación directa del
+cliente sigue limitada a `Solicitud recibida`. Marcar listo no confirma entrega,
+pago, venta, reserva ni canje de cupones. La atención continúa mediante las
+acciones explícitas de servido o entrega descritas a continuación.
+
+## Servido, entrega y finalización
+
+Las acciones operativas de esta sección completan el recorrido de atención del
+Prompt Maestro v2.1, sección 6.4. Cada confirmación requiere Admin o Staff con
+`orders:write`, sesión, Origin y CSRF, y recibe únicamente JSON vacío `{}`.
+
+| Método | Ruta | Modalidad y transición |
+| --- | --- | --- |
+| `POST` | `/api/admin/orders/{order_id}/serve` | Consumo local: `En preparación` → `Servido`. |
+| `POST` | `/api/admin/orders/{order_id}/deliver` | Recogida: `Listo para recoger` → `Entregado`. |
+| `POST` | `/api/admin/orders/{order_id}/complete` | Local: `Servido` → `Completado`; recogida: `Entregado` → `Completado`. |
+
+Servir y entregar son confirmaciones manuales de recepción de los productos.
+No completan automáticamente el pedido: finalizar la atención requiere su propia
+acción. No se permite completar desde aceptado, preparación o listo para recoger,
+ni intercambiar los estados de entrega entre modalidades. Pedidos desconocidos
+devuelven 404; estados, modalidades o repeticiones incompatibles devuelven 409;
+campos adicionales como `paid`, `status` o `actor_account_id` devuelven 422.
+
+Estado y modalidad se comprueban en el UPDATE. Estado, fecha y responsable del
+historial se confirman en la misma transacción. Un fallo del historial revierte
+la transición y dos confirmaciones simultáneas de la misma acción producen una
+sola transición. La respuesta incluye el detalle administrativo con
+`Cache-Control: no-store`; ante resultado incierto, consultar el estado antes
+de repetir. Se reutilizan la migración `0014` y los permisos existentes.
+
+Los importes, productos, complementos y descuentos originales se conservan.
+El seguimiento privado y el historial personal muestran el estado actual, incluso
+después de completar. Se puede atender un pedido ya aceptado con la recepción
+cerrada. Servir, entregar o completar no verifica pagos, registra ventas, genera
+visitas ni reserva o canjea beneficios; esos acontecimientos permanecen separados.
 
 ## 🚀 Inicio rápido (Windows)
 

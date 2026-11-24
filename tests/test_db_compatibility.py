@@ -300,6 +300,13 @@ def test_orders_tracking_cancellation_and_coupon_selection_under_writer(backend,
     receipt = created.json()
     assert receipt["total"] == "210.00" and receipt["discount_total"] == "0.00"
     assert b.client.post("/api/orders", headers=headers, json=body).json() == receipt
+    if registered:
+        history = b.client.get("/api/auth/orders")
+        assert history.status_code == 200 and history.json()["total"] == 1
+        assert history.json()["items"][0]["order_id"] == receipt["order_id"]
+        detail = b.client.get(f'/api/auth/orders/{receipt["order_id"]}')
+        assert detail.status_code == 200 and detail.json()["items"] == receipt["items"], detail.text
+        assert detail.json()["can_cancel"] is True
     if not registered:
         access = receipt["tracking"]
         headers = {"Authorization": f'Bearer {access["token"]}'}

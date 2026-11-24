@@ -61,6 +61,14 @@ class OrderAcceptanceInput(OrderCancellationInput):
     pass
 
 
+class OrderPreparationInput(OrderCancellationInput):
+    """Acción sin parámetros: el servidor decide la transición y la modalidad permitidas."""
+
+
+class OrderFulfillmentInput(OrderCancellationInput):
+    """Confirmación explícita sin importes, método de pago ni estado enviados por el cliente."""
+
+
 class OrderRejectionInput(OrderCancellationInput):
     reason: Annotated[str,StringConstraints(strip_whitespace=True,min_length=1,max_length=500)] | None = None
 
