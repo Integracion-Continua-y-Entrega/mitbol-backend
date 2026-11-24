@@ -22,6 +22,46 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 
 **Validación independiente:** integración del frontend, configuración y funcionamiento de los servicios desplegados y ejecuciones programadas. La implementación de endpoints y sus pruebas de backend no acredita esos entornos.
 
+## Corte académico y backlog vigente
+
+La planificación vigente es **Por hacer FINAL.pdf**, páginas 1–6. Parte de
+HU-001 a HU-023 ya trabajadas y prioriza las siete historias siguientes. La
+tabla describe el backend disponible; no acredita la integración del frontend
+ni el cierre completo de las historias.
+
+| Historia | Base disponible | Pendiente del backend según el plan final |
+| --- | --- | --- |
+| HU-024 · Consultar solicitudes | Listado protegido, detalle y fechas. | Priorizar solicitudes pendientes y facilitar la identificación de espera prolongada. |
+| HU-025 · Aceptar solicitudes | Aceptación condicional, responsable e historial. | Revalidar disponibilidad, precios y beneficios antes de confirmar, sin cambiar los importes históricos. Alinear `Aceptado` con el nombre contractual `Confirmado`. |
+| HU-026 · Rechazar solicitudes | Rechazo condicional e historial con motivo opcional. | Exigir el motivo conforme al plan final y conservar las garantías de concurrencia. |
+| HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial. | Alinear el estado de origen con el contrato definitivo de HU-025. |
+| HU-028 · Servicio o entrega | Acciones `serve`, `deliver` y `complete`, sin inferir cobros. | Incorporar la dimensión de pago independiente mediante HU-031. |
+| HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual; acceso restringido por propietario. | Mantener compatibilidad con el contrato de estados de HU-025. |
+| HU-031 · Pago verificado | No implementado. | Registro manual de importe, método, fecha y responsable; permisos, prevención de duplicados y consulta separada del estado operativo. |
+
+Orden de continuidad del backend: completar HU-024 y HU-026; resolver la
+revalidación y el contrato de estados de HU-025; comprobar HU-027, HU-028 y
+HU-041 con ese contrato; implementar HU-031. No se considera terminada la
+aceptación solo porque exista `/accept`: actualmente no revalida el catálogo
+ni los beneficios antes de cambiar el estado.
+
+La rama académica reutiliza los bloques de historial personal, preparación y
+servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
+(HU-038), que permanece conservado en `feature/order-reception-settings` para
+una integración posterior. Este corte no cambia los perfiles SQL ni requiere
+los permisos de recepción añadidos por aquella rama.
+
+Después del flujo obligatorio, y solo si queda tiempo, el plan propone la
+demostración de fidelización en este orden: HU-046 → HU-042 → HU-043 → HU-045 →
+HU-047 → HU-049. Se limita a configuración, visitas, generación y consulta de
+recompensas; no incluye reserva ni canje. Ventas en Loyverse, vinculación,
+conciliación y correcciones de pagos quedan fuera de esta entrega.
+
+Los cupones y cobros se demuestran únicamente con datos de prueba. No habilitar
+su uso comercial antes de completar los mecanismos posteriores de reserva,
+canje y conciliación. El registro de un pago simulado no acredita una venta
+real en Loyverse.
+
 ## 🧭 Arquitectura
 
 El backend es un **monolito modular organizado por capas**: una aplicación FastAPI cuyos módulos separan rutas HTTP, validación, reglas de negocio y persistencia.
