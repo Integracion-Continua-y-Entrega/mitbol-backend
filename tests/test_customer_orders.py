@@ -133,7 +133,7 @@ def test_detail_preserves_historical_prices_and_benefits_without_private_fields(
     ))
 
 
-@pytest.mark.parametrize("state", ["Aceptado", "En preparación", "Rechazado", "Cancelado", "Completado"])
+@pytest.mark.parametrize("state", ["Confirmado", "Aceptado", "En preparación", "Rechazado", "Cancelado", "Completado"])
 def test_current_state_controls_cancel_flag_and_existing_cancellation_revalidates(backend, state):
     b = backend
     receipt = create_order(b)

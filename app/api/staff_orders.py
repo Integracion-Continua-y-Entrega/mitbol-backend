@@ -38,8 +38,10 @@ def order_detail(order_id: UUID, request: Request, response: Response, user: Rea
 
 @router.post("/{order_id}/accept",response_model=StaffOrderDetail,summary="Aceptar una solicitud pendiente")
 def accept_order(order_id: UUID, payload: OrderAcceptanceInput, request: Request, response: Response, user: Writer):
+    """Confirma solo si disponibilidad, precios y beneficios coinciden con el pedido histórico; recibe {}."""
     response.headers["Cache-Control"] = "no-store"
-    return staff_order_service.decide_order(request.state.auth_context.db,order_id,accepted=True,actor_account_id=user.account_id)
+    return staff_order_service.decide_order(request.state.auth_context.db,order_id,accepted=True,
+        actor_account_id=user.account_id, clock=request.app.state.auth_service.now)
 
 
 @router.post("/{order_id}/reject",response_model=StaffOrderDetail,summary="Rechazar una solicitud pendiente",

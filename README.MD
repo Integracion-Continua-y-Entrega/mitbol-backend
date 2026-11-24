@@ -34,18 +34,15 @@ frontend ni el cierre completo de las historias.
 | Historia | Base disponible | Pendiente del backend según el plan final |
 | --- | --- | --- |
 | HU-024 · Consultar solicitudes | Backend implementado: listado protegido con prioridad de pendientes, detalle, tiempo de espera y aviso configurable. | Sin pendiente identificado en este bloque de backend. |
-| HU-025 · Aceptar solicitudes | Aceptación condicional, responsable e historial. | Revalidar disponibilidad, precios y beneficios antes de confirmar, sin cambiar los importes históricos. Alinear `Aceptado` con el nombre contractual `Confirmado`. |
+| HU-025 · Aceptar solicitudes | Backend implementado: revalidación local, estado `Confirmado`, responsable e historial transaccional. | Sin pendiente identificado en este bloque de backend; reserva y canje de beneficios quedan fuera de este corte. |
 | HU-026 · Rechazar solicitudes | Backend implementado: rechazo de pendientes con motivo obligatorio, fecha, responsable e historial transaccional. | Sin pendiente identificado en este bloque de backend. |
-| HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial. | Alinear el estado de origen con el contrato definitivo de HU-025. |
+| HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial; acepta `Confirmado` y `Aceptado` legado. | Sin pendiente identificado en este bloque de backend. |
 | HU-028 · Servicio o entrega | Acciones `serve`, `deliver` y `complete`, sin inferir cobros. | Incorporar la dimensión de pago independiente mediante HU-031. |
-| HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual; acceso restringido por propietario. | Mantener compatibilidad con el contrato de estados de HU-025. |
+| HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
 | HU-031 · Pago verificado | No implementado. | Registro manual de importe, método, fecha y responsable; permisos, prevención de duplicados y consulta separada del estado operativo. |
 
-Orden de continuidad del backend: resolver la
-revalidación y el contrato de estados de HU-025; comprobar HU-027, HU-028 y
-HU-041 con ese contrato; implementar HU-031. No se considera terminada la
-aceptación solo porque exista `/accept`: actualmente no revalida el catálogo
-ni los beneficios antes de cambiar el estado.
+Orden de continuidad del backend: implementar HU-031 y comprobar su consulta
+independiente del estado operativo de HU-028; después, avanzar con fidelización.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
 servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
@@ -163,6 +160,36 @@ y la espera pendiente se devuelve como `null`; no representa el tiempo total
 de preparación o entrega. Las respuestas mantienen `Cache-Control: no-store`.
 No se requieren migraciones, permisos nuevos, Web Push ni avisos externos.
 
+## HU-025: confirmación con revalidación local
+
+`POST /api/admin/orders/{order_id}/accept` recibe `{}` y requiere Admin o Staff
+con `orders:write`, sesión, Origin autorizado y CSRF. Solo una solicitud en
+`Solicitud recibida` puede pasar a `Confirmado`. Devuelve el detalle administrativo
+y su historial, con `Cache-Control: no-store`.
+
+Antes de confirmar, el backend reconstruye la selección original y comprueba
+disponibilidad local, compatibilidad de complementos, precios y beneficios
+aplicados. Un cupón se valida contra la cuenta propietaria del pedido, su vigencia
+y sus condiciones actuales. No se consulta Loyverse durante esta acción.
+
+Si cambia la selección, un precio o un beneficio aplicado, devuelve 409 y conserva
+la solicitud pendiente con sus importes históricos. No permite forzar la
+aceptación ni recalcular el precio del pedido. Cambiar nombres o metadatos de
+descuentos que nunca se aplicaron no invalida la cotización. El personal puede
+resolver el conflicto y reintentar, o rechazar con motivo. Ante una respuesta
+incierta, consultar el detalle antes de repetir.
+
+La operación bloquea la fila del pedido y mantiene el bloqueo transaccional de
+catálogo compartido con sincronización y disponibilidad hasta guardar estado e
+historial. Si el catálogo está ocupado devuelve 409 para reintentar. Decisiones
+concurrentes no sobrescriben un estado ya atendido. Un fallo al guardar el
+historial revierte la confirmación.
+
+Las nuevas confirmaciones usan `Confirmado`; los registros y eventos antiguos
+con `Aceptado` se conservan y también permiten iniciar preparación. No se
+requieren migraciones ni permisos nuevos. Confirmar no reserva ni canjea cupones,
+no asegura exclusividad de un beneficio y no registra pagos o ventas.
+
 ## HU-026: rechazo con motivo obligatorio
 
 `POST /api/admin/orders/{order_id}/reject` requiere Admin o Staff con
@@ -234,12 +261,12 @@ el pedido permanece en el historial con su información original.
 ## Preparación de pedidos
 
 Este bloque aplica los estados de preparación del Prompt Maestro v2.1, sección
-6.4, manteniendo `Aceptado` como nombre del estado confirmado que ya utiliza la
-API. No renombra registros históricos ni cambia el contrato de aceptación.
+6.4 y el contrato de HU-025: las nuevas aceptaciones usan `Confirmado` y se
+conserva compatibilidad con `Aceptado` sin renombrar registros históricos.
 
 | Método | Ruta | Transición permitida |
 | --- | --- | --- |
-| `POST` | `/api/admin/orders/{order_id}/prepare` | `Aceptado` → `En preparación`, en ambas modalidades. |
+| `POST` | `/api/admin/orders/{order_id}/prepare` | `Confirmado` (o `Aceptado` legado) → `En preparación`, en ambas modalidades. |
 | `POST` | `/api/admin/orders/{order_id}/ready` | `En preparación` → `Listo para recoger`, únicamente para `pickup`. |
 
 Ambas acciones reciben JSON vacío `{}` y requieren sesión de Admin o Staff con

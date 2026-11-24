@@ -8,9 +8,9 @@ from sqlalchemy.orm import selectinload
 
 from app.core.auth_errors import AuthError
 from app.models import Order, OrderDetail, OrderStatusHistory
-from app.models.order import INITIAL_STATUS
+from app.models.order import CONFIRMED_STATUS, INITIAL_STATUS, LEGACY_CONFIRMED_STATUS
 from app.schemas.orders import OrderRejectionInput, OrderStateRead, StaffOrderDetail, StaffOrderListItem, StaffOrderListResponse
-from app.services import order_state_service, order_tracking_service
+from app.services import order_acceptance_service, order_state_service, order_tracking_service
 
 
 def _require_history(db):
@@ -64,17 +64,25 @@ def order_detail(db, order_id, *, now=None, pending_warning_seconds=600):
         **_attention(row, now, pending_warning_seconds))
 
 
-def decide_order(db, order_id, *, accepted, actor_account_id, reason=None):
-    """Decide solo solicitudes pendientes; rechazar exige motivo válido incluso sin pasar por HTTP."""
+def decide_order(db, order_id, *, accepted, actor_account_id, reason=None, clock=None):
+    """Bloquea el pedido vigente; aceptar revalida la cotización y rechazar exige motivo."""
     if not accepted:
         try:
             reason = OrderRejectionInput(reason=reason).reason
         except ValidationError:
             raise AuthError(422, "El rechazo requiere un motivo válido de 1 a 500 caracteres.") from None
     _require_history(db)
-    if db.scalar(select(Order.order_id).where(Order.order_id == order_id)) is None:
+    query = select(Order).where(Order.order_id == order_id).with_for_update().execution_options(populate_existing=True)
+    if accepted:
+        query = query.options(selectinload(Order.details).selectinload(OrderDetail.complements))
+    row = db.scalar(query)
+    if row is None:
         raise AuthError(404,"Pedido no encontrado.")
-    identifier = order_state_service.transition_pending(db,order_id,"Aceptado" if accepted else "Rechazado",
+    if row.status != INITIAL_STATUS:
+        raise AuthError(409, "El pedido ya no está pendiente de aceptación.")
+    if accepted:
+        order_acceptance_service.validate_acceptance(db, row, clock=clock)
+    identifier = order_state_service.transition_pending(db,order_id,CONFIRMED_STATUS if accepted else "Rechazado",
         actor_account_id=actor_account_id,reason=reason,required=True)
     if identifier is None:
         raise AuthError(409,"El pedido ya no está pendiente de aceptación.")
@@ -94,8 +102,14 @@ def _advance_order(db, order_id, *, previous_status, status, actor_account_id, m
 
 
 def start_preparation(db, order_id, *, actor_account_id):
-    """Inicia ambos tipos de pedido desde Aceptado, nombre vigente del estado confirmado."""
-    return _advance_order(db, order_id, previous_status="Aceptado", status="En preparación",
+    """Inicia desde Confirmado o Aceptado legado sin renombrar los eventos históricos."""
+    _require_history(db)
+    previous = db.scalar(select(Order.status).where(Order.order_id == order_id))
+    if previous is None:
+        raise AuthError(404, "Pedido no encontrado.")
+    if previous not in {CONFIRMED_STATUS, LEGACY_CONFIRMED_STATUS}:
+        raise AuthError(409, "El pedido no está confirmado para iniciar preparación.")
+    return _advance_order(db, order_id, previous_status=previous, status="En preparación",
                           actor_account_id=actor_account_id)
 
 

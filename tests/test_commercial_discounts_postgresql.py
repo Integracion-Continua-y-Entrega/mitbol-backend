@@ -331,7 +331,7 @@ def test_staff_order_history_uses_existing_writer_without_private_access_for_rea
         assert b.client.get("/api/admin/orders").status_code == 200
         accepted = b.client.post(f'/api/admin/orders/{receipt["order_id"]}/accept',json={},headers=headers)
         assert accepted.status_code == 200, accepted.text
-        assert accepted.json()["status"] == "Aceptado" and len(accepted.json()["history"]) == 2
+        assert accepted.json()["status"] == "Confirmado" and len(accepted.json()["history"]) == 2
         execute_script(b.roles.writer,VERIFY.read_text(encoding="utf-8"))
         with b.roles.writer.connect() as db:
             assert validate_bridge_schema(db) == "20261121_0014"

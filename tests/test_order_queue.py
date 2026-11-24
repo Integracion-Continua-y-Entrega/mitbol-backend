@@ -80,7 +80,7 @@ def test_wait_and_warning_boundary_match_between_list_and_detail(backend, age, s
     assert listing.headers["cache-control"] == detail.headers["cache-control"] == "no-store"
 
 
-@pytest.mark.parametrize("state", ["Aceptado", "En preparación", "Listo para recoger", "Servido",
+@pytest.mark.parametrize("state", ["Confirmado", "Aceptado", "En preparación", "Listo para recoger", "Servido",
                                    "Entregado", "Completado", "Rechazado", "Cancelado"])
 def test_attended_orders_do_not_keep_pending_warning(backend, state):
     b = backend

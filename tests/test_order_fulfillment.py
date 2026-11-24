@@ -63,7 +63,7 @@ def test_explicit_handoff_and_completion_preserve_history_and_amounts(backend, r
     completed = advance(b, receipt, headers, "complete")
     assert completed.status_code == 200 and completed.json()["status"] == "Completado", completed.text
     assert advance(b, receipt, headers, "complete").status_code == 409
-    states = ["Solicitud recibida", "Aceptado", "En preparación"]
+    states = ["Solicitud recibida", "Confirmado", "En preparación"]
     if modality == "pickup":
         states.append("Listo para recoger")
     states += [state, "Completado"]
