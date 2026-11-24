@@ -349,3 +349,32 @@ def test_staff_order_history_uses_existing_writer_without_private_access_for_rea
     finally:
         with b.roles.owner.begin() as db:
             command.downgrade(config_for(db),"20261120_0013")
+
+
+def test_payment_persistence_revision_keeps_existing_roles_without_payment_access(restricted_backend, compatible_database):
+    """El esquema nuevo no concede privilegios de pagos hasta implementar el endpoint autorizado."""
+    b = restricted_backend
+    with b.roles.owner.begin() as db:
+        command.upgrade(config_for(db), "20261124_0015")
+    execute_script(b.roles.owner, approved(DELTA))
+    try:
+        for engine, filename in ((b.roles.writer, "verify_admin_writer_local.sql"),
+                                 (compatible_database.workers["mitbol_catalog_worker"], "verify_catalog_worker.sql"),
+                                 (compatible_database.workers["mitbol_discount_worker"], "verify_discount_worker.sql")):
+            execute_script(engine, (SQL / filename).read_text(encoding="utf-8"))
+            with engine.connect() as db:
+                assert validate_bridge_schema(db) == "20261124_0015"
+        for engine in (b.roles.reader, b.roles.writer, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."OrderPayments"',
+                    'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."OrderPayments"',
+                    'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+            for statement in ('SELECT * FROM "OrderPayments"',
+                              'INSERT INTO "OrderPayments" DEFAULT VALUES',
+                              'UPDATE "OrderPayments" SET method=\'other\'',
+                              'DELETE FROM "OrderPayments"'):
+                code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
+                denied(engine, statement, code=code)
+    finally:
+        with b.roles.owner.begin() as db:
+            command.downgrade(config_for(db), "20261120_0013")

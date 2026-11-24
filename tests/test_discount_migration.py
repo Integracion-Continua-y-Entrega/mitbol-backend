@@ -370,9 +370,9 @@ def test_staged_upgrade_sql_only_creates_discounts_and_never_connects(staged_con
     assert 'scope VARCHAR(20) NOT NULL' in sql
     assert 'value NUMERIC,' in sql
     assert all(operation not in sql for operation in ["DROP TABLE", "ALTER TABLE", "CREATE ROLE", "GRANT ", "TRUNCATE"])
-    assert ScriptDirectory.from_config(staged_config).get_heads() == ["20261121_0014"]
+    assert ScriptDirectory.from_config(staged_config).get_heads() == ["20261124_0015"]
     assert ScriptDirectory.from_config(staged_config).get_revision("20261114_0007").down_revision == REVISION
-    assert ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini"))).get_heads() == ["20261121_0014"]
+    assert ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini"))).get_heads() == ["20261124_0015"]
 
 
 def test_staged_migration_preserves_catalog_and_roundtrips_schema(empty_postgresql_connection, staged_config):

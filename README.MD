@@ -39,9 +39,9 @@ frontend ni el cierre completo de las historias.
 | HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial; acepta `Confirmado` y `Aceptado` legado. | Sin pendiente identificado en este bloque de backend. |
 | HU-028 · Servicio o entrega | Acciones `serve`, `deliver` y `complete`, sin inferir cobros. | Incorporar la dimensión de pago independiente mediante HU-031. |
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
-| HU-031 · Pago verificado | No implementado. | Registro manual de importe, método, fecha y responsable; permisos, prevención de duplicados y consulta separada del estado operativo. |
+| HU-031 · Pago verificado | Persistencia implementada: migración 0015, importe, método, fecha y responsable; unicidad por pedido. | Endpoint protegido, validación contra el pedido y consulta separada del estado operativo. Aún no se puede confirmar un pago desde la API. |
 
-Orden de continuidad del backend: implementar HU-031 y comprobar su consulta
+Orden de continuidad del backend: completar el endpoint y permisos de HU-031 y comprobar su consulta
 independiente del estado operativo de HU-028; después, avanzar con fidelización.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
@@ -320,6 +320,26 @@ El seguimiento privado y el historial personal muestran el estado actual, inclus
 después de completar. Se puede atender un pedido ya aceptado con la recepción
 cerrada. Servir, entregar o completar no verifica pagos, registra ventas, genera
 visitas ni reserva o canjea beneficios; esos acontecimientos permanecen separados.
+
+## HU-031: persistencia de pago verificado
+
+La migración aditiva `20261124_0015` incorpora `OrderPayments`, separada del
+estado operativo. Guarda un identificador, pedido, importe decimal positivo y
+finito, método (`cash`, `card`, `transfer`, `other`), fecha del servidor y cuenta
+responsable. Una restricción única impide dos confirmaciones para el mismo pedido.
+Las referencias protegidas impiden borrar el pedido o la cuenta mientras exista
+su registro de pago. Cambiar el estado de atención no modifica ese registro.
+
+Este primer bloque solo incorpora persistencia. La migración no genera pagos
+para pedidos anteriores, no cambia sus estados ni concede permisos sobre la
+tabla nueva. Los perfiles SQL reconocen la revisión 0015 conservando sus permisos
+anteriores; lectores públicos y workers continúan sin acceso a pagos. Tampoco
+el escritor web puede confirmarlos hasta completar el siguiente bloque.
+
+Quedan pendientes el endpoint protegido, sus validaciones contra el importe y
+estado del pedido y la consulta de cobro separada de la atención. HU-031 todavía
+no está terminada. El registro se demostrará con datos sintéticos y no sustituye
+una venta o recibo de Loyverse; HU-032, HU-033 y HU-035 siguen pendientes.
 
 ## 🚀 Inicio rápido (Windows)
 

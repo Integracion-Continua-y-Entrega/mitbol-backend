@@ -47,6 +47,7 @@ from app.models.coupon import CouponBase, CustomerCoupon
 from app.models.order import OrderBase, Order, OrderDetail, OrderDetailComplement, RestaurantOrderSettings
 from app.models.commercial_discount import CommercialDiscountBase, CommercialDiscountAssignment, OrderDiscountSnapshot
 from app.models.order_status_history import OrderStateBase, OrderStatusHistory
+from app.models.order_payment import OrderPaymentBase, OrderPayment
 
 __all__ = [
     "Base", "catalog_metadata", "runtime_catalog_metadata", "pre_categories_metadata",
@@ -61,4 +62,5 @@ __all__ = [
     "OrderBase", "Order", "OrderDetail", "OrderDetailComplement", "RestaurantOrderSettings",
     "CommercialDiscountBase", "CommercialDiscountAssignment", "OrderDiscountSnapshot",
     "OrderStateBase", "OrderStatusHistory",
+    "OrderPaymentBase", "OrderPayment",
 ]
