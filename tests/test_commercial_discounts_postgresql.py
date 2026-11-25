@@ -399,14 +399,31 @@ def test_payment_verification_uses_append_only_writer_without_reader_or_worker_a
             command.downgrade(config_for(db), "20261120_0013")
 
 
-def test_loyalty_configuration_storage_does_not_open_access_to_existing_roles(restricted_backend, compatible_database):
-    """La revisión admite los perfiles existentes; los permisos de administración llegarán con el endpoint."""
+def test_loyalty_configuration_uses_writer_without_reader_or_worker_access(restricted_backend, compatible_database):
+    """Admin configura con permisos por columna; no se concede DELETE ni acceso público o de workers."""
     b = restricted_backend
     with b.roles.owner.begin() as db:
         command.upgrade(config_for(db), "20261124_0016")
     execute_script(b.roles.owner, approved(DELTA))
     try:
-        for engine in (b.roles.reader, b.roles.writer, *compatible_database.workers.values()):
+        execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
+        discount = add_discount(b.sessions, [b.product_id], kind="FIXED_AMOUNT", value="10")
+        headers = csrf_headers(login(b, "admin"))
+        path = "/api/admin/loyalty/goals"
+        payload = {"required_visits": 5, "level_name": "Nivel sintético", "reward_name": "Recompensa sintética",
+                   "discount_id": discount.discount_id, "valid_days": 30, "conditions": {"scope": "order"}, "is_active": True}
+        response = b.client.post(path, headers=headers, json=payload)
+        assert response.status_code == 201, response.text
+        target = path + "/" + response.json()["goal_id"]
+        edited = b.client.put(target, headers=headers, json=payload | {"version": 1, "required_visits": 7})
+        assert edited.status_code == 200 and edited.json()["version"] == 2, edited.text
+        assert b.client.get(path).json()["total"] == 1
+        disabled = b.client.post(target + "/deactivate", headers=headers, json={"version": 2})
+        assert disabled.status_code == 200 and disabled.json()["is_active"] is False
+        for statement in ('DELETE FROM "LoyaltyGoals"', 'UPDATE "LoyaltyGoals" SET goal_id=goal_id',
+                          'UPDATE "LoyaltyGoals" SET created_at=now()', 'INSERT INTO "LoyaltyGoals" (created_at) VALUES (now())'):
+            denied(b.roles.writer, statement)
+        for engine in (b.roles.reader, *compatible_database.workers.values()):
             with engine.connect() as db:
                 if engine is not b.roles.reader:
                     assert validate_bridge_schema(db) == "20261124_0016"

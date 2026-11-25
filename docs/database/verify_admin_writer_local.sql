@@ -139,6 +139,15 @@ BEGIN
           "SELECT":["payment_id","order_id","amount","method","verified_at","verified_by_account_id"],
           "INSERT":["payment_id","order_id","amount","method","verified_by_account_id"]}}'::jsonb;
     END IF;
+    IF revision = '20261124_0016' THEN
+        policy := policy || '{"LoyaltyGoals":{
+          "SELECT":["goal_id","required_visits","level_name","reward_name","reward_description","discount_id","valid_days",
+                    "conditions","is_active","version","created_at","updated_at","updated_by_account_id"],
+          "INSERT":["goal_id","required_visits","level_name","reward_name","reward_description","discount_id","valid_days",
+                    "conditions","is_active","updated_by_account_id"],
+          "UPDATE":["required_visits","level_name","reward_name","reward_description","discount_id","valid_days",
+                    "conditions","is_active","version","updated_at","updated_by_account_id"]}}'::jsonb;
+    END IF;
     IF EXISTS (SELECT 1 FROM jsonb_object_keys(policy) k(name)
                WHERE to_regclass(format('public.%I',k.name)) IS NULL) THEN
         RAISE EXCEPTION 'WRITER_MISSING_RELATIONS';

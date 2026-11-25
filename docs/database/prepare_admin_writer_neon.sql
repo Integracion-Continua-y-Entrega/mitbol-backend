@@ -194,6 +194,15 @@ BEGIN
               INSERT (payment_id,order_id,amount,method,verified_by_account_id)
             ON public."OrderPayments" TO mitbol_admin_writer;
     END IF;
+    IF revision = '20261124_0016' THEN
+        GRANT SELECT (goal_id,required_visits,level_name,reward_name,reward_description,discount_id,valid_days,
+                      conditions,is_active,version,created_at,updated_at,updated_by_account_id),
+              INSERT (goal_id,required_visits,level_name,reward_name,reward_description,discount_id,valid_days,
+                      conditions,is_active,updated_by_account_id),
+              UPDATE (required_visits,level_name,reward_name,reward_description,discount_id,valid_days,
+                      conditions,is_active,version,updated_at,updated_by_account_id)
+            ON public."LoyaltyGoals" TO mitbol_admin_writer;
+    END IF;
 END
 $recent$;
 COMMIT;

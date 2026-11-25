@@ -20,6 +20,7 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 - 📋 **Atención de solicitudes:** seguimiento privado de invitados, cancelación pendiente, aceptación/rechazo, preparación, servido/entrega y finalización por modalidad, con historial de estados.
 - 🧾 **Mis pedidos:** historial paginado y detalle privado de solicitudes asociadas a la cuenta autenticada, con importes históricos y estado actual.
 - **Pago verificado:** confirmación manual del total histórico por personal autorizado, consulta separada del estado operativo y protección contra duplicados.
+- **Configuración de fidelización:** administración de metas y recompensas por Admin, con condiciones verificadas y control de versiones; la generación de beneficios corresponde a HU-045.
 
 **Validación independiente:** integración del frontend, configuración y funcionamiento de los servicios desplegados y ejecuciones programadas. La implementación de endpoints y sus pruebas de backend no acredita esos entornos.
 
@@ -42,21 +43,22 @@ frontend ni el cierre completo de las historias.
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
 | HU-031 · Pago verificado | Backend implementado: confirmación manual protegida del total exacto, evidencia persistente y consulta independiente; duplicados y concurrencia controlados. | Sin pendiente identificado en este bloque de backend. Uso académico con datos sintéticos; ventas y conciliación en Loyverse quedan fuera. |
 
-Orden de continuidad del backend: comenzar HU-046, configuración de niveles y
-recompensas, y continuar con las seis historias de fidelización indicadas abajo.
+Orden de continuidad del backend: continuar con HU-042, identificación QR/PIN,
+y después registrar visitas, generar recompensas y consultar progreso y billetera.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
 servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
 (HU-038), que permanece conservado en `feature/order-reception-settings` para
 una integración posterior. Este corte conserva los permisos de recepción
-anteriores; HU-031 añade únicamente consulta e inserción de pagos al escritor web.
+anteriores; HU-031 añade consulta e inserción de pagos y HU-046 añade administración
+de metas por columna al escritor web.
 
 Las seis historias de fidelización también forman parte del alcance acordado y
 se implementarán después del flujo de pedidos, en este orden:
 
 | Historia | Estado del backend |
 | --- | --- |
-| HU-046 · Configurar niveles y recompensas | Persistencia y contrato implementados: migración 0016, meta, nivel, recompensa y condiciones. Pendiente administración protegida y validación contra el catálogo. |
+| HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
 | HU-042 · Identificación QR/PIN | Pendiente. |
 | HU-043 · Registrar visita presencial | Pendiente. |
 | HU-045 · Acumular visitas y otorgar recompensas | Pendiente. |
@@ -384,7 +386,7 @@ de Loyverse; HU-032, HU-033 y HU-035 siguen pendientes.
 
 ## HU-046: configuración de metas de fidelización
 
-El primer bloque incorpora `LoyaltyGoals` mediante la migración aditiva
+La configuración usa `LoyaltyGoals`, incorporada mediante la migración aditiva
 `20261124_0016`. Cada meta guarda su identificador estable, visitas requeridas,
 nombre de nivel y recompensa, descripción opcional, descuento de referencia,
 días de vigencia del futuro cupón y condiciones compatibles con `CouponConditions`.
@@ -402,12 +404,72 @@ meta nueva queda inactiva por defecto. Configurar una meta no registra visitas,
 no reinicia progreso ni genera, reserva o canjea cupones. La identidad de la meta
 servirá para asociar posteriormente las recompensas de cada cliente en HU-045.
 
-HU-046 todavía está en desarrollo: faltan los endpoints de administración,
-sus permisos y las comprobaciones del descuento y de los productos referidos.
-La persistencia por sí sola no acredita una regla lista para emitir beneficios.
-Los perfiles SQL reconocen 0016 conservando los permisos anteriores, incluidos
-los pagos; no se concede acceso a `LoyaltyGoals` en este bloque. La migración
-no modifica pedidos, pagos ni cupones existentes.
+La administración exige sesión de Admin activo con `loyalty:read` o
+`loyalty:write`; Staff, clientes e invitados no acceden a estas rutas. Las
+escrituras requieren Origin autorizado y CSRF. El módulo está disponible con
+autenticación habilitada, independientemente de `auth_catalog_enabled`.
+
+| Método | Ruta | Resultado |
+| --- | --- | --- |
+| `GET` | `/api/admin/loyalty/goals` | Lista paginada con `items`, `total`, `limit` y `offset`, ordenada por visitas requeridas. |
+| `GET` | `/api/admin/loyalty/goals/{goal_id}` | Configuración y versión actual de una meta. |
+| `POST` | `/api/admin/loyalty/goals` | Crea una meta y devuelve 201. |
+| `PUT` | `/api/admin/loyalty/goals/{goal_id}` | Reemplaza la configuración completa indicando la versión revisada. |
+| `POST` | `/api/admin/loyalty/goals/{goal_id}/deactivate` | Desactiva con `{"version":2}`, aunque su descuento haya dejado de estar disponible. |
+
+El listado admite `is_active=true/false`, `limit` entre 1 y 100 (25 por defecto)
+y `offset` desde cero. Todas las respuestas administrativas usan
+`Cache-Control: no-store`. No se ofrece borrado de metas.
+
+Ejemplo de cuerpo de creación; `discount_id` debe corresponder a un descuento
+existente y utilizable. Estos valores ilustran el contrato y no se cargan
+automáticamente como reglas del restaurante:
+
+```json
+{
+  "required_visits":5,
+  "level_name":"Nivel de ejemplo",
+  "reward_name":"Recompensa de ejemplo",
+  "discount_id":1,
+  "valid_days":30,
+  "conditions":{"scope":"order","include_complements":true,"compatible_discount_ids":[]},
+  "is_active":true
+}
+```
+
+El PUT recibe esos mismos campos más `version`. Conserva el identificador y la
+fecha de creación, incrementa la versión y registra fecha del servidor y cuenta
+responsable de la edición. El identificador, las fechas y el responsable no se
+aceptan del navegador. Si la versión cambió, devuelve 409 sin sobrescribir datos;
+consultar de nuevo antes de editar. Desactivar una meta ya inactiva con su versión
+actual devuelve la configuración sin incrementar la versión.
+
+Crear o editar comprueba los descuentos referidos: deben existir, estar activos
+y tener un importe positivo finito de tipo calculable; los porcentajes no superan
+100. Los descuentos por puntos, sin valor o de tipo desconocido no se utilizan
+como recompensa. No se copian valores monetarios ni se modifica el `scope`
+importado de Loyverse. Los descuentos compatibles adicionales también se validan;
+no se admiten referencias repetidas ni compatibilidad consigo mismo.
+
+Para alcance por productos se comprueba que existan y estén activos. Estar
+temporalmente agotado no impide configurar un beneficio futuro. La activación
+de una meta no reserva existencias ni congela descuentos: al implementar HU-045,
+la emisión deberá volver a comprobar las condiciones vigentes.
+
+Las escrituras mantienen el bloqueo compartido con sincronización y disponibilidad
+hasta el commit. Editar y desactivar bloquean además la fila y revalidan su versión.
+Un umbral repetido, versión obsoleta, catálogo ocupado o beneficio no utilizable
+devuelve 409; referencias inexistentes, 404; entrada inválida, 422; falta de
+migración 0016 o fallos de base de datos, 503. Un fallo de transacción revierte
+los cambios y no devuelve éxito.
+
+No hay otra migración para estos endpoints. Tras 0016, un operador debe aplicar
+los scripts SQL revisados de `docs/database` para preparar o actualizar el
+escritor web. Tiene SELECT, INSERT y UPDATE por columna sobre metas, sin DELETE
+ni cambios de `goal_id` o `created_at`. Lectores públicos y workers siguen sin
+acceso. No se ejecutan estos scripts automáticamente ni se modifican pedidos,
+pagos o cupones al configurar metas. El registro de visitas y la generación y
+consulta de recompensas siguen pendientes en las historias siguientes.
 
 ## 🚀 Inicio rápido (Windows)
 
