@@ -271,8 +271,12 @@ class Settings(BaseSettings):
             if self.auth_enabled:
                 if self.auth_profile == "frontend_dev":
                     self.validate_database_configuration()
-                    if self.auth_origins != ["http://localhost:5173"]:
-                        raise ValueError("frontend_dev sólo admite el origen http://localhost:5173.")
+                    origins = set(self.auth_origins)
+                    if len(origins) != len(self.auth_origins) or origins not in (
+                        {"http://localhost:5173"},
+                        {"http://localhost:5173", "https://mitbol-frontend.onrender.com"},
+                    ):
+                        raise ValueError("frontend_dev requiere localhost:5173, solo o junto al frontend HTTPS aprobado, sin duplicados.")
                 elif (self.auth_public_origin != "https://mitbol-backend.onrender.com"
                         or self.auth_origins != ["https://mitbol-frontend.onrender.com"]):
                     raise ValueError("AUTH_ENABLED bloqueado: el perfil del restaurante requiere sus orígenes HTTPS aprobados.")

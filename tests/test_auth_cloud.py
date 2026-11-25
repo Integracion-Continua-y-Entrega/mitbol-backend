@@ -3,6 +3,7 @@
 from secrets import token_urlsafe
 from types import SimpleNamespace
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 from pydantic import SecretStr, ValidationError
 import psycopg2
@@ -10,6 +11,8 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.orm import sessionmaker
 
+from app.core.auth_errors import AuthError
+from app.core.auth_http import validate_auth_request
 from app.db.connection import CloudDatabaseTarget, DatabaseTargetError, create_database_engine
 from app.db import writer_policy
 from app.main import create_app
@@ -43,6 +46,8 @@ def render_config(monkeypatch, **changes):
     {"auth_limit_backend": "memory"}, {"auth_limit_secret": None}, {"auth_images_enabled": True},
     {"auth_public_origin": "https://attacker.invalid"}, {"auth_origins": ["*"]},
     {"auth_origins": ["http://localhost:5173"]},
+    {"auth_origins": ["http://localhost:5173", ORIGIN]},
+    {"auth_origins": [ORIGIN, "http://localhost:5173"]},
     {"auth_database_url": CLOUD_URL}, {"database_url": CLOUD_URL},
     {"auth_database_url": CLOUD_URL.replace("reader:", "neondb_owner:")},
     {"auth_database_url": CLOUD_URL.replace("verify-full", "require")},
@@ -146,13 +151,33 @@ def test_render_role_permissions_and_csrf_keep_audit_atomic(cloud_backend, role)
     assert b.client.post(f"/api/admin/variants/{b.original.variant_id}/images", headers=headers, content=b"invalid").status_code == 404
 
 
+@pytest.mark.parametrize("cloud_backend", [{}, dict(auth_profile="frontend_dev", auth_public_origin=BACKEND,
+    auth_origins=["http://localhost:5173", ORIGIN])], indirect=True)
 def test_render_rejects_host_origin_duplicates_and_missing_origin(cloud_backend):
     b = cloud_backend
-    for headers in ({"Origin": "https://evil.invalid"}, {"Origin": "null"}, {"Host": "evil.invalid"}):
-        assert b.client.get("/api/auth/me", headers=headers).status_code == 403
-    assert b.client.get("/api/auth/me", headers=[("Origin", ORIGIN), ("Origin", "https://evil.invalid")]).status_code == 403
+    origin = b.config.auth_origins[0]
+    host = "mitbol-backend.onrender.com"
+    for headers in (
+        {"Origin": "https://evil.invalid"}, {"Origin": "null"}, {"Origin": ""},
+        {"Origin": "http://localhost:5174"}, {"Origin": origin + "/"},
+        {"Origin": ", ".join(b.config.auth_origins + [origin])},
+        {"Origin": " ".join(b.config.auth_origins + [origin])},
+        {"Host": "evil.invalid"}, {"Host": host + ":443"},
+        [("Origin", origin), ("Origin", origin)],
+        [("Origin", origin), ("Origin", b.config.auth_origins[-1])],
+        [("Origin", origin), ("Origin", "https://evil.invalid")],
+        [("Host", host), ("Host", host)], [("Host", host), ("Host", "evil.invalid")],
+    ):
+        response = b.client.get("/api/auth/me", headers=headers)
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Host u origen administrativo no autorizado."
     b.client.headers.pop("Origin")
     assert b.client.get("/api/auth/me").status_code == 403
+    # TestClient repone Host automáticamente; comprobar su ausencia en el scope original.
+    request = Request({"type": "http", "headers": [(b"origin", origin.encode("ascii"))]})
+    with pytest.raises(AuthError) as error:
+        validate_auth_request(request, b.config)
+    assert error.value.status_code == 403
 
 
 def test_render_internal_http_preserves_secure_external_cookie(cloud_backend):

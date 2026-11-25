@@ -55,7 +55,8 @@ def validate_auth_request(request, config):
         expected = urlsplit(config.auth_public_origin).netloc
         hosts = request.headers.getlist("host")
         origins = request.headers.getlist("origin")
-        if hosts != [expected] or origins != config.auth_origins:
+        # Cada solicitud aporta un único origen; la configuración es su allowlist.
+        if hosts != [expected] or len(origins) != 1 or origins[0] not in config.auth_origins:
             raise AuthError(403, "Host u origen administrativo no autorizado.", code="ORIGIN_REJECTED")
         return
     try:
