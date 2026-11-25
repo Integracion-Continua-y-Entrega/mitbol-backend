@@ -351,7 +351,7 @@ def test_staff_order_history_uses_existing_writer_without_private_access_for_rea
             command.downgrade(config_for(db),"20261120_0013")
 
 
-@pytest.mark.parametrize("revision", ["20261124_0015", "20261124_0016", "20261124_0017"])
+@pytest.mark.parametrize("revision", ["20261124_0015", "20261124_0016", "20261124_0017", "20261125_0018"])
 def test_payment_verification_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
     """El escritor consulta e inserta pagos; no modifica evidencia ni puede asignar la fecha del servidor."""
     b = restricted_backend
@@ -399,7 +399,7 @@ def test_payment_verification_uses_append_only_writer_without_reader_or_worker_a
             command.downgrade(config_for(db), "20261120_0013")
 
 
-@pytest.mark.parametrize("revision", ["20261124_0016", "20261124_0017"])
+@pytest.mark.parametrize("revision", ["20261124_0016", "20261124_0017", "20261125_0018"])
 def test_loyalty_configuration_uses_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
     """Admin configura con permisos por columna; no se concede DELETE ni acceso público o de workers."""
     b = restricted_backend
@@ -440,11 +440,12 @@ def test_loyalty_configuration_uses_writer_without_reader_or_worker_access(restr
             command.downgrade(config_for(db), "20261120_0013")
 
 
-def test_loyalty_identification_uses_writer_without_public_or_worker_access(restricted_backend, compatible_database):
+@pytest.mark.parametrize("revision", ["20261124_0017", "20261125_0018"])
+def test_loyalty_identification_uses_writer_without_public_or_worker_access(restricted_backend, compatible_database, revision):
     """El pool web emite y valida credenciales sin abrirlas a lectores ni workers."""
     b = restricted_backend
     with b.roles.owner.begin() as db:
-        command.upgrade(config_for(db), "20261124_0017")
+        command.upgrade(config_for(db), revision)
     execute_script(b.roles.owner, approved(DELTA))
     try:
         execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
@@ -470,7 +471,7 @@ def test_loyalty_identification_uses_writer_without_public_or_worker_access(rest
             denied(b.roles.writer, statement)
         for engine in (b.roles.writer, *compatible_database.workers.values()):
             with engine.connect() as db:
-                assert validate_bridge_schema(db) == "20261124_0017"
+                assert validate_bridge_schema(db) == revision
         for engine in (b.roles.reader, *compatible_database.workers.values()):
             with engine.connect() as db:
                 assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyIdentifications"',
@@ -478,6 +479,36 @@ def test_loyalty_identification_uses_writer_without_public_or_worker_access(rest
                     'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
             for statement in ('SELECT * FROM "LoyaltyIdentifications"', 'INSERT INTO "LoyaltyIdentifications" DEFAULT VALUES',
                               'UPDATE "LoyaltyIdentifications" SET consumed_at=now()', 'DELETE FROM "LoyaltyIdentifications"'):
+                code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
+                denied(engine, statement, code=code)
+    finally:
+        with b.roles.owner.begin() as db:
+            command.downgrade(config_for(db), "20261120_0013")
+
+
+def test_visit_storage_revision_preserves_existing_profiles_without_visit_access(restricted_backend, compatible_database):
+    """La tabla de evidencia no recibe permisos hasta incorporar la ruta de registro protegido."""
+    from datetime import datetime, timezone
+    from app.services.visit_calendar_service import visit_day
+
+    b = restricted_backend
+    with b.roles.owner.begin() as db:
+        command.upgrade(config_for(db), "20261125_0018")
+    execute_script(b.roles.owner, approved(DELTA))
+    try:
+        execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
+        with b.service.sessions.begin() as db:
+            assert visit_day(db, datetime(2026, 11, 25, 5, tzinfo=timezone.utc)).isoformat() == "2026-11-24"
+        for engine in (b.roles.writer, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert validate_bridge_schema(db) == "20261125_0018"
+        for engine in (b.roles.reader, b.roles.writer, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyVisits"',
+                    'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyVisits"',
+                    'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+            for statement in ('SELECT * FROM "LoyaltyVisits"', 'INSERT INTO "LoyaltyVisits" DEFAULT VALUES',
+                              'UPDATE "LoyaltyVisits" SET visited_on=current_date', 'DELETE FROM "LoyaltyVisits"'):
                 code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
                 denied(engine, statement, code=code)
     finally:

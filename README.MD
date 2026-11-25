@@ -61,7 +61,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | --- | --- |
 | HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
 | HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. Consumo único interno preparado para HU-043. |
-| HU-043 · Registrar visita presencial | Pendiente. |
+| HU-043 · Registrar visita presencial | Persistencia implementada en 0018: evidencia durable, unicidad por cuenta/día y por QR, calendario local. Pendiente endpoint protegido y consumo transaccional del QR. |
 | HU-045 · Acumular visitas y otorgar recompensas | Pendiente. |
 | HU-047 · Consultar progreso de lealtad | Pendiente. |
 | HU-049 · Consultar billetera digital | Existe consulta de cupones; falta integrar las recompensas de fidelización y la presentación de estados de billetera. |
@@ -541,6 +541,38 @@ insertar y renovar o consumir por columna, sin DELETE ni cambios de `account_id`
 Lectores públicos y workers continúan sin acceso. La migración no crea códigos
 ni se ejecutan esos scripts automáticamente. Las pruebas usan exclusivamente
 cuentas y sesiones sintéticas en bases desechables.
+
+## HU-043: persistencia de visitas presenciales
+
+El primer bloque incorpora `LoyaltyVisits` mediante la migración aditiva
+`20261125_0018`. Cada registro guarda cuenta, fecha local, instante con zona
+horaria, zona del restaurante, responsable y hash de la identificación utilizada.
+El comprobante administrativo conserva esos datos salvo el hash; no publica el QR.
+
+La restricción única de cuenta y fecha impide dos visitas válidas el mismo día,
+incluso usando códigos diferentes. Otra restricción impide asociar el mismo QR
+a una segunda visita. La fecha debe coincidir con la conversión del instante a
+la zona almacenada. El calendario se calcula en PostgreSQL, con nombres de su
+registro de zonas y sin depender de la zona de la conexión o del sistema operativo.
+El helper `visit_day` admite una zona explícita y usa `America/Mexico_City` por
+omisión. Una zona desconocida o una fecha sin zona se trata como error de
+configuración, no como una fecha aportada por el cliente.
+
+Se usa día natural, no una ventana móvil de 24 horas: al cruzar la medianoche
+local cambia el día elegible. La evidencia permanece aunque se renueve el QR o
+se elimine su sesión; no tiene una FK hacia la credencial temporal. Las referencias
+a cliente y responsable impiden borrar esas cuentas mientras exista la visita.
+
+HU-043 sigue en desarrollo. No hay aún endpoint de registro ni se consumen códigos
+o generan visitas automáticamente al pagar, completar pedidos o validar un QR.
+El siguiente bloque unirá consumo y registro en la misma transacción, obtendrá
+fecha, zona e identidad desde el servidor y protegerá la acción por permisos del
+personal. La acumulación y emisión de recompensas corresponden a HU-045.
+
+La migración crea una tabla vacía y conserva pedidos, pagos, metas y credenciales.
+Los perfiles SQL admiten 0018 sin conceder acceso a visitas al escritor web,
+lectores públicos o workers en este bloque. Las pruebas usan evidencia sintética
+en PostgreSQL desechable; no se aplicó la migración a una base real.
 
 ## 🚀 Inicio rápido (Windows)
 

@@ -14,7 +14,7 @@ from app.db.connection import (
     DatabaseTargetError, cloud_target_from_environment, connection_arguments, environment_mode,
     local_database_url, postgresql_url,
 )
-from app.models import AuthBase, Base, CommercialDiscountBase, CouponBase, LoyaltyBase, LoyaltyIdentificationBase, OrderBase, OrderPaymentBase, OrderStateBase, PasswordRecoveryBase
+from app.models import AuthBase, Base, CommercialDiscountBase, CouponBase, LoyaltyBase, LoyaltyIdentificationBase, LoyaltyVisitBase, OrderBase, OrderPaymentBase, OrderStateBase, PasswordRecoveryBase
 from app.models.sync_run import SyncBase
 from migrations.validation import validate_initial_database, validate_migration_target
 
@@ -24,7 +24,7 @@ if config.config_file_name:
 
 target_metadata = [Base.metadata, AuthBase.metadata, SyncBase.metadata, OrderBase.metadata,
                    PasswordRecoveryBase.metadata, CouponBase.metadata, CommercialDiscountBase.metadata, OrderStateBase.metadata,
-                   OrderPaymentBase.metadata, LoyaltyBase.metadata, LoyaltyIdentificationBase.metadata]
+                   OrderPaymentBase.metadata, LoyaltyBase.metadata, LoyaltyIdentificationBase.metadata, LoyaltyVisitBase.metadata]
 
 
 def get_database_url():
