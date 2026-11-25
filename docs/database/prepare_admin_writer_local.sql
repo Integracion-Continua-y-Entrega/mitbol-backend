@@ -213,6 +213,14 @@ BEGIN
               INSERT (visit_id,account_id,visited_on,registered_at,restaurant_timezone,registered_by_account_id,identification_hash)
             ON public."LoyaltyVisits" TO mitbol_admin_writer;
     END IF;
+    IF revision = '20261125_0019' THEN
+        GRANT SELECT (reward_id,account_id,goal_id,visit_id,customer_coupon_id,goal_version,required_visits,total_visits,awarded_at,goal_snapshot),
+              INSERT (reward_id,account_id,goal_id,visit_id,customer_coupon_id,goal_version,required_visits,total_visits,awarded_at,goal_snapshot)
+            ON public."LoyaltyRewards" TO mitbol_admin_writer;
+        GRANT INSERT (account_id,name,description,discount_id,starts_at,expires_at,status,conditions,created_at)
+            ON public."CustomerCoupons" TO mitbol_admin_writer;
+        GRANT USAGE ON SEQUENCE public."CustomerCoupons_customer_coupon_id_seq" TO mitbol_admin_writer;
+    END IF;
 END
 $recent$;
 COMMIT;

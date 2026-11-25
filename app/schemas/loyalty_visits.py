@@ -15,3 +15,16 @@ class LoyaltyVisitRead(BaseModel):
     registered_at: datetime
     restaurant_timezone: str
     registered_by_account_id: int
+
+
+class LoyaltyRewardGranted(BaseModel):
+    reward_id: UUID
+    goal_id: UUID
+    customer_coupon_id: int
+    name: str
+    expires_at: datetime
+
+
+class LoyaltyVisitRegistration(LoyaltyVisitRead):
+    total_visits: int
+    rewards: list[LoyaltyRewardGranted]

@@ -44,8 +44,8 @@ frontend ni el cierre completo de las historias.
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
 | HU-031 · Pago verificado | Backend implementado: confirmación manual protegida del total exacto, evidencia persistente y consulta independiente; duplicados y concurrencia controlados. | Sin pendiente identificado en este bloque de backend. Uso académico con datos sintéticos; ventas y conciliación en Loyverse quedan fuera. |
 
-Orden de continuidad del backend: implementar HU-045, acumulación y recompensas,
-y después consultar progreso y billetera.
+Orden de continuidad del backend: implementar HU-047, consulta de progreso,
+y después completar la billetera con HU-049.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
 servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
@@ -62,7 +62,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
 | HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. Consumo único interno preparado para HU-043. |
 | HU-043 · Registrar visita presencial | Backend implementado: registro protegido por personal, consumo transaccional del QR y una visita por cuenta/día local. |
-| HU-045 · Acumular visitas y otorgar recompensas | En desarrollo: evaluación y persistencia de concesiones implementadas; pendiente emisión transaccional junto con la visita. |
+| HU-045 · Acumular visitas y otorgar recompensas | Backend implementado: total derivado de visitas, metas no recurrentes y emisión de cupones en la misma transacción que la visita. |
 | HU-047 · Consultar progreso de lealtad | Pendiente. |
 | HU-049 · Consultar billetera digital | Existe consulta de cupones; falta integrar las recompensas de fidelización y la presentación de estados de billetera. |
 
@@ -403,7 +403,7 @@ importes mínimos de las condiciones conservan su precisión decimal.
 No se insertan reglas predeterminadas ni valores reales del restaurante. Una
 meta nueva queda inactiva por defecto. Configurar una meta no registra visitas,
 no reinicia progreso ni genera, reserva o canjea cupones. La identidad de la meta
-servirá para asociar posteriormente las recompensas de cada cliente en HU-045.
+permite asociar las recompensas de cada cliente en HU-045.
 
 La administración exige sesión de Admin activo con `loyalty:read` o
 `loyalty:write`; Staff, clientes e invitados no acceden a estas rutas. Las
@@ -454,8 +454,8 @@ no se admiten referencias repetidas ni compatibilidad consigo mismo.
 
 Para alcance por productos se comprueba que existan y estén activos. Estar
 temporalmente agotado no impide configurar un beneficio futuro. La activación
-de una meta no reserva existencias ni congela descuentos: al implementar HU-045,
-la emisión deberá volver a comprobar las condiciones vigentes.
+de una meta no reserva existencias ni congela descuentos: HU-045 vuelve a
+comprobar las referencias comerciales vigentes antes de emitir el cupón.
 
 Las escrituras mantienen el bloqueo compartido con sincronización y disponibilidad
 hasta el commit. Editar y desactivar bloquean además la fila y revalidan su versión.
@@ -469,8 +469,8 @@ los scripts SQL revisados de `docs/database` para preparar o actualizar el
 escritor web. Tiene SELECT, INSERT y UPDATE por columna sobre metas, sin DELETE
 ni cambios de `goal_id` o `created_at`. Lectores públicos y workers siguen sin
 acceso. No se ejecutan estos scripts automáticamente ni se modifican pedidos,
-pagos o cupones al configurar metas. El registro de visitas y la generación y
-consulta de recompensas siguen pendientes en las historias siguientes.
+pagos o cupones al configurar metas. HU-043 y HU-045 registran visitas y generan
+recompensas; HU-047 y HU-049 completarán la consulta de progreso y billetera.
 
 ## HU-042: identificación personal QR
 
@@ -562,16 +562,38 @@ Las referencias no pueden borrarse mientras exista la evidencia. Editar la meta
 no modifica la copia guardada y su nueva versión no elimina la unicidad.
 
 Esta migración crea una tabla vacía: no concede recompensas retroactivamente ni
-modifica visitas o cupones existentes. Los perfiles SQL admiten la revisión 0019
-con sus permisos anteriores, sin acceso a la nueva tabla en este bloque. Las
-pruebas de migración y restricciones usan PostgreSQL temporal con datos sintéticos;
-no se aplicó la migración a una base real.
+modifica visitas o cupones existentes. Registrar una nueva visita exige 0019;
+si falta, devuelve 503 sin consumir el QR ni registrar progreso parcial.
 
-Todavía no se crean cupones automáticamente: el siguiente bloque conectará la
-emisión y verificará las referencias comerciales vigentes. Esa escritura deberá
-compartir la transacción de registro de visita;
-la selección en memoria por sí sola no garantiza exclusión entre peticiones.
-No se implementan reservas ni canjes en esta historia.
+`POST /api/admin/loyalty/visits` mantiene su entrada exclusiva `qr_payload` y añade
+`total_visits` y `rewards` al comprobante 201. El total cuenta las visitas durables
+de la cuenta, incluida la recién insertada; no se reinicia al conceder beneficios.
+Cada recompensa nueva incluye `reward_id`, `goal_id`, `customer_coupon_id`, `name`
+y `expires_at`. Sin metas elegibles, `rewards` es una lista vacía.
+
+Antes de emitir se verifican otra vez descuentos, productos y condiciones bajo
+el bloqueo compartido con sincronización y edición de metas. El cupón conserva
+nombre, descripción y condiciones de la meta, pertenece a la cuenta de la visita
+y nace `available`, con vigencia desde el instante de registro hasta ese instante
+más `valid_days` días de 24 horas. La evidencia conserva además la configuración
+completa y su versión. El importe del descuento sigue perteneciendo al catálogo
+comercial; no se promete que sea inmutable durante toda la vigencia del cupón.
+
+Una referencia comercial no utilizable en una meta alcanzada produce 409 y exige
+corregir o desactivar la meta antes de reintentar. Catálogo ocupado también produce
+409. Cualquier fallo de emisión, inserción o commit revierte consumo del QR,
+visita, cupón y concesión. La exclusión por cuenta y las restricciones únicas
+impiden duplicados incluso con solicitudes simultáneas. La operación se confirma
+antes de responder; no se ocultan fallos guardando solo parte de los cambios.
+
+Tras 0019 deben actualizarse las ACL con los scripts revisados de `docs/database`.
+El escritor web recibe SELECT e INSERT por columna sobre concesiones e INSERT
+por columna sobre cupones, más USAGE de su secuencia. No recibe UPDATE ni DELETE
+sobre esas entidades. Lectores públicos y workers no tienen acceso a concesiones.
+Las pruebas usan PostgreSQL temporal; no se aplicaron migraciones ni ACL a una
+base real. La consulta propia de cupones existente permite ver los emitidos;
+HU-047 y HU-049 completarán el progreso y la billetera. No se implementan reservas
+ni canjes en esta historia.
 
 ## HU-043: registro de visitas presenciales
 
@@ -598,7 +620,8 @@ a cliente y responsable impiden borrar esas cuentas mientras exista la visita.
 Admin o Staff con `visits:register`, sesión vigente, Origin y CSRF confirman
 la presencia física mediante esta acción explícita. Cuenta, responsable e instante
 se obtienen en el servidor; no se admiten fechas, identidades ni excepciones
-aportadas por el cliente. La respuesta 201 contiene el comprobante sin hash ni QR.
+aportadas por el cliente. La respuesta 201 contiene el comprobante sin hash ni QR,
+más el total acumulado y las recompensas nuevas descritas en HU-045.
 
 El consumo del QR y la inserción se confirman en una misma transacción. Un QR
 inválido o consumido y una segunda visita del mismo día producen 409. Ante un

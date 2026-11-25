@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response
 
 from app.api.auth_dependencies import require_permission
 from app.schemas.loyalty_identification import LoyaltyIdentificationInput
-from app.schemas.loyalty_visits import LoyaltyVisitRead
+from app.schemas.loyalty_visits import LoyaltyVisitRegistration
 from app.services import loyalty_visit_service
 from app.services.auth_service import Principal
 
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/admin/loyalty/visits", tags=["Visitas presencial
 Registrar = Annotated[Principal, Depends(require_permission("visits:register"))]
 
 
-@router.post("", response_model=LoyaltyVisitRead, status_code=201, summary="Registrar una visita presencial validada")
+@router.post("", response_model=LoyaltyVisitRegistration, status_code=201, summary="Registrar una visita presencial validada")
 def register_visit(payload: LoyaltyIdentificationInput, request: Request, response: Response, user: Registrar):
     """Admin o Staff con Origin y CSRF; recibe solo el QR presentado y registra como máximo una visita por día local."""
     response.headers["Cache-Control"] = "no-store"

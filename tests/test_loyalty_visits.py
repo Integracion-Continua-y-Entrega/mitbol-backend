@@ -1,4 +1,4 @@
-"""HU-043: confirmación manual y QR en una transacción, sin duplicados ni recompensas automáticas."""
+"""HU-043: presencia y QR sin duplicados; HU-045 añade el resultado de recompensas."""
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -10,7 +10,7 @@ from alembic import command
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import delete, event, select
 from sqlalchemy.exc import OperationalError
 
 from app.core.auth_errors import AuthError
@@ -24,10 +24,23 @@ from app.services import auth_service, loyalty_identification_service, loyalty_v
 from test_auth_api import csrf_headers, login, ORIGIN
 from test_auth_persistence import config_for
 from test_loyalty_identification import issue, restore, validate
-from test_loyalty_visit_persistence import auth_backend, auth_database, backend, password_hash
+from test_loyalty_visit_persistence import auth_backend, auth_database, backend as visit_backend, password_hash
 
 
 PATH = "/api/admin/loyalty/visits"
+
+
+@pytest.fixture
+def backend(visit_backend):
+    from app.models import LoyaltyReward
+    b = visit_backend
+    with b.sessions.kw["bind"].begin() as db:
+        command.upgrade(config_for(db), "20261125_0019")
+    try:
+        yield b
+    finally:
+        with b.sessions.begin() as db:
+            db.execute(delete(LoyaltyReward))
 
 
 def register(b, issued, role="staff"):
@@ -43,7 +56,8 @@ def test_authorized_registration_records_presence_and_consumes_only_that_qr(back
     response = register(b, issued, role)
     assert response.status_code == 201, response.text
     result = response.json()
-    assert set(result) == {"visit_id", "account_id", "visited_on", "registered_at", "restaurant_timezone", "registered_by_account_id"}
+    assert set(result) == {"visit_id", "account_id", "visited_on", "registered_at", "restaurant_timezone", "registered_by_account_id", "total_visits", "rewards"}
+    assert result["total_visits"] == 1 and result["rewards"] == []
     assert result["account_id"] == b.ids["customer"][0] and result["registered_by_account_id"] == b.ids[role][0]
     assert result["restaurant_timezone"] == "America/Mexico_City"
     assert response.headers["cache-control"] == "no-store" and response.headers["referrer-policy"] == "no-referrer"
@@ -327,7 +341,7 @@ def test_missing_migration_does_not_consume_the_qr(backend):
         assert validate(b, issued["qr_payload"]).status_code == 200
     finally:
         with b.sessions.kw["bind"].begin() as db:
-            command.upgrade(config_for(db), "20261125_0018")
+            command.upgrade(config_for(db), "20261125_0019")
 
 
 def test_visits_work_without_catalog_administration_and_keep_private_cors(backend):

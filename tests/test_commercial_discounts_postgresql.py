@@ -492,11 +492,12 @@ def test_loyalty_identification_uses_writer_without_public_or_worker_access(rest
             command.downgrade(config_for(db), "20261120_0013")
 
 
-@pytest.mark.parametrize("revision", ["20261125_0018", "20261125_0019"])
+@pytest.mark.parametrize("revision", ["20261125_0019"])
 def test_visit_registration_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
     """El escritor registra QR y visita en conjunto; no puede editar ni borrar la evidencia."""
     from datetime import datetime, timezone
     from app.services.visit_calendar_service import visit_day
+    from app.models import LoyaltyGoal, LoyaltyReward
 
     b = restricted_backend
     with b.roles.owner.begin() as db:
@@ -504,6 +505,11 @@ def test_visit_registration_uses_append_only_writer_without_reader_or_worker_acc
     execute_script(b.roles.owner, approved(DELTA))
     try:
         execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
+        discount = add_discount(b.sessions, [], kind="FIXED_AMOUNT", value="10")
+        with b.sessions.begin() as db:
+            db.add(LoyaltyGoal(required_visits=1, level_name="Nivel sintético", reward_name="Beneficio sintético",
+                discount_id=discount.discount_id, valid_days=30, conditions={"scope": "order"}, is_active=True,
+                updated_by_account_id=b.ids["admin"][0]))
         with b.service.sessions.begin() as db:
             assert visit_day(db, datetime(2026, 11, 25, 5, tzinfo=timezone.utc)).isoformat() == "2026-11-24"
         owner_headers = csrf_headers(login(b, "customer"))
@@ -514,6 +520,11 @@ def test_visit_registration_uses_append_only_writer_without_reader_or_worker_acc
         response = b.client.post("/api/admin/loyalty/visits", headers=headers, json={"qr_payload": issued.json()["qr_payload"]})
         assert response.status_code == 201, response.text
         assert "identification_hash" not in response.text
+        assert response.json()["total_visits"] == 1 and len(response.json()["rewards"]) == 1
+        with b.sessions() as db:
+            assert len(db.scalars(select(LoyaltyReward)).all()) == 1
+            coupon = db.get(CustomerCoupon, response.json()["rewards"][0]["customer_coupon_id"])
+            assert coupon.status == "available" and coupon.account_id == b.ids["customer"][0]
         assert b.client.post("/api/admin/loyalty/visits", headers=headers,
             json={"qr_payload": issued.json()["qr_payload"]}).status_code == 409
         b.client.cookies.clear()
@@ -531,7 +542,10 @@ def test_visit_registration_uses_append_only_writer_without_reader_or_worker_acc
             with engine.connect() as db:
                 assert validate_bridge_schema(db) == revision
         if revision == "20261125_0019":
-            for engine in (b.roles.writer, b.roles.reader, *compatible_database.workers.values()):
+            for statement in ('UPDATE "LoyaltyRewards" SET total_visits=0', 'DELETE FROM "LoyaltyRewards"',
+                              'UPDATE "CustomerCoupons" SET status=\'redeemed\'', 'DELETE FROM "CustomerCoupons"'):
+                denied(b.roles.writer, statement)
+            for engine in (b.roles.reader, *compatible_database.workers.values()):
                 with engine.connect() as db:
                     assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyRewards"',
                         'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyRewards"',

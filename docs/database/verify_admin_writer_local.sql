@@ -159,6 +159,14 @@ BEGIN
           "SELECT":["visit_id","account_id","visited_on","registered_at","restaurant_timezone","registered_by_account_id","identification_hash"],
           "INSERT":["visit_id","account_id","visited_on","registered_at","restaurant_timezone","registered_by_account_id","identification_hash"]}}'::jsonb;
     END IF;
+    IF revision = '20261125_0019' THEN
+        policy := policy || '{"LoyaltyRewards":{
+          "SELECT":["reward_id","account_id","goal_id","visit_id","customer_coupon_id","goal_version","required_visits","total_visits","awarded_at","goal_snapshot"],
+          "INSERT":["reward_id","account_id","goal_id","visit_id","customer_coupon_id","goal_version","required_visits","total_visits","awarded_at","goal_snapshot"]}}'::jsonb;
+        policy := jsonb_set(policy,ARRAY['CustomerCoupons','INSERT'],
+            '["account_id","name","description","discount_id","starts_at","expires_at","status","conditions","created_at"]'::jsonb);
+        permitted_sequences := permitted_sequences || ARRAY['CustomerCoupons_customer_coupon_id_seq'];
+    END IF;
     IF EXISTS (SELECT 1 FROM jsonb_object_keys(policy) k(name)
                WHERE to_regclass(format('public.%I',k.name)) IS NULL) THEN
         RAISE EXCEPTION 'WRITER_MISSING_RELATIONS';
