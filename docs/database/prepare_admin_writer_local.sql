@@ -202,6 +202,12 @@ BEGIN
                       conditions,is_active,version,updated_at,updated_by_account_id)
             ON public."LoyaltyGoals" TO mitbol_admin_writer;
     END IF;
+    IF revision = '20261124_0017' THEN
+        GRANT SELECT (account_id,token_hash,session_id,auth_version,created_at,expires_at,consumed_at,consumed_by_account_id),
+              INSERT (account_id,token_hash,session_id,auth_version,created_at,expires_at),
+              UPDATE (token_hash,session_id,auth_version,created_at,expires_at,consumed_at,consumed_by_account_id)
+            ON public."LoyaltyIdentifications" TO mitbol_admin_writer;
+    END IF;
 END
 $recent$;
 COMMIT;

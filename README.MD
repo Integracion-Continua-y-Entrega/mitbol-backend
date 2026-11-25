@@ -21,6 +21,7 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 - 🧾 **Mis pedidos:** historial paginado y detalle privado de solicitudes asociadas a la cuenta autenticada, con importes históricos y estado actual.
 - **Pago verificado:** confirmación manual del total histórico por personal autorizado, consulta separada del estado operativo y protección contra duplicados.
 - **Configuración de fidelización:** administración de metas y recompensas por Admin, con condiciones verificadas y control de versiones; la generación de beneficios corresponde a HU-045.
+- **Identificación personal:** emisión de QR temporal por sesión y comprobación protegida por el personal, sin registrar visitas automáticamente.
 
 **Validación independiente:** integración del frontend, configuración y funcionamiento de los servicios desplegados y ejecuciones programadas. La implementación de endpoints y sus pruebas de backend no acredita esos entornos.
 
@@ -43,8 +44,8 @@ frontend ni el cierre completo de las historias.
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
 | HU-031 · Pago verificado | Backend implementado: confirmación manual protegida del total exacto, evidencia persistente y consulta independiente; duplicados y concurrencia controlados. | Sin pendiente identificado en este bloque de backend. Uso académico con datos sintéticos; ventas y conciliación en Loyverse quedan fuera. |
 
-Orden de continuidad del backend: completar emisión y validación de HU-042,
-y después registrar visitas, generar recompensas y consultar progreso y billetera.
+Orden de continuidad del backend: implementar HU-043, registro de visitas,
+y después generar recompensas y consultar progreso y billetera.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
 servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
@@ -59,7 +60,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | Historia | Estado del backend |
 | --- | --- |
 | HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
-| HU-042 · Identificación QR/PIN | Formato QR opaco y persistencia privada implementados en 0017. Pendientes endpoints de emisión, validación y control de reutilización. |
+| HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. Consumo único interno preparado para HU-043. |
 | HU-043 · Registrar visita presencial | Pendiente. |
 | HU-045 · Acumular visitas y otorgar recompensas | Pendiente. |
 | HU-047 · Consultar progreso de lealtad | Pendiente. |
@@ -471,7 +472,7 @@ acceso. No se ejecutan estos scripts automáticamente ni se modifican pedidos,
 pagos o cupones al configurar metas. El registro de visitas y la generación y
 consulta de recompensas siguen pendientes en las historias siguientes.
 
-## HU-042: base de identificación personal QR
+## HU-042: identificación personal QR
 
 La migración aditiva `20261124_0017` incorpora `LoyaltyIdentifications`, una fila
 temporal por cuenta. Guarda un hash único, cuenta y sesión emisoras, versión de
@@ -492,17 +493,54 @@ acredita que el código se haya emitido ni identifica a una persona. El valor se
 oculta en repr y en los mensajes de validación del modelo. El hash usa el
 contenido con su prefijo para mantener un espacio distinto al de las sesiones.
 
-HU-042 todavía está en desarrollo. Faltan la emisión por sesión autenticada y
-la validación protegida, con comprobación de vigencia, sesión y cuenta activas,
-versión de autenticación, renovación y consumo único. Los endpoints deberán
-evitar exponer credenciales en errores o logs. No hay aún una identificación
-utilizable desde HTTP ni una acción que registre visitas.
+| Método | Ruta | Resultado |
+| --- | --- | --- |
+| `POST` | `/api/auth/loyalty/identification` | Emite o renueva el QR de la cuenta autenticada; recibe `{}` y devuelve 201. |
+| `POST` | `/api/admin/loyalty/identifications/validate` | Admin o Staff comprueba `{"qr_payload":"mitbol:loyalty:v1:…"}`; no consume el código ni registra una visita. |
 
-La migración no crea credenciales ni cambia cuentas, sesiones, pedidos, pagos
-o metas. Los perfiles SQL reconocen 0017 manteniendo los permisos previos;
-lectores públicos, workers y escritor web siguen sin acceso a la tabla nueva.
-Los permisos del flujo autenticado se incorporarán con los endpoints. Las
-pruebas usan exclusivamente cuentas y sesiones sintéticas en bases desechables.
+Ambas rutas exigen sesión, Origin autorizado y CSRF; no reciben códigos por URL.
+La emisión usa siempre la cuenta y sesión autenticadas: el cliente no puede
+elegir identidad, token, fechas o versión de seguridad. Admin y Staff también
+pueden emitir su identificación personal. La validación exige `visits:validate`,
+concedido solo a Admin y Staff activos; este permiso no permite administrar metas.
+
+El QR dura como máximo cinco minutos, limitado además por la expiración absoluta
+y por inactividad de la sesión emisora. Renovar sustituye el código actual de
+esa cuenta, incluso si se emitió desde otro navegador, e invalida el anterior.
+No se recupera un código desde su hash: si se pierde la respuesta, solicitar uno
+nuevo. Cerrar o rotar la sesión emisora, cambiar su versión de autenticación o
+desactivar la cuenta también impide validar su QR anterior.
+
+Comprobar devuelve `valid: true`, `account_id`, `name` y `expires_at` únicamente
+al personal autorizado. No devuelve correo, teléfono, sesión, hash ni el código
+presentado. Revisa cuenta activa, empleado activo cuando corresponda, asociación
+entre cuenta y sesión, vigencia del QR y de la sesión, revocación, versión y estado
+de consumo. Un código desconocido, vencido, sustituido o consumido produce el mismo
+409 genérico. Entrada inválida da 422 sin reflejar el código; falta de migración
+0017 o fallos de base de datos dan 503. Se mantienen `Cache-Control: no-store` y
+`Referrer-Policy: no-referrer` en respuestas satisfactorias; no colocar el QR en
+URLs o logs.
+
+La comprobación es informativa y puede repetirse: no acredita por sí sola una
+visita, no consume el QR ni reserva su validez para una operación posterior. El
+servicio interno `consume_identification` bloquea la credencial, revalida sus
+condiciones y permite un único consumo. No hace commit ni tiene un endpoint
+aislado. HU-043 deberá invocarlo dentro de la misma transacción que inserte la
+visita, de forma que cualquier fallo revierta también el consumo. Dos consumos
+simultáneos no pueden usar el mismo código; al esperar un bloqueo se vuelve a
+comprobar el reloj. No se bloquean cuentas ajenas durante esa comprobación.
+
+No se registra presencia, progreso ni recompensa en HU-042. Tampoco se crea un
+PIN numérico ni se exige tener un pedido. El frontend representa `qr_payload`
+como QR y lo mantiene solo durante su vigencia; la integración visual queda a
+cargo del frontend.
+
+No hay otra migración para estos endpoints. Tras 0017, un operador debe actualizar
+las ACL con los scripts revisados de `docs/database`: el escritor web puede leer,
+insertar y renovar o consumir por columna, sin DELETE ni cambios de `account_id`.
+Lectores públicos y workers continúan sin acceso. La migración no crea códigos
+ni se ejecutan esos scripts automáticamente. Las pruebas usan exclusivamente
+cuentas y sesiones sintéticas en bases desechables.
 
 ## 🚀 Inicio rápido (Windows)
 

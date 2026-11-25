@@ -440,17 +440,38 @@ def test_loyalty_configuration_uses_writer_without_reader_or_worker_access(restr
             command.downgrade(config_for(db), "20261120_0013")
 
 
-def test_loyalty_identification_storage_is_private_for_existing_profiles(restricted_backend, compatible_database):
-    """La fila de credenciales no recibe grants hasta implementar su flujo autenticado."""
+def test_loyalty_identification_uses_writer_without_public_or_worker_access(restricted_backend, compatible_database):
+    """El pool web emite y valida credenciales sin abrirlas a lectores ni workers."""
     b = restricted_backend
     with b.roles.owner.begin() as db:
         command.upgrade(config_for(db), "20261124_0017")
     execute_script(b.roles.owner, approved(DELTA))
     try:
+        execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
+        headers = csrf_headers(login(b, "customer"))
+        issued = b.client.post("/api/auth/loyalty/identification", headers=headers, json={})
+        assert issued.status_code == 201, issued.text
+        replacement = b.client.post("/api/auth/loyalty/identification", headers=headers, json={})
+        assert replacement.status_code == 201 and replacement.json()["qr_payload"] != issued.json()["qr_payload"]
+        headers = csrf_headers(login(b, "staff"))
+        checked = b.client.post("/api/admin/loyalty/identifications/validate", headers=headers,
+                               json={"qr_payload": replacement.json()["qr_payload"]})
+        assert checked.status_code == 200, checked.text
+        from app.services.loyalty_identification_service import consume_identification
+        from app.schemas.loyalty_identification import LoyaltyIdentificationInput
+        with b.service.sessions.begin() as db:
+            consume_identification(db, LoyaltyIdentificationInput(qr_payload=replacement.json()["qr_payload"]),
+                                   actor_account_id=b.ids["staff"][0], clock=lambda: b.now.value)
+        assert b.client.post("/api/admin/loyalty/identifications/validate", headers=headers,
+            json={"qr_payload": replacement.json()["qr_payload"]}).status_code == 409
+        for statement in ('DELETE FROM "LoyaltyIdentifications"',
+                          'UPDATE "LoyaltyIdentifications" SET account_id=account_id',
+                          'INSERT INTO "LoyaltyIdentifications" (consumed_at) VALUES (now())'):
+            denied(b.roles.writer, statement)
         for engine in (b.roles.writer, *compatible_database.workers.values()):
             with engine.connect() as db:
                 assert validate_bridge_schema(db) == "20261124_0017"
-        for engine in (b.roles.reader, b.roles.writer, *compatible_database.workers.values()):
+        for engine in (b.roles.reader, *compatible_database.workers.values()):
             with engine.connect() as db:
                 assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyIdentifications"',
                     'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyIdentifications"',

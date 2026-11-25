@@ -20,6 +20,10 @@ class LoyaltyIdentificationInput(BaseModel):
         return value
 
 
+class LoyaltyIdentificationIssue(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
 class LoyaltyIdentificationRead(LoyaltyIdentificationInput):
     identification_type: Literal["qr"] = "qr"
     purpose: Literal["visit_identification"] = "visit_identification"
@@ -33,3 +37,10 @@ class LoyaltyIdentificationRead(LoyaltyIdentificationInput):
                 or self.issued_at >= self.expires_at):
             raise ValueError("La identificación requiere fechas con zona horaria y vigencia positiva.")
         return self
+
+
+class LoyaltyIdentificationValidation(BaseModel):
+    valid: Literal[True] = True
+    account_id: int
+    name: str
+    expires_at: datetime

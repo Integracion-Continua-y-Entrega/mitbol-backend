@@ -151,6 +151,12 @@ BEGIN
           "UPDATE":["required_visits","level_name","reward_name","reward_description","discount_id","valid_days",
                     "conditions","is_active","version","updated_at","updated_by_account_id"]}}'::jsonb;
     END IF;
+    IF revision = '20261124_0017' THEN
+        policy := policy || '{"LoyaltyIdentifications":{
+          "SELECT":["account_id","token_hash","session_id","auth_version","created_at","expires_at","consumed_at","consumed_by_account_id"],
+          "INSERT":["account_id","token_hash","session_id","auth_version","created_at","expires_at"],
+          "UPDATE":["token_hash","session_id","auth_version","created_at","expires_at","consumed_at","consumed_by_account_id"]}}'::jsonb;
+    END IF;
     IF EXISTS (SELECT 1 FROM jsonb_object_keys(policy) k(name)
                WHERE to_regclass(format('public.%I',k.name)) IS NULL) THEN
         RAISE EXCEPTION 'WRITER_MISSING_RELATIONS';
