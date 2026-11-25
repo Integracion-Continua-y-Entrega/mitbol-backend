@@ -544,6 +544,12 @@ def test_visit_registration_uses_append_only_writer_without_reader_or_worker_acc
         assert progress.status_code == 200 and progress.json()["total_visits"] == 1, progress.text
         assert progress.json()["current_level"]["required_visits"] == 1
         assert progress.json()["pending_goals"] == [] and progress.json()["next_goal"] is None
+        wallet = b.client.get("/api/auth/wallet")
+        assert wallet.status_code == 200, wallet.text
+        assert len(wallet.json()["coupons"]) == 1 and not wallet.json()["can_redeem"]
+        assert wallet.json()["coupons"][0]["source"] == "loyalty_reward"
+        assert wallet.json()["coupons"][0]["display_status"] == "available"
+        assert wallet.json()["coupons"][0]["loyalty_reward"]["total_visits"] == 1
         for statement in ('UPDATE "LoyaltyVisits" SET visited_on=current_date', 'DELETE FROM "LoyaltyVisits"'):
             denied(b.roles.writer, statement)
         for engine in (b.roles.writer, *compatible_database.workers.values()):

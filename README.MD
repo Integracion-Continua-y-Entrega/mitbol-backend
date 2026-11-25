@@ -22,6 +22,7 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 - **Pago verificado:** confirmación manual del total histórico por personal autorizado, consulta separada del estado operativo y protección contra duplicados.
 - **Configuración de fidelización:** administración de metas y recompensas por Admin, con condiciones verificadas y control de versiones; la generación de beneficios corresponde a HU-045.
 - **Identificación personal:** emisión de QR temporal por sesión y comprobación protegida por el personal, sin registrar visitas automáticamente.
+- **Fidelización por visitas:** registro presencial por personal, concesión de recompensas sin duplicados y consultas privadas de progreso y billetera.
 
 **Validación independiente:** integración del frontend, configuración y funcionamiento de los servicios desplegados y ejecuciones programadas. La implementación de endpoints y sus pruebas de backend no acredita esos entornos.
 
@@ -30,7 +31,7 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 La planificación vigente es **Por hacer FINAL.pdf**, páginas 1–10. Parte de
 HU-001 a HU-023 ya trabajadas. Por acuerdo de trabajo, el alcance de implementación
 comprende **13 historias**: las siete del flujo de pedidos y las seis de
-fidelización. Se desarrollan por bloques, priorizando primero el flujo de pedidos.
+fidelización. Se implementaron por bloques, priorizando primero el flujo de pedidos.
 Las tablas describen el backend disponible; no acreditan la integración del
 frontend ni el cierre completo de las historias.
 
@@ -44,7 +45,7 @@ frontend ni el cierre completo de las historias.
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
 | HU-031 · Pago verificado | Backend implementado: confirmación manual protegida del total exacto, evidencia persistente y consulta independiente; duplicados y concurrencia controlados. | Sin pendiente identificado en este bloque de backend. Uso académico con datos sintéticos; ventas y conciliación en Loyverse quedan fuera. |
 
-Orden de continuidad del backend: completar la billetera con HU-049.
+Las 13 historias de este corte cuentan con implementación de backend.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
 servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
@@ -53,17 +54,17 @@ una integración posterior. Este corte conserva los permisos de recepción
 anteriores; HU-031 añade consulta e inserción de pagos y HU-046 añade administración
 de metas por columna al escritor web.
 
-Las seis historias de fidelización también forman parte del alcance acordado y
-se implementarán después del flujo de pedidos, en este orden:
+Las seis historias de fidelización se implementaron después del flujo de pedidos,
+en este orden:
 
 | Historia | Estado del backend |
 | --- | --- |
 | HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
-| HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. Consumo único interno preparado para HU-043. |
+| HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. HU-043 consume la credencial junto con el registro. |
 | HU-043 · Registrar visita presencial | Backend implementado: registro protegido por personal, consumo transaccional del QR y una visita por cuenta/día local. |
 | HU-045 · Acumular visitas y otorgar recompensas | Backend implementado: total derivado de visitas, metas no recurrentes y emisión de cupones en la misma transacción que la visita. |
 | HU-047 · Consultar progreso de lealtad | Backend implementado: consulta propia de visitas, nivel, siguiente meta y metas alcanzadas pendientes, con una instantánea coherente. |
-| HU-049 · Consultar billetera digital | En desarrollo: servicio de consulta de cupones y origen de fidelización, estados por vigencia y paginación; pendiente endpoint autenticado de billetera. |
+| HU-049 · Consultar billetera digital | Backend implementado: consulta propia de cupones y origen de fidelización, estados por vigencia y paginación; conserva la consulta anterior de cupones. |
 
 Este bloque se limita a configuración, visitas, generación y consulta de
 recompensas; no incluye reserva ni canje. Ventas en Loyverse, vinculación,
@@ -469,7 +470,7 @@ escritor web. Tiene SELECT, INSERT y UPDATE por columna sobre metas, sin DELETE
 ni cambios de `goal_id` o `created_at`. Lectores públicos y workers siguen sin
 acceso. No se ejecutan estos scripts automáticamente ni se modifican pedidos,
 pagos o cupones al configurar metas. HU-043 y HU-045 registran visitas y generan
-recompensas; HU-047 consulta el progreso y HU-049 completará la billetera.
+recompensas; HU-047 consulta el progreso y HU-049 consulta la billetera.
 
 ## HU-042: identificación personal QR
 
@@ -591,7 +592,7 @@ por columna sobre cupones, más USAGE de su secuencia. No recibe UPDATE ni DELET
 sobre esas entidades. Lectores públicos y workers no tienen acceso a concesiones.
 Las pruebas usan PostgreSQL temporal; no se aplicaron migraciones ni ACL a una
 base real. La consulta propia de cupones existente permite ver los emitidos;
-HU-047 consulta el progreso y HU-049 completará la billetera. No se implementan reservas
+HU-047 consulta el progreso y HU-049 consulta la billetera. No se implementan reservas
 ni canjes en esta historia.
 
 ## HU-047: cálculo de progreso personal
@@ -638,11 +639,18 @@ La actividad de sesión puede actualizarse, pero consultar no altera visitas,
 metas, concesiones ni cupones. Las pruebas usan cuentas sintéticas y el perfil
 SQL restringido en PostgreSQL temporal; no se modificó una base real.
 
-## HU-049: servicio de billetera digital
+## HU-049: billetera digital
 
-`wallet_service.get_wallet` consulta los cupones de una cuenta junto con su
-evidencia de fidelización cuando existe. La futura ruta obtendrá la cuenta de
-la sesión; tanto cupones como concesiones se filtran por propietario. No se
+`GET /api/auth/wallet` obtiene la cuenta de la sesión vigente, también para
+Admin y Staff: esos roles consultan aquí únicamente su propia billetera.
+Admite `limit` entre 1 y 100 (25 por omisión) y `offset` desde 0 (0 por omisión).
+Parámetros inválidos o desconocidos, incluido `account_id`, producen 422. Es un
+GET sin exigencia de CSRF; el navegador debe enviar la cookie de sesión desde
+un origen autorizado según la política del entorno.
+
+`wallet_service.get_wallet` consulta los cupones de esa cuenta junto con su
+evidencia de fidelización cuando existe; tanto cupones como concesiones se
+filtran por propietario. No se
 consultan metas actuales para reconstruir el beneficio: el cupón conserva su
 nombre, descripción y condiciones de emisión, y el origen conserva identificador,
 versión y umbral de la meta, total acumulado e instante de concesión.
@@ -673,11 +681,18 @@ para informar si hay otra página. No promete una instantánea entre páginas si
 se emiten nuevos cupones. No ejecuta reservas ni canjes, ni crea beneficios al
 consultar; esas operaciones siguen fuera del alcance académico.
 
-Este bloque requiere 0019 sin nuevas migraciones ni permisos SQL. La consulta
-existente `GET /api/auth/coupons` y su selección conservan su contrato y su orden.
-Todavía no se publica la ruta de billetera: el siguiente bloque conectará el
-servicio a la sesión y verificará sus protecciones HTTP. Las pruebas se ejecutan
-con datos sintéticos en PostgreSQL temporal.
+La ruta usa `Cache-Control: no-store`, `Referrer-Policy: no-referrer` y CORS privado
+con credenciales. Una sesión inválida produce 401; un origen rechazado, 403. Se
+mantiene disponible sin administración del catálogo y no se registra cuando
+`AUTH_ENABLED=false`. Un fallo de lectura o de commit de autenticación impide
+la respuesta 200 y devuelve 503 sin detalles SQL ni datos parciales.
+
+Requiere 0019 y las ACL preparadas para HU-045, sin nuevas migraciones ni permisos
+SQL en este bloque. Si falta el esquema, responde 503 en lugar de una billetera
+ficticia vacía. La consulta existente `GET /api/auth/coupons` y su selección
+conservan su contrato y su orden. Las pruebas verifican el recorrido visita,
+concesión, progreso y billetera con datos sintéticos en PostgreSQL temporal y el
+usuario SQL restringido; no se modificó una base real.
 
 ## HU-043: registro de visitas presenciales
 
