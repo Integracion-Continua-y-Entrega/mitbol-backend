@@ -56,7 +56,7 @@ se implementarán después del flujo de pedidos, en este orden:
 
 | Historia | Estado del backend |
 | --- | --- |
-| HU-046 · Configurar niveles y recompensas | Pendiente. |
+| HU-046 · Configurar niveles y recompensas | Persistencia y contrato implementados: migración 0016, meta, nivel, recompensa y condiciones. Pendiente administración protegida y validación contra el catálogo. |
 | HU-042 · Identificación QR/PIN | Pendiente. |
 | HU-043 · Registrar visita presencial | Pendiente. |
 | HU-045 · Acumular visitas y otorgar recompensas | Pendiente. |
@@ -381,6 +381,33 @@ este bloque del endpoint; estos scripts no se ejecutan automáticamente.
 
 El registro se demostrará con datos sintéticos y no sustituye una venta o recibo
 de Loyverse; HU-032, HU-033 y HU-035 siguen pendientes.
+
+## HU-046: configuración de metas de fidelización
+
+El primer bloque incorpora `LoyaltyGoals` mediante la migración aditiva
+`20261124_0016`. Cada meta guarda su identificador estable, visitas requeridas,
+nombre de nivel y recompensa, descripción opcional, descuento de referencia,
+días de vigencia del futuro cupón y condiciones compatibles con `CouponConditions`.
+Incluye activación explícita, versión y fecha y cuenta de la última modificación.
+
+Las visitas requeridas son enteros positivos y no se repiten entre metas, para
+evitar dos niveles en el mismo umbral. Los nombres deben ser visibles y las
+condiciones declarar un alcance coherente; para productos se requiere indicar
+sus identificadores y el tratamiento de complementos. Los días de vigencia
+deben estar entre 1 y 32767, rango positivo del tipo de almacenamiento. Los
+importes mínimos de las condiciones conservan su precisión decimal.
+
+No se insertan reglas predeterminadas ni valores reales del restaurante. Una
+meta nueva queda inactiva por defecto. Configurar una meta no registra visitas,
+no reinicia progreso ni genera, reserva o canjea cupones. La identidad de la meta
+servirá para asociar posteriormente las recompensas de cada cliente en HU-045.
+
+HU-046 todavía está en desarrollo: faltan los endpoints de administración,
+sus permisos y las comprobaciones del descuento y de los productos referidos.
+La persistencia por sí sola no acredita una regla lista para emitir beneficios.
+Los perfiles SQL reconocen 0016 conservando los permisos anteriores, incluidos
+los pagos; no se concede acceso a `LoyaltyGoals` en este bloque. La migración
+no modifica pedidos, pagos ni cupones existentes.
 
 ## 🚀 Inicio rápido (Windows)
 

@@ -55,7 +55,8 @@ def test_metadata_is_separate_and_migration_has_one_new_head():
     assert not set(catalog_metadata.tables) & AUTH_TABLES
     scripts = ScriptDirectory.from_config(config_for())
     assert len(Base.metadata.tables) == 10
-    assert scripts.get_heads() == ["20261124_0015"]
+    assert scripts.get_heads() == ["20261124_0016"]
+    assert scripts.get_revision("20261124_0016").down_revision == "20261124_0015"
     assert scripts.get_revision("20261124_0015").down_revision == "20261121_0014"
     assert scripts.get_revision("20261120_0013").down_revision == "20261119_0012"
     assert scripts.get_revision("20261119_0012").down_revision == "20261119_0011"

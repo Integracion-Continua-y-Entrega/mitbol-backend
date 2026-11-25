@@ -351,11 +351,12 @@ def test_staff_order_history_uses_existing_writer_without_private_access_for_rea
             command.downgrade(config_for(db),"20261120_0013")
 
 
-def test_payment_verification_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database):
+@pytest.mark.parametrize("revision", ["20261124_0015", "20261124_0016"])
+def test_payment_verification_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
     """El escritor consulta e inserta pagos; no modifica evidencia ni puede asignar la fecha del servidor."""
     b = restricted_backend
     with b.roles.owner.begin() as db:
-        command.upgrade(config_for(db), "20261124_0015")
+        command.upgrade(config_for(db), revision)
     execute_script(b.roles.owner, approved(DELTA))
     try:
         for engine, filename in ((b.roles.writer, "verify_admin_writer_local.sql"),
@@ -363,7 +364,7 @@ def test_payment_verification_uses_append_only_writer_without_reader_or_worker_a
                                  (compatible_database.workers["mitbol_discount_worker"], "verify_discount_worker.sql")):
             execute_script(engine, (SQL / filename).read_text(encoding="utf-8"))
             with engine.connect() as db:
-                assert validate_bridge_schema(db) == "20261124_0015"
+                assert validate_bridge_schema(db) == revision
         with b.sessions.begin() as db:
             db.get(RestaurantOrderSettings, 1).accepting_orders = True
         created = submit(b.client, {"cart": {"items": [{"product_id": b.product_id,
@@ -391,6 +392,29 @@ def test_payment_verification_uses_append_only_writer_without_reader_or_worker_a
                               'INSERT INTO "OrderPayments" DEFAULT VALUES',
                               'UPDATE "OrderPayments" SET method=\'other\'',
                               'DELETE FROM "OrderPayments"'):
+                code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
+                denied(engine, statement, code=code)
+    finally:
+        with b.roles.owner.begin() as db:
+            command.downgrade(config_for(db), "20261120_0013")
+
+
+def test_loyalty_configuration_storage_does_not_open_access_to_existing_roles(restricted_backend, compatible_database):
+    """La revisión admite los perfiles existentes; los permisos de administración llegarán con el endpoint."""
+    b = restricted_backend
+    with b.roles.owner.begin() as db:
+        command.upgrade(config_for(db), "20261124_0016")
+    execute_script(b.roles.owner, approved(DELTA))
+    try:
+        for engine in (b.roles.reader, b.roles.writer, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                if engine is not b.roles.reader:
+                    assert validate_bridge_schema(db) == "20261124_0016"
+                assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyGoals"',
+                    'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyGoals"',
+                    'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+            for statement in ('SELECT * FROM "LoyaltyGoals"', 'INSERT INTO "LoyaltyGoals" DEFAULT VALUES',
+                              'UPDATE "LoyaltyGoals" SET is_active=true', 'DELETE FROM "LoyaltyGoals"'):
                 code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
                 denied(engine, statement, code=code)
     finally:
