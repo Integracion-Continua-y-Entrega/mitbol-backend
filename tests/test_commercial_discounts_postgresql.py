@@ -536,6 +536,14 @@ def test_visit_registration_uses_append_only_writer_without_reader_or_worker_acc
             json={"qr_payload": renewed.json()["qr_payload"]}).status_code == 409
         assert b.client.post("/api/admin/loyalty/identifications/validate", headers=headers,
             json={"qr_payload": renewed.json()["qr_payload"]}).status_code == 200
+        progress = b.client.get("/api/auth/loyalty/progress")
+        assert progress.status_code == 200 and progress.json()["total_visits"] == 0
+        b.client.cookies.clear()
+        b.client.cookies.update(cookies)
+        progress = b.client.get("/api/auth/loyalty/progress")
+        assert progress.status_code == 200 and progress.json()["total_visits"] == 1, progress.text
+        assert progress.json()["current_level"]["required_visits"] == 1
+        assert progress.json()["pending_goals"] == [] and progress.json()["next_goal"] is None
         for statement in ('UPDATE "LoyaltyVisits" SET visited_on=current_date', 'DELETE FROM "LoyaltyVisits"'):
             denied(b.roles.writer, statement)
         for engine in (b.roles.writer, *compatible_database.workers.values()):

@@ -44,8 +44,7 @@ frontend ni el cierre completo de las historias.
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
 | HU-031 · Pago verificado | Backend implementado: confirmación manual protegida del total exacto, evidencia persistente y consulta independiente; duplicados y concurrencia controlados. | Sin pendiente identificado en este bloque de backend. Uso académico con datos sintéticos; ventas y conciliación en Loyverse quedan fuera. |
 
-Orden de continuidad del backend: implementar HU-047, consulta de progreso,
-y después completar la billetera con HU-049.
+Orden de continuidad del backend: completar la billetera con HU-049.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
 servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
@@ -63,7 +62,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. Consumo único interno preparado para HU-043. |
 | HU-043 · Registrar visita presencial | Backend implementado: registro protegido por personal, consumo transaccional del QR y una visita por cuenta/día local. |
 | HU-045 · Acumular visitas y otorgar recompensas | Backend implementado: total derivado de visitas, metas no recurrentes y emisión de cupones en la misma transacción que la visita. |
-| HU-047 · Consultar progreso de lealtad | En desarrollo: servicio de consulta coherente por cuenta implementado; pendiente endpoint autenticado. |
+| HU-047 · Consultar progreso de lealtad | Backend implementado: consulta propia de visitas, nivel, siguiente meta y metas alcanzadas pendientes, con una instantánea coherente. |
 | HU-049 · Consultar billetera digital | Existe consulta de cupones; falta integrar las recompensas de fidelización y la presentación de estados de billetera. |
 
 Este bloque se limita a configuración, visitas, generación y consulta de
@@ -470,7 +469,7 @@ escritor web. Tiene SELECT, INSERT y UPDATE por columna sobre metas, sin DELETE
 ni cambios de `goal_id` o `created_at`. Lectores públicos y workers siguen sin
 acceso. No se ejecutan estos scripts automáticamente ni se modifican pedidos,
 pagos o cupones al configurar metas. HU-043 y HU-045 registran visitas y generan
-recompensas; HU-047 y HU-049 completarán la consulta de progreso y billetera.
+recompensas; HU-047 consulta el progreso y HU-049 completará la billetera.
 
 ## HU-042: identificación personal QR
 
@@ -592,13 +591,19 @@ por columna sobre cupones, más USAGE de su secuencia. No recibe UPDATE ni DELET
 sobre esas entidades. Lectores públicos y workers no tienen acceso a concesiones.
 Las pruebas usan PostgreSQL temporal; no se aplicaron migraciones ni ACL a una
 base real. La consulta propia de cupones existente permite ver los emitidos;
-HU-047 y HU-049 completarán el progreso y la billetera. No se implementan reservas
+HU-047 consulta el progreso y HU-049 completará la billetera. No se implementan reservas
 ni canjes en esta historia.
 
 ## HU-047: cálculo de progreso personal
 
-El servicio `loyalty_progress_service.get_progress` recibe la identidad que el
-futuro endpoint obtendrá de la sesión. Consulta en una misma instantánea SQL
+`GET /api/auth/loyalty/progress` obtiene la identidad de la sesión vigente,
+también para Admin y Staff: esos roles consultan aquí únicamente su propio
+progreso. No admite parámetros de consulta ni identificadores en la ruta; enviar
+`account_id` u otro parámetro devuelve 422. No exige permisos administrativos ni
+CSRF para este GET. El navegador debe enviar la cookie de sesión y usar un origen
+autorizado, conforme a la política de autenticación del entorno.
+
+El servicio `loyalty_progress_service.get_progress` consulta en una misma instantánea SQL
 el total de visitas de esa cuenta, las metas activas y sus concesiones. No
 mantiene un contador separado ni modifica visitas, metas o cupones al consultar.
 
@@ -619,11 +624,19 @@ pero todavía no representan cupones disponibles: HU-045 las evalúa al registra
 la siguiente visita válida y vuelve a comprobar las referencias comerciales.
 La consulta no emite beneficios ni garantiza disponibilidad futura del descuento.
 
+La respuesta usa `Cache-Control: no-store` y `Referrer-Policy: no-referrer`; no
+incluye cuentas ajenas, responsables administrativos ni datos de QR o sesiones.
+Cuenta o sesión inválida produce 401 y un origen rechazado, 403. El endpoint
+funciona aunque la administración del catálogo esté desactivada y no se registra
+cuando `AUTH_ENABLED=false`. Conserva CORS privado con credenciales.
+
 Este bloque requiere 0019, sin añadir migraciones ni permisos SQL. Configuración
-almacenada inválida o tablas faltantes impiden calcular el progreso y producen
-un error de servicio 503. Las pruebas usan cuentas sintéticas en PostgreSQL
-temporal. La ruta autenticada y sus pruebas de acceso se incorporarán en el
-siguiente bloque; todavía no hay un nuevo endpoint público.
+almacenada inválida, tablas faltantes o fallos de lectura producen 503 en lugar
+de presentar un progreso ficticio de cero visitas. Se confirma la transacción
+de autenticación antes de responder: un fallo de commit también impide el 200.
+La actividad de sesión puede actualizarse, pero consultar no altera visitas,
+metas, concesiones ni cupones. Las pruebas usan cuentas sintéticas y el perfil
+SQL restringido en PostgreSQL temporal; no se modificó una base real.
 
 ## HU-043: registro de visitas presenciales
 
