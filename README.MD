@@ -62,7 +62,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
 | HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. Consumo único interno preparado para HU-043. |
 | HU-043 · Registrar visita presencial | Backend implementado: registro protegido por personal, consumo transaccional del QR y una visita por cuenta/día local. |
-| HU-045 · Acumular visitas y otorgar recompensas | Pendiente. |
+| HU-045 · Acumular visitas y otorgar recompensas | En desarrollo: evaluación de metas alcanzadas implementada; pendientes persistencia de concesiones y emisión transaccional. |
 | HU-047 · Consultar progreso de lealtad | Pendiente. |
 | HU-049 · Consultar billetera digital | Existe consulta de cupones; falta integrar las recompensas de fidelización y la presentación de estados de billetera. |
 
@@ -541,6 +541,24 @@ insertar y renovar o consumir por columna, sin DELETE ni cambios de `account_id`
 Lectores públicos y workers continúan sin acceso. La migración no crea códigos
 ni se ejecutan esos scripts automáticamente. Las pruebas usan exclusivamente
 cuentas y sesiones sintéticas en bases desechables.
+
+## HU-045: evaluación de metas no recurrentes
+
+El primer bloque incorpora `eligible_goals`, una evaluación sin escrituras ni
+endpoints adicionales. Recibe el total de visitas, las metas configuradas y las
+identidades de metas ya concedidas. Selecciona todas las metas activas cuyo
+umbral se alcanzó, ordenadas por visitas, sin reiniciar el total acumulado.
+
+Una meta ya concedida no vuelve a ser elegible por editar su versión o su umbral.
+Una meta activada después de alcanzar su umbral puede evaluarse en la siguiente
+visita válida. La evaluación no genera beneficios retroactivamente al editar
+configuración, ni admite dos versiones de la misma meta en una evaluación.
+
+Todavía no se crean cupones: el siguiente bloque incorporará evidencia durable
+de concesión, unicidad por cuenta y meta y comprobación de referencias comerciales
+vigentes. Esa escritura deberá compartir la transacción de registro de visita;
+la selección en memoria por sí sola no garantiza exclusión entre peticiones.
+No se implementan reservas ni canjes en esta historia.
 
 ## HU-043: registro de visitas presenciales
 
