@@ -1,26 +1,31 @@
-# React localhost → Render académico actual
+# React local y publicado → Render académico actual
 
-**API: https://mitbol-backend.onrender.com. React: http://localhost:5173.**
+**API: https://mitbol-backend.onrender.com. React: http://localhost:5173 y
+https://mitbol-frontend.onrender.com.**
 Neon `production / mitbol_cloud_dev` es la base académica de pruebas, no la
 producción definitiva del restaurante. Se reutilizan servicio, base y roles actuales;
 no crear ramas/servicios, ejecutar migraciones ni cambiar permisos. Los compañeros
-sólo necesitan React y credenciales de aplicación. El frontend publicado puede
-seguir como demostración del menú público.
+sólo necesitan React y credenciales de aplicación. El perfil `frontend_dev`
+admite el origen local original o ambos orígenes simultáneamente, en cualquier
+orden y sin duplicados. El frontend publicado solo no es una configuración válida
+de este perfil; `restaurant` conserva sus restricciones actuales.
 
 ## 1. Integrar y configurar Render (operador, después de autorización)
 
-Integrar el código en develop mediante PR y CI. Si el servicio tiene Auto Deploy,
-el merge puede desplegarlo: conservar AUTH_ENABLED=false hasta configurar y
-autorizar la activación. El código público sigue arrancando con los flags apagados.
+Integrar el código en develop mediante PR y CI, después de autorizar la integración.
+Si el servicio tiene Auto Deploy, el merge puede desplegarlo. Para esta actualización
+se conservan los flags y secretos existentes; no regenerar `AUTH_LIMIT_SECRET`.
+El código público sigue arrancando con los flags apagados en una instalación nueva.
 
-Variables del **Render actual**, sin `/` final en los orígenes:
+Variables propuestas **después de integrar y desplegar el cambio**, sin `/` final
+en los orígenes. Esta intervención no modifica las variables reales de Render:
 
 | Variable | Valor |
 | --- | --- |
 | APP_ENV | `cloud` (conservar) |
 | AUTH_PROFILE | `frontend_dev` |
 | AUTH_PUBLIC_ORIGIN | `https://mitbol-backend.onrender.com` |
-| AUTH_ORIGINS | `["http://localhost:5173"]` |
+| AUTH_ORIGINS | `["http://localhost:5173","https://mitbol-frontend.onrender.com"]` |
 | CORS_ORIGINS | `["http://localhost:5173","https://mitbol-frontend.onrender.com"]` (público, sin credenciales) |
 | EXPECTED_DATABASE | `mitbol_cloud_dev` (conservar) |
 | EXPECTED_DATABASE_HOST | `ep-green-hill-bddfbmgh-pooler.c-8.us-east-2.aws.neon.tech` (host aprobado actual) |
@@ -29,13 +34,25 @@ Variables del **Render actual**, sin `/` final en los orígenes:
 | AUTH_PROXY_MODE | `render` |
 | AUTH_COOKIE_SECURE / AUTH_COOKIE_PARTITIONED | `true` / `true` |
 | AUTH_LIMIT_BACKEND | `postgresql` |
-| AUTH_LIMIT_SECRET | Secreto nuevo estable: 32 bytes aleatorios, Base64 URL-safe sin padding (43 caracteres canónicos) |
+| AUTH_LIMIT_SECRET | Conservar el secreto estable existente; 32 bytes aleatorios, Base64 URL-safe sin padding (43 caracteres canónicos) |
 | AUTH_LOGIN_ATTEMPTS / AUTH_IP_ATTEMPTS | `5` / `30` |
 | AUTH_LIMIT_WINDOW_SECONDS | `900` |
 | ADMIN_ENABLED | `false`, siempre (clave legada local) |
-| AUTH_ENABLED | `false` al desplegar/preparar; `true` sólo después de autorizar activación |
+| AUTH_ENABLED | Conservar la activación existente; el valor predeterminado sigue siendo `false` |
+| AUTH_SYNC_ENABLED | `false`; panel HU-010, no las sincronizaciones programadas de GitHub Actions |
 | AUTH_CATALOG_ENABLED | `true` para operaciones Admin/Staff |
 | AUTH_IMAGES_ENABLED | `true` para CRUD de fotos de prueba, o `false` si no se necesitan |
+
+La configuración original `AUTH_ORIGINS=["http://localhost:5173"]` sigue siendo
+válida. Cada solicitud autenticada debe incluir exactamente un `Origin` autorizado
+y un `Host` igual al backend aprobado. Se rechazan orígenes desconocidos, `null`,
+ausentes, duplicados o combinados; no se utilizan cabeceras Forwarded para decidirlos.
+`ScopedCORSMiddleware` conserva el CORS público y autenticado separados, con las
+reglas específicas de pedidos, cancelación y seguimiento de invitados.
+
+Conservar `AUTH_RECOVERY_URL` como único destino HTTPS configurado para recuperar
+la contraseña, junto con el proveedor de correo existente. No se construye el
+destino a partir de `Origin`, `Host`, parámetros ni cabeceras reenviadas.
 
 Los DSN sólo van en secretos de Render. La contraseña SQL debe estar codificada
 como componente URL; nunca imprimirla ni ponerla en Git o variables VITE_*.
@@ -48,7 +65,8 @@ Render aporta RENDER=true y RENDER_EXTERNAL_URL: no sobrescribirlas. El perfil
 exige que esa URL coincida con AUTH_PUBLIC_ORIGIN y con el backend académico.
 No confía en cabeceras Forwarded para cambiar Host o eludir el limitador.
 
-Para generar AUTH_LIMIT_SECRET sin mostrarlo, desde PowerShell sin transcripción
+Sólo para una instalación nueva, para generar AUTH_LIMIT_SECRET sin mostrarlo,
+desde PowerShell sin transcripción
 ni grabación (no conecta ni escribe en Neon):
 
 ```powershell
@@ -109,7 +127,8 @@ académico compartido, incluido el menú público de demostración.
 
 ## 3. Prueba mínima desde React en el navegador
 
-Configurar `VITE_API_BASE_URL=https://mitbol-backend.onrender.com` y Vite con
+En ambos frontends configurar `VITE_API_URL=https://mitbol-backend.onrender.com`.
+Para desarrollo local usar Vite con
 host localhost, puerto 5173 y strictPort. No usar 127.0.0.1 ni otro puerto.
 Adaptar [admin_api_client.ts](../examples/admin_api_client.ts); ya implementa
 credentials:include, login JSON con X-CSRF-Protection:1, CSRF de sesión en memoria
@@ -117,8 +136,8 @@ y X-CSRF-Token en cada escritura (también logout). Origin lo añade el navegado
 no poner tokens/cookies/contraseñas en consola o localStorage.
 
 ```typescript
-const api = adminApi(import.meta.env.VITE_API_BASE_URL);
-const menu = await publicMenu(import.meta.env.VITE_API_BASE_URL); // sin cookies
+const api = adminApi(import.meta.env.VITE_API_URL);
+const menu = await publicMenu(import.meta.env.VITE_API_URL); // credentials:omit
 await api.login(emailDelFormulario, passwordDelFormulario); // login + /me 200
 await api.request("/api/auth/me");                          // 200, usuario/roles
 await api.availability(productId, false);                  // Admin/Staff: 200
@@ -154,30 +173,45 @@ CHIPS [depende del navegador](https://developer.mozilla.org/en-US/docs/Web/Priva
 login 200 solo no acredita cookie persistente. Si /me da 401, comprobar bloqueo
 de cookies y usar un navegador compatible sin desactivar protecciones. Las
 pruebas Python no certifican este paso real; no se ejecutó contra Render.
+Las cookies particionadas pueden requerir inicios de sesión independientes en
+localhost y en el frontend publicado; no se promete una sesión compartida entre
+ellos. `logout-all` y el restablecimiento de contraseña revocan las sesiones en
+el backend independientemente de su contexto del navegador.
+
+Usar solicitudes directas al backend HTTPS: el navegador añade `Origin` y no se
+debe fabricarlo. Postman no comprueba las políticas CORS/CHIPS del navegador.
+Un proxy de Vite puede cambiar Host, Origin y el contexto de las cookies, por lo
+que no sustituye la validación directa desde los dos frontends.
 
 Las fotos usan disco efímero: pueden perderse en reinicios, reposo o despliegues
 de [Render Free](https://render.com/docs/free), aunque queden referencias DB.
 Es válido para las pruebas académicas; almacenamiento durable queda para entrega.
 
-## 4. Verificar e integrar (comandos manuales, no ejecutados en Git)
+## 4. Verificación focalizada de los dos orígenes
 
 ```powershell
-& .\.venv\Scripts\python.exe -B scripts/test_auth_phase1.py tests/test_frontend_remote.py tests/test_auth_cloud.py tests/test_account_provisioning.py -k 'not function_warning' -q --tb=short
+$focusedTests = @(
+    'tests/test_frontend_remote.py'
+    'tests/test_auth_cloud.py'
+    'tests/test_cloud_configuration.py'
+    'tests/test_password_recovery_delivery.py'
+    'tests/test_password_recovery.py::test_recovery_hashes_token_changes_password_and_revokes_every_session_without_changing_permissions'
+    'tests/test_order_submission.py::test_orders_cors_allows_submission_headers_without_exposing_other_routes'
+    'tests/test_order_tracking.py::test_tracking_cors_allows_only_get_with_private_header'
+    'tests/test_order_cancellation.py::test_cancellation_cors_is_limited_to_its_route'
+    'tests/test_cart.py::test_cart_json_is_available_to_react_without_broadening_other_cors_routes'
+)
+& .\.venv\Scripts\python.exe -B scripts/test_auth_phase1.py @focusedTests -q --tb=short
 git diff --check
 git diff --stat
-git add -- .env.example README.MD app/core/config.py app/main.py docs/examples/admin_api_client.ts docs/security/admin_auth_phase5.md docs/security/admin_frontend_integration.md docs/security/frontend_remote_dev.md tests/test_auth_cloud.py tests/test_frontend_remote.py
-git diff --cached --check
-git diff --cached --stat
-git commit -m "feat: enable localhost admin integration with academic Render"
-git push -u origin feature/admin-frontend-integration
-gh pr create --base develop --head feature/admin-frontend-integration --fill
 ```
 
-Resultado: **70 passed, 3 deselected**, PostgreSQL 18 temporal; sintaxis PowerShell
-y TypeScript verificadas y `git diff --check` correcto. Si el PR ya existe, basta
-el push: no ejecutar de nuevo `gh pr create`.
-
-Se omiten de esta ejecución focalizada sólo los tres ensayos de advertencias de
-funciones SQL ya revisados. CI conserva toda la suite. No se cambiaron grants,
-migraciones, Neon ni Render; no se ejecutaron commits ni push. La autorización
-para configurar Render o crear/reactivar cuentas sigue pendiente.
+El ejecutor utiliza exclusivamente PostgreSQL 18 desechable en TEMP; no lee `.env`
+ni conecta con Neon. Los ensayos cubren la configuración original y dual, ambos
+órdenes, encabezados inválidos, CSRF, permisos, cookies HTTP, renovación, expiración,
+logout/revocación y recuperación con captura en memoria, sin correos reales.
+Resultado de esta selección en `feature/auth-dual-origin`: **159 passed**, dos
+advertencias de deprecación de dependencias, PostgreSQL 18 temporal detenido.
+CI conserva sus comprobaciones habituales. La verificación en navegadores reales
+queda pendiente para después del despliegue autorizado. No ejecutar merge, push,
+despliegue ni cambios de variables como parte de esta intervención.

@@ -3,8 +3,8 @@
 **Desarrollo del equipo desde localhost sin backend local:** seguir
 [Frontend local → Render académico actual](frontend_remote_dev.md). El laboratorio
 de este documento es opcional. El perfil `restaurant` descrito aquí conserva sus
-restricciones; `frontend_dev` admite sólo localhost en el Render/Neon académicos
-actuales. No se necesita otro servicio ni otra rama.
+restricciones; `frontend_dev` admite localhost solo o junto al frontend publicado
+en el Render/Neon académicos actuales. No se necesita otro servicio.
 
 6 de noviembre de 2026. Código en `feature/admin-frontend-integration`, desde
 `origin/develop`. No se cambiaron Neon, Render, permisos SQL ni cuentas reales.
