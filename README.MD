@@ -63,7 +63,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | HU-043 · Registrar visita presencial | Backend implementado: registro protegido por personal, consumo transaccional del QR y una visita por cuenta/día local. |
 | HU-045 · Acumular visitas y otorgar recompensas | Backend implementado: total derivado de visitas, metas no recurrentes y emisión de cupones en la misma transacción que la visita. |
 | HU-047 · Consultar progreso de lealtad | Backend implementado: consulta propia de visitas, nivel, siguiente meta y metas alcanzadas pendientes, con una instantánea coherente. |
-| HU-049 · Consultar billetera digital | Existe consulta de cupones; falta integrar las recompensas de fidelización y la presentación de estados de billetera. |
+| HU-049 · Consultar billetera digital | En desarrollo: servicio de consulta de cupones y origen de fidelización, estados por vigencia y paginación; pendiente endpoint autenticado de billetera. |
 
 Este bloque se limita a configuración, visitas, generación y consulta de
 recompensas; no incluye reserva ni canje. Ventas en Loyverse, vinculación,
@@ -637,6 +637,47 @@ de autenticación antes de responder: un fallo de commit también impide el 200.
 La actividad de sesión puede actualizarse, pero consultar no altera visitas,
 metas, concesiones ni cupones. Las pruebas usan cuentas sintéticas y el perfil
 SQL restringido en PostgreSQL temporal; no se modificó una base real.
+
+## HU-049: servicio de billetera digital
+
+`wallet_service.get_wallet` consulta los cupones de una cuenta junto con su
+evidencia de fidelización cuando existe. La futura ruta obtendrá la cuenta de
+la sesión; tanto cupones como concesiones se filtran por propietario. No se
+consultan metas actuales para reconstruir el beneficio: el cupón conserva su
+nombre, descripción y condiciones de emisión, y el origen conserva identificador,
+versión y umbral de la meta, total acumulado e instante de concesión.
+
+El contrato conserva los campos de `CouponRead` y añade `source` (`coupon` o
+`loyalty_reward`), `loyalty_reward` con esa evidencia mínima o `null`, y
+`display_status`. `status` sigue siendo el valor guardado; `display_status`
+describe el estado que corresponde mostrar al consultar:
+
+| Estado mostrado | Significado |
+| --- | --- |
+| `available` · Disponible | Estado guardado disponible y dentro de su vigencia. |
+| `reserved` · Reservado | Reserva guardada que todavía no ha vencido. |
+| `redeemed` · Canjeado | Canje histórico guardado, incluso si la vigencia ya terminó. |
+| `expired` · Expirado | Estado expirado o fecha final alcanzada, salvo un canje histórico. |
+| `scheduled` · Próximamente | Disponible en almacenamiento, pero su vigencia aún no comienza. |
+
+`available` conserva su significado temporal: no garantiza que se cumplan las
+condiciones del pedido ni que el descuento comercial siga utilizable. Los
+importes proceden del catálogo local vigente; su validación sigue correspondiendo
+a la selección y al envío. Condiciones desconocidas se muestran como pendientes,
+sin interpretarlas como uso libre. La vigencia incluye el instante inicial y
+excluye el final; consultar no escribe expiraciones en la base.
+
+La respuesta contiene `coupons`, `limit`, `offset`, `has_more` y `can_redeem:false`.
+Ordena por identificador de cupón descendente y obtiene un elemento adicional
+para informar si hay otra página. No promete una instantánea entre páginas si
+se emiten nuevos cupones. No ejecuta reservas ni canjes, ni crea beneficios al
+consultar; esas operaciones siguen fuera del alcance académico.
+
+Este bloque requiere 0019 sin nuevas migraciones ni permisos SQL. La consulta
+existente `GET /api/auth/coupons` y su selección conservan su contrato y su orden.
+Todavía no se publica la ruta de billetera: el siguiente bloque conectará el
+servicio a la sesión y verificará sus protecciones HTTP. Las pruebas se ejecutan
+con datos sintéticos en PostgreSQL temporal.
 
 ## HU-043: registro de visitas presenciales
 
