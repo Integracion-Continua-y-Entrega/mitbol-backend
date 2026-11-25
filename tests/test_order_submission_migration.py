@@ -23,7 +23,7 @@ def test_consolidated_revision_is_additive_and_offline_sql_has_no_grants():
     config = config_for(output=output)
     command.upgrade(config, f"{PREVIOUS}:{REVISION}", sql=True)
     sql = output.getvalue()
-    assert ScriptDirectory.from_config(config).get_heads() == ["20261121_0014"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20261125_0019"]
     assert sql.count("CREATE TABLE") == 4
     assert all(f'CREATE TABLE "{name}"' in sql for name in TABLES)
     assert not any(operation in sql for operation in ("ALTER TABLE", "DROP TABLE", "CREATE ROLE", "GRANT ", "TRUNCATE"))

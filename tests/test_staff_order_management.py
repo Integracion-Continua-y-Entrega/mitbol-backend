@@ -38,7 +38,10 @@ def guest_order(b):
 
 
 def decide(b, receipt, headers, action="accept", body=None):
-    return b.client.post(f'{PATH}/{receipt["order_id"]}/{action}',headers=headers,json=body or {})
+    """Usa un motivo válido por defecto al rechazar y conserva los cuerpos inválidos explícitos."""
+    if body is None:
+        body = {"reason": "Motivo sintético de rechazo"} if action == "reject" else {}
+    return b.client.post(f'{PATH}/{receipt["order_id"]}/{action}',headers=headers,json=body)
 
 
 @pytest.mark.parametrize("role", ["admin","staff"])
@@ -92,12 +95,13 @@ def test_inactive_employee_and_missing_csrf_cannot_decide(backend):
 
 
 @pytest.mark.parametrize("role", ["admin","staff"])
-@pytest.mark.parametrize("action,status", [("accept","Aceptado"),("reject","Rechazado")])
+@pytest.mark.parametrize("action,status", [("accept","Confirmado"),("reject","Rechazado")])
 def test_decisions_keep_history_amounts_and_existing_tracking(backend, role, action, status):
     b = backend
     receipt = guest_order(b)
-    with b.sessions.begin() as db:
-        db.get(ProductVariant,b.products[0].variants[0].product_variant_id).price = 999
+    if action == "reject":
+        with b.sessions.begin() as db:
+            db.get(ProductVariant,b.products[0].variants[0].product_variant_id).price = 999
     headers = csrf_headers(login(b,role))
     body = {"reason":"  No hay disponibilidad  "} if action == "reject" else {}
     response = decide(b,receipt,headers,action,body)
@@ -110,6 +114,8 @@ def test_decisions_keep_history_amounts_and_existing_tracking(backend, role, act
     assert last["reason"] == ("No hay disponibilidad" if action == "reject" else None)
     assert decide(b,receipt,headers,action,body).status_code == 409
     assert decide(b,receipt,headers,"reject" if action == "accept" else "accept").status_code == 409
+    with b.sessions.begin() as db:
+        db.get(ProductVariant,b.products[0].variants[0].product_variant_id).price = 999
     b.client.cookies.clear()
     private = {"Authorization":f'Bearer {receipt["tracking"]["token"]}'}
     tracked = b.client.get(receipt["tracking"]["path"],headers=private)
@@ -132,7 +138,9 @@ def test_only_received_requests_can_be_decided(backend, status, action):
         assert len(db.scalars(select(OrderStatusHistory)).all()) == 1
 
 
-@pytest.mark.parametrize("body", [{"reason":" "},{"reason":"x"*501},{"reason":"nul\x00"},
+@pytest.mark.parametrize("body", [{}, {"reason":None}, {"reason":" "}, {"reason":"x"*501},
+                                {"reason":"nul\x00"}, {"reason":"No\nhay"}, {"reason":False},
+                                {"reason":123}, {"reason":[]}, {"reason":{}},
                                 {"status":"Aceptado"},{"actor_account_id":1}])
 def test_invalid_reason_or_administrative_fields_do_not_change_the_order(backend, body):
     b = backend
@@ -143,11 +151,14 @@ def test_invalid_reason_or_administrative_fields_do_not_change_the_order(backend
         assert db.get(Order,UUID(receipt["order_id"])).status == "Solicitud recibida"
 
 
-def test_optional_rejection_reason_and_query_validation(backend):
+def test_required_rejection_reason_and_query_validation(backend):
     b = backend
     receipt = guest_order(b)
     headers = csrf_headers(login(b,"admin"))
-    assert decide(b,receipt,headers,"reject").json()["history"][-1]["reason"] is None
+    assert decide(b,receipt,headers,"reject",{}).status_code == 422
+    assert decide(b,receipt,headers,"reject",{"reason":None}).status_code == 422
+    rejected = decide(b,receipt,headers,"reject",{"reason":"  Sin capacidad  "})
+    assert rejected.status_code == 200 and rejected.json()["history"][-1]["reason"] == "Sin capacidad"
     assert b.client.get(f"{PATH}/{uuid4()}").status_code == 404
     assert decide(b,{"order_id":str(uuid4())},headers).status_code == 404
     for query in ({"limit":0},{"limit":101},{"offset":-1},{"status":""}):
@@ -200,12 +211,12 @@ def test_registered_order_keeps_coupon_history_and_idempotent_receipt_after_acce
     assert created.status_code == 201 and created.json()["total"] == "145.00", created.text
     receipt = created.json()
     response = decide(b,receipt,csrf_headers(login(b,"staff")))
-    assert response.status_code == 200 and response.json()["status"] == "Aceptado", response.text
+    assert response.status_code == 200 and response.json()["status"] == "Confirmado", response.text
     assert response.json()["coupon"] == receipt["coupon"] and response.json()["total"] == "145.00"
     assert [row["actor_account_id"] for row in response.json()["history"]] == [b.ids["customer"][0],b.ids["staff"][0]]
     customer = csrf_headers(login(b,"customer"))
     repeated = b.client.post("/api/orders",headers=customer | {"Idempotency-Key":key},json=body)
-    assert repeated.status_code == 201 and repeated.json()["status"] == "Aceptado"
+    assert repeated.status_code == 201 and repeated.json()["status"] == "Confirmado"
     assert repeated.json()["coupon"] == receipt["coupon"]
     with b.sessions() as db:
         assert len(db.scalars(select(Order)).all()) == 1 and len(db.scalars(select(OrderStatusHistory)).all()) == 2
@@ -225,8 +236,10 @@ def test_concurrent_staff_decisions_and_customer_cancellation_have_one_winner(ba
                 if action is None:
                     order_cancellation_service.cancel_order(db,identifier,guest_token=receipt["tracking"]["token"])
                     return "Cancelado"
-                staff_order_service.decide_order(db,identifier,accepted=action,actor_account_id=b.ids["staff" if index else "admin"][0])
-                return "Aceptado" if action else "Rechazado"
+                staff_order_service.decide_order(db,identifier,accepted=action,
+                    actor_account_id=b.ids["staff" if index else "admin"][0],
+                    reason="Motivo sintético de rechazo" if action is False else None)
+                return "Confirmado" if action else "Rechazado"
         except (AuthError,order_cancellation_service.OrderNotPendingError) as error:
             assert not isinstance(error,AuthError) or error.status_code == 409
             return "conflict"

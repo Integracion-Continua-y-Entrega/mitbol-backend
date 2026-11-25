@@ -331,7 +331,7 @@ def test_staff_order_history_uses_existing_writer_without_private_access_for_rea
         assert b.client.get("/api/admin/orders").status_code == 200
         accepted = b.client.post(f'/api/admin/orders/{receipt["order_id"]}/accept',json={},headers=headers)
         assert accepted.status_code == 200, accepted.text
-        assert accepted.json()["status"] == "Aceptado" and len(accepted.json()["history"]) == 2
+        assert accepted.json()["status"] == "Confirmado" and len(accepted.json()["history"]) == 2
         execute_script(b.roles.writer,VERIFY.read_text(encoding="utf-8"))
         with b.roles.writer.connect() as db:
             assert validate_bridge_schema(db) == "20261121_0014"
@@ -349,3 +349,231 @@ def test_staff_order_history_uses_existing_writer_without_private_access_for_rea
     finally:
         with b.roles.owner.begin() as db:
             command.downgrade(config_for(db),"20261120_0013")
+
+
+@pytest.mark.parametrize("revision", ["20261124_0015", "20261124_0016", "20261124_0017", "20261125_0018"])
+def test_payment_verification_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
+    """El escritor consulta e inserta pagos; no modifica evidencia ni puede asignar la fecha del servidor."""
+    b = restricted_backend
+    with b.roles.owner.begin() as db:
+        command.upgrade(config_for(db), revision)
+    execute_script(b.roles.owner, approved(DELTA))
+    try:
+        for engine, filename in ((b.roles.writer, "verify_admin_writer_local.sql"),
+                                 (compatible_database.workers["mitbol_catalog_worker"], "verify_catalog_worker.sql"),
+                                 (compatible_database.workers["mitbol_discount_worker"], "verify_discount_worker.sql")):
+            execute_script(engine, (SQL / filename).read_text(encoding="utf-8"))
+            with engine.connect() as db:
+                assert validate_bridge_schema(db) == revision
+        with b.sessions.begin() as db:
+            db.get(RestaurantOrderSettings, 1).accepting_orders = True
+        created = submit(b.client, {"cart": {"items": [{"product_id": b.product_id,
+            "product_variant_id": b.variant_id, "quantity": 1}]}, "data": {"modality": "dine_in", "name": "Invitado"}})
+        assert created.status_code == 201, created.text
+        receipt = created.json()
+        headers = csrf_headers(login(b, "staff"))
+        base = f'/api/admin/orders/{receipt["order_id"]}'
+        assert b.client.post(base + "/accept", headers=headers, json={}).status_code == 200
+        assert b.client.get(base + "/payment").json()["payment_status"] == "unverified"
+        paid = b.client.post(base + "/payment", headers=headers, json={"amount": receipt["total"], "method": "cash"})
+        assert paid.status_code == 201, paid.text
+        assert b.client.get(base + "/payment").json() == paid.json()
+        assert b.client.post(base + "/prepare", headers=headers, json={}).status_code == 200
+        assert b.client.get(base + "/payment").json() == paid.json()
+        if revision == "20261125_0018":
+            from app.models import LoyaltyVisit
+            assert b.client.post(base + "/serve", headers=headers, json={}).status_code == 200
+            assert b.client.post(base + "/complete", headers=headers, json={}).status_code == 200
+            with b.sessions() as db:
+                assert db.scalars(select(LoyaltyVisit)).all() == []
+        for statement in ('UPDATE "OrderPayments" SET method=\'other\'', 'DELETE FROM "OrderPayments"',
+                          'INSERT INTO "OrderPayments" (verified_at) VALUES (now())'):
+            denied(b.roles.writer, statement)
+        for engine in (b.roles.reader, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."OrderPayments"',
+                    'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."OrderPayments"',
+                    'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+            for statement in ('SELECT * FROM "OrderPayments"',
+                              'INSERT INTO "OrderPayments" DEFAULT VALUES',
+                              'UPDATE "OrderPayments" SET method=\'other\'',
+                              'DELETE FROM "OrderPayments"'):
+                code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
+                denied(engine, statement, code=code)
+    finally:
+        with b.roles.owner.begin() as db:
+            command.downgrade(config_for(db), "20261120_0013")
+
+
+@pytest.mark.parametrize("revision", ["20261124_0016", "20261124_0017", "20261125_0018"])
+def test_loyalty_configuration_uses_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
+    """Admin configura con permisos por columna; no se concede DELETE ni acceso público o de workers."""
+    b = restricted_backend
+    with b.roles.owner.begin() as db:
+        command.upgrade(config_for(db), revision)
+    execute_script(b.roles.owner, approved(DELTA))
+    try:
+        execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
+        discount = add_discount(b.sessions, [b.product_id], kind="FIXED_AMOUNT", value="10")
+        headers = csrf_headers(login(b, "admin"))
+        path = "/api/admin/loyalty/goals"
+        payload = {"required_visits": 5, "level_name": "Nivel sintético", "reward_name": "Recompensa sintética",
+                   "discount_id": discount.discount_id, "valid_days": 30, "conditions": {"scope": "order"}, "is_active": True}
+        response = b.client.post(path, headers=headers, json=payload)
+        assert response.status_code == 201, response.text
+        target = path + "/" + response.json()["goal_id"]
+        edited = b.client.put(target, headers=headers, json=payload | {"version": 1, "required_visits": 7})
+        assert edited.status_code == 200 and edited.json()["version"] == 2, edited.text
+        assert b.client.get(path).json()["total"] == 1
+        disabled = b.client.post(target + "/deactivate", headers=headers, json={"version": 2})
+        assert disabled.status_code == 200 and disabled.json()["is_active"] is False
+        for statement in ('DELETE FROM "LoyaltyGoals"', 'UPDATE "LoyaltyGoals" SET goal_id=goal_id',
+                          'UPDATE "LoyaltyGoals" SET created_at=now()', 'INSERT INTO "LoyaltyGoals" (created_at) VALUES (now())'):
+            denied(b.roles.writer, statement)
+        for engine in (b.roles.reader, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                if engine is not b.roles.reader:
+                    assert validate_bridge_schema(db) == revision
+                assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyGoals"',
+                    'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyGoals"',
+                    'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+            for statement in ('SELECT * FROM "LoyaltyGoals"', 'INSERT INTO "LoyaltyGoals" DEFAULT VALUES',
+                              'UPDATE "LoyaltyGoals" SET is_active=true', 'DELETE FROM "LoyaltyGoals"'):
+                code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
+                denied(engine, statement, code=code)
+    finally:
+        with b.roles.owner.begin() as db:
+            command.downgrade(config_for(db), "20261120_0013")
+
+
+@pytest.mark.parametrize("revision", ["20261124_0017", "20261125_0018"])
+def test_loyalty_identification_uses_writer_without_public_or_worker_access(restricted_backend, compatible_database, revision):
+    """El pool web emite y valida credenciales sin abrirlas a lectores ni workers."""
+    b = restricted_backend
+    with b.roles.owner.begin() as db:
+        command.upgrade(config_for(db), revision)
+    execute_script(b.roles.owner, approved(DELTA))
+    try:
+        execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
+        headers = csrf_headers(login(b, "customer"))
+        issued = b.client.post("/api/auth/loyalty/identification", headers=headers, json={})
+        assert issued.status_code == 201, issued.text
+        replacement = b.client.post("/api/auth/loyalty/identification", headers=headers, json={})
+        assert replacement.status_code == 201 and replacement.json()["qr_payload"] != issued.json()["qr_payload"]
+        headers = csrf_headers(login(b, "staff"))
+        checked = b.client.post("/api/admin/loyalty/identifications/validate", headers=headers,
+                               json={"qr_payload": replacement.json()["qr_payload"]})
+        assert checked.status_code == 200, checked.text
+        from app.services.loyalty_identification_service import consume_identification
+        from app.schemas.loyalty_identification import LoyaltyIdentificationInput
+        with b.service.sessions.begin() as db:
+            consume_identification(db, LoyaltyIdentificationInput(qr_payload=replacement.json()["qr_payload"]),
+                                   actor_account_id=b.ids["staff"][0], clock=lambda: b.now.value)
+        assert b.client.post("/api/admin/loyalty/identifications/validate", headers=headers,
+            json={"qr_payload": replacement.json()["qr_payload"]}).status_code == 409
+        for statement in ('DELETE FROM "LoyaltyIdentifications"',
+                          'UPDATE "LoyaltyIdentifications" SET account_id=account_id',
+                          'INSERT INTO "LoyaltyIdentifications" (consumed_at) VALUES (now())'):
+            denied(b.roles.writer, statement)
+        for engine in (b.roles.writer, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert validate_bridge_schema(db) == revision
+        for engine in (b.roles.reader, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyIdentifications"',
+                    'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyIdentifications"',
+                    'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+            for statement in ('SELECT * FROM "LoyaltyIdentifications"', 'INSERT INTO "LoyaltyIdentifications" DEFAULT VALUES',
+                              'UPDATE "LoyaltyIdentifications" SET consumed_at=now()', 'DELETE FROM "LoyaltyIdentifications"'):
+                code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
+                denied(engine, statement, code=code)
+    finally:
+        with b.roles.owner.begin() as db:
+            command.downgrade(config_for(db), "20261120_0013")
+
+
+@pytest.mark.parametrize("revision", ["20261125_0019"])
+def test_visit_registration_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
+    """El escritor registra QR y visita en conjunto; no puede editar ni borrar la evidencia."""
+    from datetime import datetime, timezone
+    from app.services.visit_calendar_service import visit_day
+    from app.models import LoyaltyGoal, LoyaltyReward
+
+    b = restricted_backend
+    with b.roles.owner.begin() as db:
+        command.upgrade(config_for(db), revision)
+    execute_script(b.roles.owner, approved(DELTA))
+    try:
+        execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
+        discount = add_discount(b.sessions, [], kind="FIXED_AMOUNT", value="10")
+        with b.sessions.begin() as db:
+            db.add(LoyaltyGoal(required_visits=1, level_name="Nivel sintético", reward_name="Beneficio sintético",
+                discount_id=discount.discount_id, valid_days=30, conditions={"scope": "order"}, is_active=True,
+                updated_by_account_id=b.ids["admin"][0]))
+        with b.service.sessions.begin() as db:
+            assert visit_day(db, datetime(2026, 11, 25, 5, tzinfo=timezone.utc)).isoformat() == "2026-11-24"
+        owner_headers = csrf_headers(login(b, "customer"))
+        cookies = dict(b.client.cookies)
+        issued = b.client.post("/api/auth/loyalty/identification", headers=owner_headers, json={})
+        assert issued.status_code == 201, issued.text
+        headers = csrf_headers(login(b, "staff"))
+        response = b.client.post("/api/admin/loyalty/visits", headers=headers, json={"qr_payload": issued.json()["qr_payload"]})
+        assert response.status_code == 201, response.text
+        assert "identification_hash" not in response.text
+        assert response.json()["total_visits"] == 1 and len(response.json()["rewards"]) == 1
+        with b.sessions() as db:
+            assert len(db.scalars(select(LoyaltyReward)).all()) == 1
+            coupon = db.get(CustomerCoupon, response.json()["rewards"][0]["customer_coupon_id"])
+            assert coupon.status == "available" and coupon.account_id == b.ids["customer"][0]
+        assert b.client.post("/api/admin/loyalty/visits", headers=headers,
+            json={"qr_payload": issued.json()["qr_payload"]}).status_code == 409
+        b.client.cookies.clear()
+        b.client.cookies.update(cookies)
+        renewed = b.client.post("/api/auth/loyalty/identification", headers=owner_headers, json={})
+        assert renewed.status_code == 201
+        headers = csrf_headers(login(b, "staff"))
+        assert b.client.post("/api/admin/loyalty/visits", headers=headers,
+            json={"qr_payload": renewed.json()["qr_payload"]}).status_code == 409
+        assert b.client.post("/api/admin/loyalty/identifications/validate", headers=headers,
+            json={"qr_payload": renewed.json()["qr_payload"]}).status_code == 200
+        progress = b.client.get("/api/auth/loyalty/progress")
+        assert progress.status_code == 200 and progress.json()["total_visits"] == 0
+        b.client.cookies.clear()
+        b.client.cookies.update(cookies)
+        progress = b.client.get("/api/auth/loyalty/progress")
+        assert progress.status_code == 200 and progress.json()["total_visits"] == 1, progress.text
+        assert progress.json()["current_level"]["required_visits"] == 1
+        assert progress.json()["pending_goals"] == [] and progress.json()["next_goal"] is None
+        wallet = b.client.get("/api/auth/wallet")
+        assert wallet.status_code == 200, wallet.text
+        assert len(wallet.json()["coupons"]) == 1 and not wallet.json()["can_redeem"]
+        assert wallet.json()["coupons"][0]["source"] == "loyalty_reward"
+        assert wallet.json()["coupons"][0]["display_status"] == "available"
+        assert wallet.json()["coupons"][0]["loyalty_reward"]["total_visits"] == 1
+        for statement in ('UPDATE "LoyaltyVisits" SET visited_on=current_date', 'DELETE FROM "LoyaltyVisits"'):
+            denied(b.roles.writer, statement)
+        for engine in (b.roles.writer, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert validate_bridge_schema(db) == revision
+        if revision == "20261125_0019":
+            for statement in ('UPDATE "LoyaltyRewards" SET total_visits=0', 'DELETE FROM "LoyaltyRewards"',
+                              'UPDATE "CustomerCoupons" SET status=\'redeemed\'', 'DELETE FROM "CustomerCoupons"'):
+                denied(b.roles.writer, statement)
+            for engine in (b.roles.reader, *compatible_database.workers.values()):
+                with engine.connect() as db:
+                    assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyRewards"',
+                        'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyRewards"',
+                        'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+                denied(engine, 'SELECT * FROM "LoyaltyRewards"')
+        for engine in (b.roles.reader, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyVisits"',
+                    'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyVisits"',
+                    'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+            for statement in ('SELECT * FROM "LoyaltyVisits"', 'INSERT INTO "LoyaltyVisits" DEFAULT VALUES',
+                              'UPDATE "LoyaltyVisits" SET visited_on=current_date', 'DELETE FROM "LoyaltyVisits"'):
+                code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
+                denied(engine, statement, code=code)
+    finally:
+        with b.roles.owner.begin() as db:
+            command.downgrade(config_for(db), "20261120_0013")

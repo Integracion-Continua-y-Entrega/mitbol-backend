@@ -4,7 +4,7 @@
 
 MITBOL es un proyecto web para modernizar la atención de un restaurante que utiliza **Loyverse** como punto de venta. Su API permite consultar un menú actualizado desde el celular, con productos, precios, variantes y complementos, sin necesidad de iniciar sesión.
 
-> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. La API permite preparar, registrar y consultar solicitudes y gestionar su atención por modalidad hasta completarla. Pagos, conciliación de ventas y fidelización completa corresponden a etapas posteriores.
+> 📌 **Este repositorio contiene el backend.** La interfaz para clientes y personal se desarrolla por separado con React. La API permite registrar solicitudes, gestionar su atención por modalidad y verificar manualmente su pago. La venta y conciliación en Loyverse y la fidelización completa corresponden a etapas posteriores.
 
 ## ✨ Funcionalidades principales
 
@@ -19,43 +19,56 @@ MITBOL es un proyecto web para modernizar la atención de un restaurante que uti
 - 🎟️ **Cupones personales:** selección y cálculo de beneficios elegibles; no se reservan ni canjean al registrar la solicitud.
 - 📋 **Atención de solicitudes:** seguimiento privado de invitados, cancelación pendiente, aceptación/rechazo, preparación, servido/entrega y finalización por modalidad, con historial de estados.
 - 🧾 **Mis pedidos:** historial paginado y detalle privado de solicitudes asociadas a la cuenta autenticada, con importes históricos y estado actual.
+- **Pago verificado:** confirmación manual del total histórico por personal autorizado, consulta separada del estado operativo y protección contra duplicados.
+- **Configuración de fidelización:** administración de metas y recompensas por Admin, con condiciones verificadas y control de versiones; la generación de beneficios corresponde a HU-045.
+- **Identificación personal:** emisión de QR temporal por sesión y comprobación protegida por el personal, sin registrar visitas automáticamente.
+- **Fidelización por visitas:** registro presencial por personal, concesión de recompensas sin duplicados y consultas privadas de progreso y billetera.
 
 **Validación independiente:** integración del frontend, configuración y funcionamiento de los servicios desplegados y ejecuciones programadas. La implementación de endpoints y sus pruebas de backend no acredita esos entornos.
 
 ## Corte académico y backlog vigente
 
-La planificación vigente es **Por hacer FINAL.pdf**, páginas 1–6. Parte de
-HU-001 a HU-023 ya trabajadas y prioriza las siete historias siguientes. La
-tabla describe el backend disponible; no acredita la integración del frontend
-ni el cierre completo de las historias.
+La planificación vigente es **Por hacer FINAL.pdf**, páginas 1–10. Parte de
+HU-001 a HU-023 ya trabajadas. Por acuerdo de trabajo, el alcance de implementación
+comprende **13 historias**: las siete del flujo de pedidos y las seis de
+fidelización. Se implementaron por bloques, priorizando primero el flujo de pedidos.
+Las tablas describen el backend disponible; no acreditan la integración del
+frontend ni el cierre completo de las historias.
 
 | Historia | Base disponible | Pendiente del backend según el plan final |
 | --- | --- | --- |
-| HU-024 · Consultar solicitudes | Listado protegido, detalle y fechas. | Priorizar solicitudes pendientes y facilitar la identificación de espera prolongada. |
-| HU-025 · Aceptar solicitudes | Aceptación condicional, responsable e historial. | Revalidar disponibilidad, precios y beneficios antes de confirmar, sin cambiar los importes históricos. Alinear `Aceptado` con el nombre contractual `Confirmado`. |
-| HU-026 · Rechazar solicitudes | Rechazo condicional e historial con motivo opcional. | Exigir el motivo conforme al plan final y conservar las garantías de concurrencia. |
-| HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial. | Alinear el estado de origen con el contrato definitivo de HU-025. |
-| HU-028 · Servicio o entrega | Acciones `serve`, `deliver` y `complete`, sin inferir cobros. | Incorporar la dimensión de pago independiente mediante HU-031. |
-| HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual; acceso restringido por propietario. | Mantener compatibilidad con el contrato de estados de HU-025. |
-| HU-031 · Pago verificado | No implementado. | Registro manual de importe, método, fecha y responsable; permisos, prevención de duplicados y consulta separada del estado operativo. |
+| HU-024 · Consultar solicitudes | Backend implementado: listado protegido con prioridad de pendientes, detalle, tiempo de espera y aviso configurable. | Sin pendiente identificado en este bloque de backend. |
+| HU-025 · Aceptar solicitudes | Backend implementado: revalidación local, estado `Confirmado`, responsable e historial transaccional. | Sin pendiente identificado en este bloque de backend; reserva y canje de beneficios quedan fuera de este corte. |
+| HU-026 · Rechazar solicitudes | Backend implementado: rechazo de pendientes con motivo obligatorio, fecha, responsable e historial transaccional. | Sin pendiente identificado en este bloque de backend. |
+| HU-027 · Actualizar preparación | Acciones `prepare` y `ready`, con validación de modalidad e historial; acepta `Confirmado` y `Aceptado` legado. | Sin pendiente identificado en este bloque de backend. |
+| HU-028 · Servicio o entrega | Acciones `serve`, `deliver` y `complete`; el cobro se consulta y confirma por separado mediante HU-031. | Sin pendiente identificado en este bloque de backend. |
+| HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
+| HU-031 · Pago verificado | Backend implementado: confirmación manual protegida del total exacto, evidencia persistente y consulta independiente; duplicados y concurrencia controlados. | Sin pendiente identificado en este bloque de backend. Uso académico con datos sintéticos; ventas y conciliación en Loyverse quedan fuera. |
 
-Orden de continuidad del backend: completar HU-024 y HU-026; resolver la
-revalidación y el contrato de estados de HU-025; comprobar HU-027, HU-028 y
-HU-041 con ese contrato; implementar HU-031. No se considera terminada la
-aceptación solo porque exista `/accept`: actualmente no revalida el catálogo
-ni los beneficios antes de cambiar el estado.
+Las 13 historias de este corte cuentan con implementación de backend.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
 servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
 (HU-038), que permanece conservado en `feature/order-reception-settings` para
-una integración posterior. Este corte no cambia los perfiles SQL ni requiere
-los permisos de recepción añadidos por aquella rama.
+una integración posterior. Este corte conserva los permisos de recepción
+anteriores; HU-031 añade consulta e inserción de pagos y HU-046 añade administración
+de metas por columna al escritor web.
 
-Después del flujo obligatorio, y solo si queda tiempo, el plan propone la
-demostración de fidelización en este orden: HU-046 → HU-042 → HU-043 → HU-045 →
-HU-047 → HU-049. Se limita a configuración, visitas, generación y consulta de
+Las seis historias de fidelización se implementaron después del flujo de pedidos,
+en este orden:
+
+| Historia | Estado del backend |
+| --- | --- |
+| HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
+| HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. HU-043 consume la credencial junto con el registro. |
+| HU-043 · Registrar visita presencial | Backend implementado: registro protegido por personal, consumo transaccional del QR y una visita por cuenta/día local. |
+| HU-045 · Acumular visitas y otorgar recompensas | Backend implementado: total derivado de visitas, metas no recurrentes y emisión de cupones en la misma transacción que la visita. |
+| HU-047 · Consultar progreso de lealtad | Backend implementado: consulta propia de visitas, nivel, siguiente meta y metas alcanzadas pendientes, con una instantánea coherente. |
+| HU-049 · Consultar billetera digital | Backend implementado: consulta propia de cupones y origen de fidelización, estados por vigencia y paginación; conserva la consulta anterior de cupones. |
+
+Este bloque se limita a configuración, visitas, generación y consulta de
 recompensas; no incluye reserva ni canje. Ventas en Loyverse, vinculación,
-conciliación y correcciones de pagos quedan fuera de esta entrega.
+conciliación y correcciones de pagos permanecen fuera del alcance actual.
 
 Los cupones y cobros se demuestran únicamente con datos de prueba. No habilitar
 su uso comercial antes de completar los mecanismos posteriores de reserva,
@@ -119,6 +132,102 @@ Las dependencias se encuentran en [`requirements.txt`](requirements.txt).
 
 La administración de productos y la autenticación se encuentran bajo `/api/admin/` y `/api/auth/`. Consulta la documentación OpenAPI (`/docs`) del entorno correspondiente para ver sus contratos completos. **El QR se genera desde el frontend; el backend proporciona la URL del menú.**
 
+## HU-024: recepción y consulta operativa
+
+`GET /api/admin/orders` y `GET /api/admin/orders/{order_id}` conservan el acceso
+protegido por `orders:read`, disponible para Admin y Staff. El UUID `order_id`
+identifica la solicitud; se devuelven modalidad, fecha, estado, importes y los
+datos necesarios para atenderla. El detalle incluye productos, variantes,
+complementos, cantidades e historial, sin publicar tokens o claves de idempotencia.
+
+El listado coloca primero `Solicitud recibida`. Dentro del grupo pendiente y
+del resto, ordena por fecha ascendente y UUID ascendente como desempate. La
+prioridad se aplica antes de paginar y se mantienen los filtros `status`,
+`limit` y `offset`. Las páginas no congelan la cola entre consultas: nuevos
+pedidos o cambios de estado pueden mover posiciones.
+
+Lista y detalle añaden dos campos informativos:
+
+| Campo | Significado |
+| --- | --- |
+| `pending_wait_seconds` | Segundos enteros desde la creación de una solicitud pendiente, con mínimo cero; `null` para otros estados. |
+| `needs_attention` | `true` cuando la solicitud sigue pendiente y alcanzó el umbral de espera configurado. |
+
+`ORDER_PENDING_WARNING_SECONDS` configura el umbral del aviso, entre 1 y 86400
+segundos. El valor inicial es 600 segundos (10 minutos); puede ajustarse para
+la demostración sin cambiar datos. El reloj del backend calcula la espera y
+usa una misma referencia temporal para todos los elementos de una página.
+
+Consultar repetidamente no atiende, rechaza ni cancela pedidos, aunque lleven
+mucho tiempo pendientes. Al salir de `Solicitud recibida`, el aviso desaparece
+y la espera pendiente se devuelve como `null`; no representa el tiempo total
+de preparación o entrega. Las respuestas mantienen `Cache-Control: no-store`.
+No se requieren migraciones, permisos nuevos, Web Push ni avisos externos.
+
+## HU-025: confirmación con revalidación local
+
+`POST /api/admin/orders/{order_id}/accept` recibe `{}` y requiere Admin o Staff
+con `orders:write`, sesión, Origin autorizado y CSRF. Solo una solicitud en
+`Solicitud recibida` puede pasar a `Confirmado`. Devuelve el detalle administrativo
+y su historial, con `Cache-Control: no-store`.
+
+Antes de confirmar, el backend reconstruye la selección original y comprueba
+disponibilidad local, compatibilidad de complementos, precios y beneficios
+aplicados. Un cupón se valida contra la cuenta propietaria del pedido, su vigencia
+y sus condiciones actuales. No se consulta Loyverse durante esta acción.
+
+Si cambia la selección, un precio o un beneficio aplicado, devuelve 409 y conserva
+la solicitud pendiente con sus importes históricos. No permite forzar la
+aceptación ni recalcular el precio del pedido. Cambiar nombres o metadatos de
+descuentos que nunca se aplicaron no invalida la cotización. El personal puede
+resolver el conflicto y reintentar, o rechazar con motivo. Ante una respuesta
+incierta, consultar el detalle antes de repetir.
+
+La operación bloquea la fila del pedido y mantiene el bloqueo transaccional de
+catálogo compartido con sincronización y disponibilidad hasta guardar estado e
+historial. Si el catálogo está ocupado devuelve 409 para reintentar. Decisiones
+concurrentes no sobrescriben un estado ya atendido. Un fallo al guardar el
+historial revierte la confirmación.
+
+Las nuevas confirmaciones usan `Confirmado`; los registros y eventos antiguos
+con `Aceptado` se conservan y también permiten iniciar preparación. No se
+requieren migraciones ni permisos nuevos. Confirmar no reserva ni canjea cupones,
+no asegura exclusividad de un beneficio y no registra pagos o ventas.
+
+## HU-026: rechazo con motivo obligatorio
+
+`POST /api/admin/orders/{order_id}/reject` requiere Admin o Staff con
+`orders:write`, sesión, Origin autorizado y CSRF. El cuerpo es:
+
+```json
+{"reason":"No contamos con disponibilidad para atender la solicitud"}
+```
+
+El motivo es obligatorio, tiene de 1 a 500 caracteres después de recortar los
+espacios exteriores y no admite controles internos. Se rechazan con 422 los
+motivos ausentes, nulos, vacíos, de otro tipo o demasiado largos, y los campos
+administrativos adicionales. La misma validación se aplica en el servicio para
+evitar rechazos sin motivo en llamadas internas. Clientes que antes enviaban
+`{}` o `{"reason":null}` deben actualizar su solicitud.
+
+Solo `Solicitud recibida` puede pasar a `Rechazado`. Pedidos ya aceptados,
+cancelados, rechazados o en atención devuelven 409; un UUID inexistente con
+cuerpo válido devuelve 404. La comprobación de estado forma parte del UPDATE:
+una aceptación, cancelación o segundo rechazo concurrente no puede sobrescribir
+una decisión ya confirmada.
+
+Motivo normalizado, fecha y responsable se guardan en el historial dentro de la
+misma transacción que el estado. Si falla el historial, se revierte el rechazo.
+Ante una respuesta perdida o incierta, consultar el detalle antes de repetir.
+No se cambian productos, importes históricos ni beneficios. La respuesta contiene
+el detalle administrativo y `Cache-Control: no-store`. El personal puede leer
+el motivo en el historial; el seguimiento de invitados y el historial personal
+conservan el estado `Rechazado` sin publicar notas internas ni identidades del
+empleado.
+
+No se requieren migraciones ni permisos nuevos. Los eventos antiguos con motivo
+nulo se conservan; no se inventan motivos ni se modifican registros históricos.
+
 ## Historial personal de pedidos
 
 El seguimiento desde la cuenta implementa el alcance del Prompt Maestro v2.1,
@@ -156,12 +265,12 @@ el pedido permanece en el historial con su información original.
 ## Preparación de pedidos
 
 Este bloque aplica los estados de preparación del Prompt Maestro v2.1, sección
-6.4, manteniendo `Aceptado` como nombre del estado confirmado que ya utiliza la
-API. No renombra registros históricos ni cambia el contrato de aceptación.
+6.4 y el contrato de HU-025: las nuevas aceptaciones usan `Confirmado` y se
+conserva compatibilidad con `Aceptado` sin renombrar registros históricos.
 
 | Método | Ruta | Transición permitida |
 | --- | --- | --- |
-| `POST` | `/api/admin/orders/{order_id}/prepare` | `Aceptado` → `En preparación`, en ambas modalidades. |
+| `POST` | `/api/admin/orders/{order_id}/prepare` | `Confirmado` (o `Aceptado` legado) → `En preparación`, en ambas modalidades. |
 | `POST` | `/api/admin/orders/{order_id}/ready` | `En preparación` → `Listo para recoger`, únicamente para `pickup`. |
 
 Ambas acciones reciben JSON vacío `{}` y requieren sesión de Admin o Staff con
@@ -215,6 +324,428 @@ El seguimiento privado y el historial personal muestran el estado actual, inclus
 después de completar. Se puede atender un pedido ya aceptado con la recepción
 cerrada. Servir, entregar o completar no verifica pagos, registra ventas, genera
 visitas ni reserva o canjea beneficios; esos acontecimientos permanecen separados.
+
+## HU-031: confirmación manual de pago verificado
+
+La migración aditiva `20261124_0015` incorpora `OrderPayments`, separada del
+estado operativo. Guarda un identificador, pedido, importe decimal positivo y
+finito, método (`cash`, `card`, `transfer`, `other`), fecha del servidor y cuenta
+responsable. Una restricción única impide dos confirmaciones para el mismo pedido.
+Las referencias protegidas impiden borrar el pedido o la cuenta mientras exista
+su registro de pago. Cambiar el estado de atención no modifica ese registro.
+
+| Método | Ruta | Resultado |
+| --- | --- | --- |
+| `GET` | `/api/admin/orders/{order_id}/payment` | Consulta `total`, `currency`, `payment_status` y `payment`; no registra cobros. |
+| `POST` | `/api/admin/orders/{order_id}/payment` | Confirma manualmente el pago completo; devuelve 201 con la evidencia guardada. |
+
+Ambas rutas requieren sesión de Admin o Staff activo con los permisos específicos
+`payments:read` y `payments:write`, respectivamente. El POST exige Origin autorizado
+y CSRF. El cuerpo recibe únicamente importe y método:
+
+```json
+{"amount":"170.00","method":"cash"}
+```
+
+El importe se envía como cadena decimal positiva, sin exponentes ni redondeo.
+Debe coincidir exactamente con el total histórico, incluidos sus descuentos;
+no se recalcula con precios actuales. Se rechazan números JSON, booleanos,
+importes no finitos y campos administrativos con 422. El método puede ser
+`cash`, `card`, `transfer` u `other`; todos representan comprobaciones manuales.
+La fecha la genera PostgreSQL y el responsable se toma de la sesión autenticada.
+
+Solo se cobra desde `Confirmado` (o `Aceptado` legado), preparación, listo para
+recoger, servido, entregado o completado. Una solicitud aún no confirmada,
+cancelada o rechazada devuelve 409. Un importe distinto del total, un pedido de
+total cero o una segunda confirmación también devuelven 409. No se admiten pagos
+parciales, sobrepagos ni correcciones en este bloque. Un pedido inexistente da
+404; sin migración 0015 o ante un fallo de base de datos, 503.
+
+La consulta devuelve `payment_status: unverified` y `payment: null` mientras no
+exista confirmación; `verified` incluye `payment_id`, `amount`, `method`,
+`verified_at` y `verified_by_account_id`. Para un total cero sin pago devuelve
+`not_required`, que no acredita un cobro. El seguimiento público y el historial
+personal mantienen sus contratos actuales sin exponer la identidad del empleado.
+Las respuestas de las rutas de pagos incluyen `Cache-Control: no-store`.
+
+Confirmar bloquea el pedido hasta el commit y revalida su estado después de
+esperar. Intentos simultáneos generan una única evidencia; un fallo del commit
+no responde con éxito. Ante una respuesta incierta, consultar el GET antes de
+repetir. Confirmar el cobro no cambia estados ni crea eventos de preparación,
+visitas, ventas o canjes; servir, entregar o completar tampoco crea un pago.
+
+La migración no genera cobros históricos ni concede privilegios. Tras aplicar
+0015, un operador debe actualizar las ACL con los scripts revisados de
+`docs/database`: `update_admin_writer_accounts_orders.sql` para un escritor
+existente o el perfil de preparación para uno nuevo. El escritor tiene SELECT e
+INSERT por columna sobre pagos, sin UPDATE, DELETE ni inserción de `verified_at`.
+Lectores públicos y workers continúan sin acceso. No hay otra migración para
+este bloque del endpoint; estos scripts no se ejecutan automáticamente.
+
+El registro se demostrará con datos sintéticos y no sustituye una venta o recibo
+de Loyverse; HU-032, HU-033 y HU-035 siguen pendientes.
+
+## HU-046: configuración de metas de fidelización
+
+La configuración usa `LoyaltyGoals`, incorporada mediante la migración aditiva
+`20261124_0016`. Cada meta guarda su identificador estable, visitas requeridas,
+nombre de nivel y recompensa, descripción opcional, descuento de referencia,
+días de vigencia del futuro cupón y condiciones compatibles con `CouponConditions`.
+Incluye activación explícita, versión y fecha y cuenta de la última modificación.
+
+Las visitas requeridas son enteros positivos y no se repiten entre metas, para
+evitar dos niveles en el mismo umbral. Los nombres deben ser visibles y las
+condiciones declarar un alcance coherente; para productos se requiere indicar
+sus identificadores y el tratamiento de complementos. Los días de vigencia
+deben estar entre 1 y 32767, rango positivo del tipo de almacenamiento. Los
+importes mínimos de las condiciones conservan su precisión decimal.
+
+No se insertan reglas predeterminadas ni valores reales del restaurante. Una
+meta nueva queda inactiva por defecto. Configurar una meta no registra visitas,
+no reinicia progreso ni genera, reserva o canjea cupones. La identidad de la meta
+permite asociar las recompensas de cada cliente en HU-045.
+
+La administración exige sesión de Admin activo con `loyalty:read` o
+`loyalty:write`; Staff, clientes e invitados no acceden a estas rutas. Las
+escrituras requieren Origin autorizado y CSRF. El módulo está disponible con
+autenticación habilitada, independientemente de `auth_catalog_enabled`.
+
+| Método | Ruta | Resultado |
+| --- | --- | --- |
+| `GET` | `/api/admin/loyalty/goals` | Lista paginada con `items`, `total`, `limit` y `offset`, ordenada por visitas requeridas. |
+| `GET` | `/api/admin/loyalty/goals/{goal_id}` | Configuración y versión actual de una meta. |
+| `POST` | `/api/admin/loyalty/goals` | Crea una meta y devuelve 201. |
+| `PUT` | `/api/admin/loyalty/goals/{goal_id}` | Reemplaza la configuración completa indicando la versión revisada. |
+| `POST` | `/api/admin/loyalty/goals/{goal_id}/deactivate` | Desactiva con `{"version":2}`, aunque su descuento haya dejado de estar disponible. |
+
+El listado admite `is_active=true/false`, `limit` entre 1 y 100 (25 por defecto)
+y `offset` desde cero. Todas las respuestas administrativas usan
+`Cache-Control: no-store`. No se ofrece borrado de metas.
+
+Ejemplo de cuerpo de creación; `discount_id` debe corresponder a un descuento
+existente y utilizable. Estos valores ilustran el contrato y no se cargan
+automáticamente como reglas del restaurante:
+
+```json
+{
+  "required_visits":5,
+  "level_name":"Nivel de ejemplo",
+  "reward_name":"Recompensa de ejemplo",
+  "discount_id":1,
+  "valid_days":30,
+  "conditions":{"scope":"order","include_complements":true,"compatible_discount_ids":[]},
+  "is_active":true
+}
+```
+
+El PUT recibe esos mismos campos más `version`. Conserva el identificador y la
+fecha de creación, incrementa la versión y registra fecha del servidor y cuenta
+responsable de la edición. El identificador, las fechas y el responsable no se
+aceptan del navegador. Si la versión cambió, devuelve 409 sin sobrescribir datos;
+consultar de nuevo antes de editar. Desactivar una meta ya inactiva con su versión
+actual devuelve la configuración sin incrementar la versión.
+
+Crear o editar comprueba los descuentos referidos: deben existir, estar activos
+y tener un importe positivo finito de tipo calculable; los porcentajes no superan
+100. Los descuentos por puntos, sin valor o de tipo desconocido no se utilizan
+como recompensa. No se copian valores monetarios ni se modifica el `scope`
+importado de Loyverse. Los descuentos compatibles adicionales también se validan;
+no se admiten referencias repetidas ni compatibilidad consigo mismo.
+
+Para alcance por productos se comprueba que existan y estén activos. Estar
+temporalmente agotado no impide configurar un beneficio futuro. La activación
+de una meta no reserva existencias ni congela descuentos: HU-045 vuelve a
+comprobar las referencias comerciales vigentes antes de emitir el cupón.
+
+Las escrituras mantienen el bloqueo compartido con sincronización y disponibilidad
+hasta el commit. Editar y desactivar bloquean además la fila y revalidan su versión.
+Un umbral repetido, versión obsoleta, catálogo ocupado o beneficio no utilizable
+devuelve 409; referencias inexistentes, 404; entrada inválida, 422; falta de
+migración 0016 o fallos de base de datos, 503. Un fallo de transacción revierte
+los cambios y no devuelve éxito.
+
+No hay otra migración para estos endpoints. Tras 0016, un operador debe aplicar
+los scripts SQL revisados de `docs/database` para preparar o actualizar el
+escritor web. Tiene SELECT, INSERT y UPDATE por columna sobre metas, sin DELETE
+ni cambios de `goal_id` o `created_at`. Lectores públicos y workers siguen sin
+acceso. No se ejecutan estos scripts automáticamente ni se modifican pedidos,
+pagos o cupones al configurar metas. HU-043 y HU-045 registran visitas y generan
+recompensas; HU-047 consulta el progreso y HU-049 consulta la billetera.
+
+## HU-042: identificación personal QR
+
+La migración aditiva `20261124_0017` incorpora `LoyaltyIdentifications`, una fila
+temporal por cuenta. Guarda un hash único, cuenta y sesión emisoras, versión de
+autenticación, fechas de creación y expiración y campos de consumo ligados al
+responsable. No guarda el código en claro. Su estructura impide consumo sin
+responsable o fuera de la vigencia almacenada. La fila actual no sustituye al
+historial de visitas que corresponde a HU-043.
+
+Este bloque elige la variante QR de HU-042. El material se genera con 256 bits
+aleatorios y formato `mitbol:loyalty:v1:<valor opaco>`, separado de las cookies
+de sesión. No contiene nombre, teléfono, correo ni identificador de cuenta;
+tampoco es una URL, el QR público del menú ni un PIN numérico. El contrato
+prepara `qr_payload`, `issued_at`, `expires_at`, `identification_type: qr` y
+`purpose: visit_identification` para que el frontend represente el QR.
+
+El validador de formato comprueba la codificación canónica; por sí solo no
+acredita que el código se haya emitido ni identifica a una persona. El valor se
+oculta en repr y en los mensajes de validación del modelo. El hash usa el
+contenido con su prefijo para mantener un espacio distinto al de las sesiones.
+
+| Método | Ruta | Resultado |
+| --- | --- | --- |
+| `POST` | `/api/auth/loyalty/identification` | Emite o renueva el QR de la cuenta autenticada; recibe `{}` y devuelve 201. |
+| `POST` | `/api/admin/loyalty/identifications/validate` | Admin o Staff comprueba `{"qr_payload":"mitbol:loyalty:v1:…"}`; no consume el código ni registra una visita. |
+
+Ambas rutas exigen sesión, Origin autorizado y CSRF; no reciben códigos por URL.
+La emisión usa siempre la cuenta y sesión autenticadas: el cliente no puede
+elegir identidad, token, fechas o versión de seguridad. Admin y Staff también
+pueden emitir su identificación personal. La validación exige `visits:validate`,
+concedido solo a Admin y Staff activos; este permiso no permite administrar metas.
+
+El QR dura como máximo cinco minutos, limitado además por la expiración absoluta
+y por inactividad de la sesión emisora. Renovar sustituye el código actual de
+esa cuenta, incluso si se emitió desde otro navegador, e invalida el anterior.
+No se recupera un código desde su hash: si se pierde la respuesta, solicitar uno
+nuevo. Cerrar o rotar la sesión emisora, cambiar su versión de autenticación o
+desactivar la cuenta también impide validar su QR anterior.
+
+Comprobar devuelve `valid: true`, `account_id`, `name` y `expires_at` únicamente
+al personal autorizado. No devuelve correo, teléfono, sesión, hash ni el código
+presentado. Revisa cuenta activa, empleado activo cuando corresponda, asociación
+entre cuenta y sesión, vigencia del QR y de la sesión, revocación, versión y estado
+de consumo. Un código desconocido, vencido, sustituido o consumido produce el mismo
+409 genérico. Entrada inválida da 422 sin reflejar el código; falta de migración
+0017 o fallos de base de datos dan 503. Se mantienen `Cache-Control: no-store` y
+`Referrer-Policy: no-referrer` en respuestas satisfactorias; no colocar el QR en
+URLs o logs.
+
+La comprobación es informativa y puede repetirse: no acredita por sí sola una
+visita, no consume el QR ni reserva su validez para una operación posterior. El
+servicio interno `consume_identification` bloquea la credencial, revalida sus
+condiciones y permite un único consumo. No hace commit ni tiene un endpoint
+aislado. HU-043 lo invoca dentro de la misma transacción que inserta la
+visita, de forma que cualquier fallo revierta también el consumo. Dos consumos
+simultáneos no pueden usar el mismo código; al esperar un bloqueo se vuelve a
+comprobar el reloj. No se bloquean cuentas ajenas durante esa comprobación.
+
+No se registra presencia, progreso ni recompensa en HU-042. Tampoco se crea un
+PIN numérico ni se exige tener un pedido. El frontend representa `qr_payload`
+como QR y lo mantiene solo durante su vigencia; la integración visual queda a
+cargo del frontend.
+
+No hay otra migración para estos endpoints. Tras 0017, un operador debe actualizar
+las ACL con los scripts revisados de `docs/database`: el escritor web puede leer,
+insertar y renovar o consumir por columna, sin DELETE ni cambios de `account_id`.
+Lectores públicos y workers continúan sin acceso. La migración no crea códigos
+ni se ejecutan esos scripts automáticamente. Las pruebas usan exclusivamente
+cuentas y sesiones sintéticas en bases desechables.
+
+## HU-045: metas no recurrentes y evidencia de concesión
+
+El primer bloque incorpora `eligible_goals`, una evaluación sin escrituras ni
+endpoints adicionales. Recibe el total de visitas, las metas configuradas y las
+identidades de metas ya concedidas. Selecciona todas las metas activas cuyo
+umbral se alcanzó, ordenadas por visitas, sin reiniciar el total acumulado.
+
+Una meta ya concedida no vuelve a ser elegible por editar su versión o su umbral.
+Una meta activada después de alcanzar su umbral puede evaluarse en la siguiente
+visita válida. La evaluación no genera beneficios retroactivamente al editar
+configuración, ni admite dos versiones de la misma meta en una evaluación.
+
+La migración aditiva `20261125_0019` incorpora `LoyaltyRewards`: vincula cuenta,
+meta, visita y cupón y guarda la versión, el umbral, el total acumulado, el instante
+y una copia de la configuración al concederla. Una restricción impide repetir
+la combinación cuenta/meta; otra impide compartir un cupón entre concesiones.
+Las referencias no pueden borrarse mientras exista la evidencia. Editar la meta
+no modifica la copia guardada y su nueva versión no elimina la unicidad.
+
+Esta migración crea una tabla vacía: no concede recompensas retroactivamente ni
+modifica visitas o cupones existentes. Registrar una nueva visita exige 0019;
+si falta, devuelve 503 sin consumir el QR ni registrar progreso parcial.
+
+`POST /api/admin/loyalty/visits` mantiene su entrada exclusiva `qr_payload` y añade
+`total_visits` y `rewards` al comprobante 201. El total cuenta las visitas durables
+de la cuenta, incluida la recién insertada; no se reinicia al conceder beneficios.
+Cada recompensa nueva incluye `reward_id`, `goal_id`, `customer_coupon_id`, `name`
+y `expires_at`. Sin metas elegibles, `rewards` es una lista vacía.
+
+Antes de emitir se verifican otra vez descuentos, productos y condiciones bajo
+el bloqueo compartido con sincronización y edición de metas. El cupón conserva
+nombre, descripción y condiciones de la meta, pertenece a la cuenta de la visita
+y nace `available`, con vigencia desde el instante de registro hasta ese instante
+más `valid_days` días de 24 horas. La evidencia conserva además la configuración
+completa y su versión. El importe del descuento sigue perteneciendo al catálogo
+comercial; no se promete que sea inmutable durante toda la vigencia del cupón.
+
+Una referencia comercial no utilizable en una meta alcanzada produce 409 y exige
+corregir o desactivar la meta antes de reintentar. Catálogo ocupado también produce
+409. Cualquier fallo de emisión, inserción o commit revierte consumo del QR,
+visita, cupón y concesión. La exclusión por cuenta y las restricciones únicas
+impiden duplicados incluso con solicitudes simultáneas. La operación se confirma
+antes de responder; no se ocultan fallos guardando solo parte de los cambios.
+
+Tras 0019 deben actualizarse las ACL con los scripts revisados de `docs/database`.
+El escritor web recibe SELECT e INSERT por columna sobre concesiones e INSERT
+por columna sobre cupones, más USAGE de su secuencia. No recibe UPDATE ni DELETE
+sobre esas entidades. Lectores públicos y workers no tienen acceso a concesiones.
+Las pruebas usan PostgreSQL temporal; no se aplicaron migraciones ni ACL a una
+base real. La consulta propia de cupones existente permite ver los emitidos;
+HU-047 consulta el progreso y HU-049 consulta la billetera. No se implementan reservas
+ni canjes en esta historia.
+
+## HU-047: cálculo de progreso personal
+
+`GET /api/auth/loyalty/progress` obtiene la identidad de la sesión vigente,
+también para Admin y Staff: esos roles consultan aquí únicamente su propio
+progreso. No admite parámetros de consulta ni identificadores en la ruta; enviar
+`account_id` u otro parámetro devuelve 422. No exige permisos administrativos ni
+CSRF para este GET. El navegador debe enviar la cookie de sesión y usar un origen
+autorizado, conforme a la política de autenticación del entorno.
+
+El servicio `loyalty_progress_service.get_progress` consulta en una misma instantánea SQL
+el total de visitas de esa cuenta, las metas activas y sus concesiones. No
+mantiene un contador separado ni modifica visitas, metas o cupones al consultar.
+
+Su contrato contiene `total_visits`, `current_level`, `next_goal` y `pending_goals`.
+El nivel corresponde al umbral más alto alcanzado entre las metas activas de la
+configuración actual. Antes del primer umbral o sin metas activas es `null`; no
+se inventa un nivel inicial. Cambiar o desactivar metas puede cambiar el nivel
+mostrado, pero conserva las visitas y las concesiones históricas.
+
+`next_goal` es la primera meta activa aún no alcanzada ni concedida, con las
+visitas faltantes, nombre del beneficio, descripción, vigencia y condiciones.
+Vale `null` cuando no existe otra meta de ese tipo. Una meta concedida no vuelve
+a proponerse por editar su versión o aumentar su umbral.
+
+`pending_goals` distingue metas activas alcanzadas sin concesión, por ejemplo
+tras activar una meta con un umbral ya superado. Tienen cero visitas faltantes,
+pero todavía no representan cupones disponibles: HU-045 las evalúa al registrar
+la siguiente visita válida y vuelve a comprobar las referencias comerciales.
+La consulta no emite beneficios ni garantiza disponibilidad futura del descuento.
+
+La respuesta usa `Cache-Control: no-store` y `Referrer-Policy: no-referrer`; no
+incluye cuentas ajenas, responsables administrativos ni datos de QR o sesiones.
+Cuenta o sesión inválida produce 401 y un origen rechazado, 403. El endpoint
+funciona aunque la administración del catálogo esté desactivada y no se registra
+cuando `AUTH_ENABLED=false`. Conserva CORS privado con credenciales.
+
+Este bloque requiere 0019, sin añadir migraciones ni permisos SQL. Configuración
+almacenada inválida, tablas faltantes o fallos de lectura producen 503 en lugar
+de presentar un progreso ficticio de cero visitas. Se confirma la transacción
+de autenticación antes de responder: un fallo de commit también impide el 200.
+La actividad de sesión puede actualizarse, pero consultar no altera visitas,
+metas, concesiones ni cupones. Las pruebas usan cuentas sintéticas y el perfil
+SQL restringido en PostgreSQL temporal; no se modificó una base real.
+
+## HU-049: billetera digital
+
+`GET /api/auth/wallet` obtiene la cuenta de la sesión vigente, también para
+Admin y Staff: esos roles consultan aquí únicamente su propia billetera.
+Admite `limit` entre 1 y 100 (25 por omisión) y `offset` desde 0 (0 por omisión).
+Parámetros inválidos o desconocidos, incluido `account_id`, producen 422. Es un
+GET sin exigencia de CSRF; el navegador debe enviar la cookie de sesión desde
+un origen autorizado según la política del entorno.
+
+`wallet_service.get_wallet` consulta los cupones de esa cuenta junto con su
+evidencia de fidelización cuando existe; tanto cupones como concesiones se
+filtran por propietario. No se
+consultan metas actuales para reconstruir el beneficio: el cupón conserva su
+nombre, descripción y condiciones de emisión, y el origen conserva identificador,
+versión y umbral de la meta, total acumulado e instante de concesión.
+
+El contrato conserva los campos de `CouponRead` y añade `source` (`coupon` o
+`loyalty_reward`), `loyalty_reward` con esa evidencia mínima o `null`, y
+`display_status`. `status` sigue siendo el valor guardado; `display_status`
+describe el estado que corresponde mostrar al consultar:
+
+| Estado mostrado | Significado |
+| --- | --- |
+| `available` · Disponible | Estado guardado disponible y dentro de su vigencia. |
+| `reserved` · Reservado | Reserva guardada que todavía no ha vencido. |
+| `redeemed` · Canjeado | Canje histórico guardado, incluso si la vigencia ya terminó. |
+| `expired` · Expirado | Estado expirado o fecha final alcanzada, salvo un canje histórico. |
+| `scheduled` · Próximamente | Disponible en almacenamiento, pero su vigencia aún no comienza. |
+
+`available` conserva su significado temporal: no garantiza que se cumplan las
+condiciones del pedido ni que el descuento comercial siga utilizable. Los
+importes proceden del catálogo local vigente; su validación sigue correspondiendo
+a la selección y al envío. Condiciones desconocidas se muestran como pendientes,
+sin interpretarlas como uso libre. La vigencia incluye el instante inicial y
+excluye el final; consultar no escribe expiraciones en la base.
+
+La respuesta contiene `coupons`, `limit`, `offset`, `has_more` y `can_redeem:false`.
+Ordena por identificador de cupón descendente y obtiene un elemento adicional
+para informar si hay otra página. No promete una instantánea entre páginas si
+se emiten nuevos cupones. No ejecuta reservas ni canjes, ni crea beneficios al
+consultar; esas operaciones siguen fuera del alcance académico.
+
+La ruta usa `Cache-Control: no-store`, `Referrer-Policy: no-referrer` y CORS privado
+con credenciales. Una sesión inválida produce 401; un origen rechazado, 403. Se
+mantiene disponible sin administración del catálogo y no se registra cuando
+`AUTH_ENABLED=false`. Un fallo de lectura o de commit de autenticación impide
+la respuesta 200 y devuelve 503 sin detalles SQL ni datos parciales.
+
+Requiere 0019 y las ACL preparadas para HU-045, sin nuevas migraciones ni permisos
+SQL en este bloque. Si falta el esquema, responde 503 en lugar de una billetera
+ficticia vacía. La consulta existente `GET /api/auth/coupons` y su selección
+conservan su contrato y su orden. Las pruebas verifican el recorrido visita,
+concesión, progreso y billetera con datos sintéticos en PostgreSQL temporal y el
+usuario SQL restringido; no se modificó una base real.
+
+## HU-043: registro de visitas presenciales
+
+El primer bloque incorpora `LoyaltyVisits` mediante la migración aditiva
+`20261125_0018`. Cada registro guarda cuenta, fecha local, instante con zona
+horaria, zona del restaurante, responsable y hash de la identificación utilizada.
+El comprobante administrativo conserva esos datos salvo el hash; no publica el QR.
+
+La restricción única de cuenta y fecha impide dos visitas válidas el mismo día,
+incluso usando códigos diferentes. Otra restricción impide asociar el mismo QR
+a una segunda visita. La fecha debe coincidir con la conversión del instante a
+la zona almacenada. El calendario se calcula en PostgreSQL, con nombres de su
+registro de zonas y sin depender de la zona de la conexión o del sistema operativo.
+El helper `visit_day` admite una zona explícita y usa `America/Mexico_City` por
+omisión. Una zona desconocida o una fecha sin zona se trata como error de
+configuración, no como una fecha aportada por el cliente.
+
+Se usa día natural, no una ventana móvil de 24 horas: al cruzar la medianoche
+local cambia el día elegible. La evidencia permanece aunque se renueve el QR o
+se elimine su sesión; no tiene una FK hacia la credencial temporal. Las referencias
+a cliente y responsable impiden borrar esas cuentas mientras exista la visita.
+
+`POST /api/admin/loyalty/visits` recibe únicamente `{"qr_payload": "..."}`.
+Admin o Staff con `visits:register`, sesión vigente, Origin y CSRF confirman
+la presencia física mediante esta acción explícita. Cuenta, responsable e instante
+se obtienen en el servidor; no se admiten fechas, identidades ni excepciones
+aportadas por el cliente. La respuesta 201 contiene el comprobante sin hash ni QR,
+más el total acumulado y las recompensas nuevas descritas en HU-045.
+
+El consumo del QR y la inserción se confirman en una misma transacción. Un QR
+inválido o consumido y una segunda visita del mismo día producen 409. Ante un
+conflicto diario, un QR nuevo queda sin consumir. Entradas incorrectas producen
+422 sin reflejar el código; errores de persistencia, configuración o falta de
+migración producen 503 y revierten ambos cambios. Reintentar una petición no
+duplica visitas; no se ofrece recuperación del comprobante mediante GET.
+
+`RESTAURANT_TIMEZONE` configura el calendario y debe coincidir en todas las
+instancias del restaurante; su valor predeterminado es `America/Mexico_City`.
+La zona se verifica contra PostgreSQL y queda guardada en cada visita. Se usa
+el instante exacto del consumo, después de esperar cualquier bloqueo del QR.
+Emisión y consumo coordinan cuentas mediante bloqueos transaccionales consultivos
+sin espera: una operación concurrente incompatible recibe 409 y puede reintentarse.
+Esto evita interbloqueos entre renovación, autenticación y registros cruzados.
+
+Pagar, completar pedidos o comprobar un QR no registra visitas automáticamente.
+La acumulación y emisión de recompensas corresponden a HU-045.
+
+La migración crea una tabla vacía y conserva pedidos, pagos, metas y credenciales.
+Tras 0018 deben actualizarse las ACL con los scripts de `docs/database`: el
+escritor web recibe SELECT e INSERT por columna en visitas, sin UPDATE ni DELETE.
+Lectores públicos y workers no tienen acceso. Este bloque no añade otra migración.
+Las pruebas usan evidencia sintética
+en PostgreSQL desechable; no se aplicó la migración a una base real.
 
 ## 🚀 Inicio rápido (Windows)
 

@@ -1,12 +1,16 @@
 """Consulta y decisión del personal; conserva precios y datos históricos."""
 
-from sqlalchemy import func, select
+from datetime import datetime, timezone
+
+from pydantic import ValidationError
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.auth_errors import AuthError
 from app.models import Order, OrderDetail, OrderStatusHistory
-from app.schemas.orders import OrderStateRead, StaffOrderDetail, StaffOrderListItem, StaffOrderListResponse
-from app.services import order_state_service, order_tracking_service
+from app.models.order import CONFIRMED_STATUS, INITIAL_STATUS, LEGACY_CONFIRMED_STATUS
+from app.schemas.orders import OrderRejectionInput, OrderStateRead, StaffOrderDetail, StaffOrderListItem, StaffOrderListResponse
+from app.services import order_acceptance_service, order_state_service, order_tracking_service
 
 
 def _require_history(db):
@@ -21,18 +25,33 @@ def _data(order):
     return data
 
 
-def list_orders(db, *, status=None, limit=25, offset=0):
+def _attention(order, now, pending_warning_seconds):
+    """Calcula espera solo para solicitudes pendientes, sin persistir ni cambiar su estado."""
+    if order.status != INITIAL_STATUS:
+        return {"pending_wait_seconds": None, "needs_attention": False}
+    seconds = max(0, int((now - order.created_at).total_seconds()))
+    return {"pending_wait_seconds": seconds, "needs_attention": seconds >= pending_warning_seconds}
+
+
+def list_orders(db, *, status=None, limit=25, offset=0, now=None, pending_warning_seconds=600):
+    """Prioriza pendientes antes de paginar; cada grupo conserva primero las solicitudes más antiguas."""
     _require_history(db)
+    now = now or datetime.now(timezone.utc)
     filters = [Order.status == status] if status is not None else []
     total = db.scalar(select(func.count(Order.order_id)).where(*filters))
-    rows = db.scalars(select(Order).where(*filters).order_by(Order.created_at,Order.order_id).limit(limit).offset(offset))
+    priority = case((Order.status == INITIAL_STATUS, 0), else_=1)
+    rows = db.scalars(select(Order).where(*filters).order_by(priority, Order.created_at, Order.order_id)
+                      .limit(limit).offset(offset))
     return StaffOrderListResponse(total=total,limit=limit,offset=offset,items=[StaffOrderListItem(
         order_id=row.order_id,status=row.status,created_at=row.created_at,data=_data(row),
-        subtotal=row.subtotal,discount_total=row.discount_total,total=row.total) for row in rows])
+        subtotal=row.subtotal,discount_total=row.discount_total,total=row.total,
+        **_attention(row, now, pending_warning_seconds)) for row in rows])
 
 
-def order_detail(db, order_id):
+def order_detail(db, order_id, *, now=None, pending_warning_seconds=600):
+    """Devuelve precios e historial originales junto a la espera actual de una solicitud pendiente."""
     _require_history(db)
+    now = now or datetime.now(timezone.utc)
     row = db.scalar(select(Order).where(Order.order_id == order_id).options(
         selectinload(Order.details).selectinload(OrderDetail.complements)))
     if row is None:
@@ -41,14 +60,29 @@ def order_detail(db, order_id):
                          .order_by(OrderStatusHistory.created_at,OrderStatusHistory.status_history_id))
     return StaffOrderDetail(**order_tracking_service.historical_summary(row).model_dump(),order_id=row.order_id,
         status=row.status,created_at=row.created_at,data=_data(row),
-        history=[OrderStateRead.model_validate(event,from_attributes=True) for event in history])
+        history=[OrderStateRead.model_validate(event,from_attributes=True) for event in history],
+        **_attention(row, now, pending_warning_seconds))
 
 
-def decide_order(db, order_id, *, accepted, actor_account_id, reason=None):
+def decide_order(db, order_id, *, accepted, actor_account_id, reason=None, clock=None):
+    """Bloquea el pedido vigente; aceptar revalida la cotización y rechazar exige motivo."""
+    if not accepted:
+        try:
+            reason = OrderRejectionInput(reason=reason).reason
+        except ValidationError:
+            raise AuthError(422, "El rechazo requiere un motivo válido de 1 a 500 caracteres.") from None
     _require_history(db)
-    if db.scalar(select(Order.order_id).where(Order.order_id == order_id)) is None:
+    query = select(Order).where(Order.order_id == order_id).with_for_update().execution_options(populate_existing=True)
+    if accepted:
+        query = query.options(selectinload(Order.details).selectinload(OrderDetail.complements))
+    row = db.scalar(query)
+    if row is None:
         raise AuthError(404,"Pedido no encontrado.")
-    identifier = order_state_service.transition_pending(db,order_id,"Aceptado" if accepted else "Rechazado",
+    if row.status != INITIAL_STATUS:
+        raise AuthError(409, "El pedido ya no está pendiente de aceptación.")
+    if accepted:
+        order_acceptance_service.validate_acceptance(db, row, clock=clock)
+    identifier = order_state_service.transition_pending(db,order_id,CONFIRMED_STATUS if accepted else "Rechazado",
         actor_account_id=actor_account_id,reason=reason,required=True)
     if identifier is None:
         raise AuthError(409,"El pedido ya no está pendiente de aceptación.")
@@ -68,8 +102,14 @@ def _advance_order(db, order_id, *, previous_status, status, actor_account_id, m
 
 
 def start_preparation(db, order_id, *, actor_account_id):
-    """Inicia ambos tipos de pedido desde Aceptado, nombre vigente del estado confirmado."""
-    return _advance_order(db, order_id, previous_status="Aceptado", status="En preparación",
+    """Inicia desde Confirmado o Aceptado legado sin renombrar los eventos históricos."""
+    _require_history(db)
+    previous = db.scalar(select(Order.status).where(Order.order_id == order_id))
+    if previous is None:
+        raise AuthError(404, "Pedido no encontrado.")
+    if previous not in {CONFIRMED_STATUS, LEGACY_CONFIRMED_STATUS}:
+        raise AuthError(409, "El pedido no está confirmado para iniciar preparación.")
+    return _advance_order(db, order_id, previous_status=previous, status="En preparación",
                           actor_account_id=actor_account_id)
 
 

@@ -67,7 +67,7 @@ def test_preparation_and_pickup_readiness_preserve_history_and_prices(backend, r
         assert row.status == expected and row.total == Decimal(receipt["total"])
         history = db.scalars(select(OrderStatusHistory).where(OrderStatusHistory.order_id == row.order_id)
                              .order_by(OrderStatusHistory.created_at)).all()
-        states = ["Solicitud recibida", "Aceptado", "En preparación"]
+        states = ["Solicitud recibida", "Confirmado", "En preparación"]
         if modality == "pickup":
             states.append("Listo para recoger")
         assert [state.status for state in history] == states
@@ -137,7 +137,7 @@ def test_history_failure_rolls_back_the_transition(backend, action):
     receipt, headers = accepted_order(b)
     if action == "ready":
         assert advance(b, receipt, headers).status_code == 200
-    previous = "Aceptado" if action == "prepare" else "En preparación"
+    previous = "Confirmado" if action == "prepare" else "En preparación"
     engine = b.service.sessions.kw["bind"]
     def fail(conn, cursor, statement, parameters, context, many):
         """Falla después del UPDATE para comprobar su rollback junto con el historial."""

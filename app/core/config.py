@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.db.connection import CloudDatabaseTarget, environment_mode, local_database_url, postgresql_url
 from app.core.account_identity import normalize_email
+from app.core.visit_calendar import DEFAULT_RESTAURANT_TIMEZONE, valid_timezone_name
 
 
 class Settings(BaseSettings):
@@ -35,6 +36,10 @@ class Settings(BaseSettings):
     auth_catalog_enabled: bool = False
     auth_images_enabled: bool = False
     auth_sync_enabled: bool = False
+    order_pending_warning_seconds: int = Field(default=600, ge=1, le=86_400,
+        description="Umbral informativo de espera de solicitudes; no cancela ni modifica pedidos.")
+    restaurant_timezone: str = Field(default=DEFAULT_RESTAURANT_TIMEZONE,
+        description="Zona del día de visitas; usar el mismo nombre registrado en PostgreSQL en todas las instancias.")
     auth_database_url: str | None = Field(default=None, repr=False)
     auth_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     auth_cookie_secure: bool = True
@@ -104,6 +109,13 @@ class Settings(BaseSettings):
             return None
         if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", value):
             raise ValueError("AUTH_SMTP_HOST requiere un hostname sin URL, credenciales ni espacios.")
+        return value
+
+    @field_validator("restaurant_timezone")
+    @classmethod
+    def explicit_restaurant_timezone(cls, value):
+        if not valid_timezone_name(value):
+            raise ValueError("RESTAURANT_TIMEZONE requiere un nombre de zona sin espacios ni offsets fijos.")
         return value
 
     @field_validator("auth_smtp_from", "auth_brevo_from_email")

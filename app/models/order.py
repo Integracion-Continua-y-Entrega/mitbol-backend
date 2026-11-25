@@ -19,6 +19,8 @@ from app.models.product_modifier import ProductModifier
 
 
 INITIAL_STATUS = "Solicitud recibida"
+CONFIRMED_STATUS = "Confirmado"
+LEGACY_CONFIRMED_STATUS = "Aceptado"
 
 
 class OrderBase(DeclarativeBase):

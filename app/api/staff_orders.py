@@ -7,38 +7,67 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.api.auth_dependencies import require_permission
 from app.schemas.orders import OrderAcceptanceInput, OrderFulfillmentInput, OrderPreparationInput, OrderRejectionInput, StaffOrderDetail, StaffOrderListResponse
-from app.services import staff_order_service
+from app.schemas.order_payments import OrderPaymentInput, OrderPaymentResponse
+from app.services import order_payment_service, staff_order_service
 from app.services.auth_service import Principal
 
 
 router = APIRouter(prefix="/api/admin/orders",tags=["Gestión de solicitudes"])
 Reader = Annotated[Principal,Depends(require_permission("orders:read"))]
 Writer = Annotated[Principal,Depends(require_permission("orders:write"))]
+PaymentReader = Annotated[Principal, Depends(require_permission("payments:read"))]
+PaymentWriter = Annotated[Principal, Depends(require_permission("payments:write"))]
+
+
+@router.get("/{order_id}/payment", response_model=OrderPaymentResponse, summary="Consultar verificación de pago")
+def get_payment(order_id: UUID, request: Request, response: Response, user: PaymentReader):
+    """Consulta protegida del cobro, independiente del estado de preparación o entrega."""
+    response.headers["Cache-Control"] = "no-store"
+    return order_payment_service.get_payment(request.state.auth_context.db, order_id)
+
+
+@router.post("/{order_id}/payment", response_model=OrderPaymentResponse, status_code=201,
+             summary="Registrar un pago verificado manualmente")
+def confirm_payment(order_id: UUID, payload: OrderPaymentInput, request: Request, response: Response, user: PaymentWriter):
+    """Exige importe total exacto, sesión de personal, Origin y CSRF; no registra una venta en Loyverse."""
+    response.headers["Cache-Control"] = "no-store"
+    return order_payment_service.confirm_payment(request.state.auth_context.db, order_id, payload,
+                                                 actor_account_id=user.account_id)
 
 
 @router.get("",response_model=StaffOrderListResponse,summary="Consultar solicitudes del restaurante")
 def list_orders(request: Request, response: Response, user: Reader,
                 status: Annotated[str | None,Query(min_length=1,max_length=50)] = None,
                 limit: Annotated[int,Query(ge=1,le=100)] = 25, offset: Annotated[int,Query(ge=0)] = 0):
+    """Pendientes primero, de mayor a menor espera; filtros y paginación conservan ese orden."""
     response.headers["Cache-Control"] = "no-store"
-    return staff_order_service.list_orders(request.state.auth_context.db,status=status,limit=limit,offset=offset)
+    return staff_order_service.list_orders(request.state.auth_context.db,status=status,limit=limit,offset=offset,
+        now=request.app.state.auth_service.now(),
+        pending_warning_seconds=request.app.state.settings.order_pending_warning_seconds)
 
 
 @router.get("/{order_id}",response_model=StaffOrderDetail,summary="Consultar pedido e historial de estados")
 def order_detail(order_id: UUID, request: Request, response: Response, user: Reader):
+    """Incluye aviso de espera informativo; consultar no atiende ni cancela la solicitud."""
     response.headers["Cache-Control"] = "no-store"
-    return staff_order_service.order_detail(request.state.auth_context.db,order_id)
+    return staff_order_service.order_detail(request.state.auth_context.db,order_id,
+        now=request.app.state.auth_service.now(),
+        pending_warning_seconds=request.app.state.settings.order_pending_warning_seconds)
 
 
 @router.post("/{order_id}/accept",response_model=StaffOrderDetail,summary="Aceptar una solicitud pendiente")
 def accept_order(order_id: UUID, payload: OrderAcceptanceInput, request: Request, response: Response, user: Writer):
+    """Confirma solo si disponibilidad, precios y beneficios coinciden con el pedido histórico; recibe {}."""
     response.headers["Cache-Control"] = "no-store"
-    return staff_order_service.decide_order(request.state.auth_context.db,order_id,accepted=True,actor_account_id=user.account_id)
+    return staff_order_service.decide_order(request.state.auth_context.db,order_id,accepted=True,
+        actor_account_id=user.account_id, clock=request.app.state.auth_service.now)
 
 
 @router.post("/{order_id}/reject",response_model=StaffOrderDetail,summary="Rechazar una solicitud pendiente",
-             description="Motivo opcional de hasta 500 caracteres. No altera los productos ni importes históricos.")
+             description="Motivo obligatorio de 1 a 500 caracteres, sin espacios exteriores ni controles internos. "
+                         "No altera los productos ni importes históricos.")
 def reject_order(order_id: UUID, payload: OrderRejectionInput, request: Request, response: Response, user: Writer):
+    """Guarda motivo, fecha y responsable junto al rechazo; no permite rechazar pedidos ya confirmados."""
     response.headers["Cache-Control"] = "no-store"
     return staff_order_service.decide_order(request.state.auth_context.db,order_id,accepted=False,
                                            actor_account_id=user.account_id,reason=payload.reason)

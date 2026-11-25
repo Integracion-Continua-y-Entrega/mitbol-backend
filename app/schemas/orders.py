@@ -70,12 +70,13 @@ class OrderFulfillmentInput(OrderCancellationInput):
 
 
 class OrderRejectionInput(OrderCancellationInput):
-    reason: Annotated[str,StringConstraints(strip_whitespace=True,min_length=1,max_length=500)] | None = None
+    """Exige un motivo legible y lo normaliza sin aceptar campos administrativos."""
+    reason: Annotated[str,StringConstraints(strip_whitespace=True,min_length=1,max_length=500)]
 
     @field_validator("reason")
     @classmethod
     def visible_reason(cls, value):
-        if value is not None and not value.isprintable():
+        if not value.isprintable():
             raise ValueError("El motivo debe contener texto visible.")
         return value
 
@@ -97,6 +98,9 @@ class StaffOrderListItem(BaseModel):
     subtotal: MenuAmount
     discount_total: MenuAmount
     total: MenuAmount
+    pending_wait_seconds: int | None = Field(default=None, ge=0,
+        description="Segundos de espera actuales; null cuando la solicitud ya fue atendida.")
+    needs_attention: bool = Field(default=False, description="Solicitud pendiente que alcanzó el umbral de aviso.")
 
 
 class StaffOrderListResponse(BaseModel):
@@ -112,3 +116,6 @@ class StaffOrderDetail(OrderSummaryResponse):
     created_at: datetime
     data: OrderModalityInput
     history: list[OrderStateRead]
+    pending_wait_seconds: int | None = Field(default=None, ge=0,
+        description="Segundos de espera actuales; null cuando la solicitud ya fue atendida.")
+    needs_attention: bool = Field(default=False, description="Solicitud pendiente que alcanzó el umbral de aviso.")
