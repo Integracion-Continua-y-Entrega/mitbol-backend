@@ -222,7 +222,7 @@ def test_identity_relationships_and_database_uniqueness(db, encoded_password):
     assert employee.person_id == account.person_id
     assert account.person.employee is employee and account.person.account is account
     assert permissions_for_roles([link.role.code for link in employee.role_assignments], employee_active=employee.is_active) == {
-        "catalog:read", "availability:write", "orders:read", "orders:write", "payments:read", "payments:write", "visits:validate",
+        "catalog:read", "availability:write", "orders:read", "orders:write", "payments:read", "payments:write", "visits:validate", "visits:register",
     }
     other = Person(name="Otra persona sintética", phone="0000000001")
     db.add(other)

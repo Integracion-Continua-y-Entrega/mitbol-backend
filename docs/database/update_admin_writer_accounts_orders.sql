@@ -119,6 +119,11 @@ BEGIN
               UPDATE (token_hash,session_id,auth_version,created_at,expires_at,consumed_at,consumed_by_account_id)
             ON public."LoyaltyIdentifications" TO mitbol_admin_writer;
     END IF;
+    IF revision = '20261125_0018' THEN
+        GRANT SELECT (visit_id,account_id,visited_on,registered_at,restaurant_timezone,registered_by_account_id,identification_hash),
+              INSERT (visit_id,account_id,visited_on,registered_at,restaurant_timezone,registered_by_account_id,identification_hash)
+            ON public."LoyaltyVisits" TO mitbol_admin_writer;
+    END IF;
 END
 $recent$;
 COMMIT;

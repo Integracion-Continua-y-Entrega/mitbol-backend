@@ -44,8 +44,8 @@ frontend ni el cierre completo de las historias.
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
 | HU-031 · Pago verificado | Backend implementado: confirmación manual protegida del total exacto, evidencia persistente y consulta independiente; duplicados y concurrencia controlados. | Sin pendiente identificado en este bloque de backend. Uso académico con datos sintéticos; ventas y conciliación en Loyverse quedan fuera. |
 
-Orden de continuidad del backend: implementar HU-043, registro de visitas,
-y después generar recompensas y consultar progreso y billetera.
+Orden de continuidad del backend: implementar HU-045, acumulación y recompensas,
+y después consultar progreso y billetera.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
 servicio/entrega. Excluye el bloque de pausa y reactivación de recepción
@@ -61,7 +61,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | --- | --- |
 | HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
 | HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. Consumo único interno preparado para HU-043. |
-| HU-043 · Registrar visita presencial | Persistencia implementada en 0018: evidencia durable, unicidad por cuenta/día y por QR, calendario local. Pendiente endpoint protegido y consumo transaccional del QR. |
+| HU-043 · Registrar visita presencial | Backend implementado: registro protegido por personal, consumo transaccional del QR y una visita por cuenta/día local. |
 | HU-045 · Acumular visitas y otorgar recompensas | Pendiente. |
 | HU-047 · Consultar progreso de lealtad | Pendiente. |
 | HU-049 · Consultar billetera digital | Existe consulta de cupones; falta integrar las recompensas de fidelización y la presentación de estados de billetera. |
@@ -525,7 +525,7 @@ La comprobación es informativa y puede repetirse: no acredita por sí sola una
 visita, no consume el QR ni reserva su validez para una operación posterior. El
 servicio interno `consume_identification` bloquea la credencial, revalida sus
 condiciones y permite un único consumo. No hace commit ni tiene un endpoint
-aislado. HU-043 deberá invocarlo dentro de la misma transacción que inserte la
+aislado. HU-043 lo invoca dentro de la misma transacción que inserta la
 visita, de forma que cualquier fallo revierta también el consumo. Dos consumos
 simultáneos no pueden usar el mismo código; al esperar un bloqueo se vuelve a
 comprobar el reloj. No se bloquean cuentas ajenas durante esa comprobación.
@@ -542,7 +542,7 @@ Lectores públicos y workers continúan sin acceso. La migración no crea códig
 ni se ejecutan esos scripts automáticamente. Las pruebas usan exclusivamente
 cuentas y sesiones sintéticas en bases desechables.
 
-## HU-043: persistencia de visitas presenciales
+## HU-043: registro de visitas presenciales
 
 El primer bloque incorpora `LoyaltyVisits` mediante la migración aditiva
 `20261125_0018`. Cada registro guarda cuenta, fecha local, instante con zona
@@ -563,15 +563,35 @@ local cambia el día elegible. La evidencia permanece aunque se renueve el QR o
 se elimine su sesión; no tiene una FK hacia la credencial temporal. Las referencias
 a cliente y responsable impiden borrar esas cuentas mientras exista la visita.
 
-HU-043 sigue en desarrollo. No hay aún endpoint de registro ni se consumen códigos
-o generan visitas automáticamente al pagar, completar pedidos o validar un QR.
-El siguiente bloque unirá consumo y registro en la misma transacción, obtendrá
-fecha, zona e identidad desde el servidor y protegerá la acción por permisos del
-personal. La acumulación y emisión de recompensas corresponden a HU-045.
+`POST /api/admin/loyalty/visits` recibe únicamente `{"qr_payload": "..."}`.
+Admin o Staff con `visits:register`, sesión vigente, Origin y CSRF confirman
+la presencia física mediante esta acción explícita. Cuenta, responsable e instante
+se obtienen en el servidor; no se admiten fechas, identidades ni excepciones
+aportadas por el cliente. La respuesta 201 contiene el comprobante sin hash ni QR.
+
+El consumo del QR y la inserción se confirman en una misma transacción. Un QR
+inválido o consumido y una segunda visita del mismo día producen 409. Ante un
+conflicto diario, un QR nuevo queda sin consumir. Entradas incorrectas producen
+422 sin reflejar el código; errores de persistencia, configuración o falta de
+migración producen 503 y revierten ambos cambios. Reintentar una petición no
+duplica visitas; no se ofrece recuperación del comprobante mediante GET.
+
+`RESTAURANT_TIMEZONE` configura el calendario y debe coincidir en todas las
+instancias del restaurante; su valor predeterminado es `America/Mexico_City`.
+La zona se verifica contra PostgreSQL y queda guardada en cada visita. Se usa
+el instante exacto del consumo, después de esperar cualquier bloqueo del QR.
+Emisión y consumo coordinan cuentas mediante bloqueos transaccionales consultivos
+sin espera: una operación concurrente incompatible recibe 409 y puede reintentarse.
+Esto evita interbloqueos entre renovación, autenticación y registros cruzados.
+
+Pagar, completar pedidos o comprobar un QR no registra visitas automáticamente.
+La acumulación y emisión de recompensas corresponden a HU-045.
 
 La migración crea una tabla vacía y conserva pedidos, pagos, metas y credenciales.
-Los perfiles SQL admiten 0018 sin conceder acceso a visitas al escritor web,
-lectores públicos o workers en este bloque. Las pruebas usan evidencia sintética
+Tras 0018 deben actualizarse las ACL con los scripts de `docs/database`: el
+escritor web recibe SELECT e INSERT por columna en visitas, sin UPDATE ni DELETE.
+Lectores públicos y workers no tienen acceso. Este bloque no añade otra migración.
+Las pruebas usan evidencia sintética
 en PostgreSQL desechable; no se aplicó la migración a una base real.
 
 ## 🚀 Inicio rápido (Windows)

@@ -55,6 +55,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
         from app.api.customer_orders import router as customer_order_router
         from app.api.loyalty_configuration import router as loyalty_configuration_router
         from app.api.loyalty_identification import router as loyalty_identification_router
+        from app.api.loyalty_visits import router as loyalty_visits_router
         from app.core.auth_errors import AuthError
         from app.core.auth_http import AuthRequestGuard, auth_error_response
         from app.db.auth_database import auth_session_factory_for
@@ -69,6 +70,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
         application.include_router(staff_order_router)
         application.include_router(loyalty_configuration_router)
         application.include_router(loyalty_identification_router)
+        application.include_router(loyalty_visits_router)
         application.include_router(customer_order_router)
         application.add_middleware(AuthRequestGuard, config=config)
         # CORS exterior resuelve preflight sin credenciales y decora también errores.
@@ -80,7 +82,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
 
         @application.exception_handler(RequestValidationError)
         async def auth_validation(request, error):
-            if request.url.path.startswith("/api/admin/loyalty/identifications/"):
+            if request.url.path.startswith("/api/admin/loyalty/identifications/") or request.url.path == "/api/admin/loyalty/visits":
                 return JSONResponse({"detail": "Identificación de fidelización inválida."}, status_code=422,
                                     headers={"Cache-Control": "no-store"})
             if request.url.path.startswith(("/api/auth/", "/api/admin/sync/")):

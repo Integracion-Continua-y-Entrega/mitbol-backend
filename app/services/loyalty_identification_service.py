@@ -4,7 +4,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 from pydantic import ValidationError
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,19 @@ from app.schemas.loyalty_identification import LoyaltyIdentificationInput, Loyal
 
 
 IDENTIFICATION_LIFETIME = timedelta(minutes=5)
+IDENTIFICATION_LOCK_NAMESPACE = 0x4D49564C
+
+
+def _lock_accounts(db, *account_ids):
+    """Coordina emisor y personal sin esperar mientras autenticación mantiene sus filas bloqueadas.
+
+    Los INSERT de visitas toman bloqueos de FK sobre cuentas. Un intento que
+    encuentre otra operación libera su transacción en vez de formar un ciclo
+    entre esas FK, la sesión autenticada y la fila del QR.
+    """
+    for account_id in sorted(set(account_ids)):
+        if not db.scalar(select(func.pg_try_advisory_xact_lock(IDENTIFICATION_LOCK_NAMESPACE, account_id))):
+            raise AuthError(409, "Hay otra operación de identificación en curso; reintenta.", code="LOYALTY_IDENTIFICATION_BUSY")
 
 
 def _require_schema(db):
@@ -40,6 +53,7 @@ def issue_identification(context, *, clock) -> LoyaltyIdentificationRead:
     """Usa la cuenta y sesión bloqueadas por autenticación; renovar reemplaza la credencial actual."""
     db = context.db
     _require_schema(db)
+    _lock_accounts(db, context.account.account_id)
     db.scalar(select(LoyaltyIdentification.account_id).where(LoyaltyIdentification.account_id == context.account.account_id)
               .with_for_update())
     now = utc_datetime(clock())
@@ -99,13 +113,18 @@ def validate_identification(db: Session, payload: LoyaltyIdentificationInput, *,
 
 
 def consume_identification(db: Session, payload: LoyaltyIdentificationInput, *, actor_account_id: int, clock) -> LoyaltyIdentificationValidation:
-    """Reserva el uso único dentro de la transacción que HU-043 deberá compartir con el registro de visita.
+    """Reserva el uso único dentro de la transacción compartida con el registro de visita de HU-043.
 
-    Bloquea solo la credencial del cliente, sin tomar bloqueos de su cuenta o
-    sesión. El llamador decide commit o rollback; no hay endpoint de consumo aislado.
+    Coordina las cuentas con bloqueos asesores y bloquea la fila de la credencial,
+    sin bloquear filas de cuentas o sesiones ajenas. El llamador decide commit
+    o rollback; no hay endpoint de consumo aislado.
     """
     digest = _digest(payload)
     _require_schema(db)
+    account_id = db.scalar(select(LoyaltyIdentification.account_id).where(LoyaltyIdentification.token_hash == digest))
+    if account_id is None:
+        raise _invalid()
+    _lock_accounts(db, actor_account_id, account_id)
     identifier = db.scalar(select(LoyaltyIdentification.account_id).where(LoyaltyIdentification.token_hash == digest).with_for_update())
     if identifier is None:
         raise _invalid()

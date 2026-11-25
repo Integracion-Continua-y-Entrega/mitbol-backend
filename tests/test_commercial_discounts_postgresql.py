@@ -380,6 +380,12 @@ def test_payment_verification_uses_append_only_writer_without_reader_or_worker_a
         assert b.client.get(base + "/payment").json() == paid.json()
         assert b.client.post(base + "/prepare", headers=headers, json={}).status_code == 200
         assert b.client.get(base + "/payment").json() == paid.json()
+        if revision == "20261125_0018":
+            from app.models import LoyaltyVisit
+            assert b.client.post(base + "/serve", headers=headers, json={}).status_code == 200
+            assert b.client.post(base + "/complete", headers=headers, json={}).status_code == 200
+            with b.sessions() as db:
+                assert db.scalars(select(LoyaltyVisit)).all() == []
         for statement in ('UPDATE "OrderPayments" SET method=\'other\'', 'DELETE FROM "OrderPayments"',
                           'INSERT INTO "OrderPayments" (verified_at) VALUES (now())'):
             denied(b.roles.writer, statement)
@@ -486,8 +492,8 @@ def test_loyalty_identification_uses_writer_without_public_or_worker_access(rest
             command.downgrade(config_for(db), "20261120_0013")
 
 
-def test_visit_storage_revision_preserves_existing_profiles_without_visit_access(restricted_backend, compatible_database):
-    """La tabla de evidencia no recibe permisos hasta incorporar la ruta de registro protegido."""
+def test_visit_registration_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database):
+    """El escritor registra QR y visita en conjunto; no puede editar ni borrar la evidencia."""
     from datetime import datetime, timezone
     from app.services.visit_calendar_service import visit_day
 
@@ -499,10 +505,31 @@ def test_visit_storage_revision_preserves_existing_profiles_without_visit_access
         execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
         with b.service.sessions.begin() as db:
             assert visit_day(db, datetime(2026, 11, 25, 5, tzinfo=timezone.utc)).isoformat() == "2026-11-24"
+        owner_headers = csrf_headers(login(b, "customer"))
+        cookies = dict(b.client.cookies)
+        issued = b.client.post("/api/auth/loyalty/identification", headers=owner_headers, json={})
+        assert issued.status_code == 201, issued.text
+        headers = csrf_headers(login(b, "staff"))
+        response = b.client.post("/api/admin/loyalty/visits", headers=headers, json={"qr_payload": issued.json()["qr_payload"]})
+        assert response.status_code == 201, response.text
+        assert "identification_hash" not in response.text
+        assert b.client.post("/api/admin/loyalty/visits", headers=headers,
+            json={"qr_payload": issued.json()["qr_payload"]}).status_code == 409
+        b.client.cookies.clear()
+        b.client.cookies.update(cookies)
+        renewed = b.client.post("/api/auth/loyalty/identification", headers=owner_headers, json={})
+        assert renewed.status_code == 201
+        headers = csrf_headers(login(b, "staff"))
+        assert b.client.post("/api/admin/loyalty/visits", headers=headers,
+            json={"qr_payload": renewed.json()["qr_payload"]}).status_code == 409
+        assert b.client.post("/api/admin/loyalty/identifications/validate", headers=headers,
+            json={"qr_payload": renewed.json()["qr_payload"]}).status_code == 200
+        for statement in ('UPDATE "LoyaltyVisits" SET visited_on=current_date', 'DELETE FROM "LoyaltyVisits"'):
+            denied(b.roles.writer, statement)
         for engine in (b.roles.writer, *compatible_database.workers.values()):
             with engine.connect() as db:
                 assert validate_bridge_schema(db) == "20261125_0018"
-        for engine in (b.roles.reader, b.roles.writer, *compatible_database.workers.values()):
+        for engine in (b.roles.reader, *compatible_database.workers.values()):
             with engine.connect() as db:
                 assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyVisits"',
                     'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyVisits"',
