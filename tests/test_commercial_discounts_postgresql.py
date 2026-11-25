@@ -351,7 +351,7 @@ def test_staff_order_history_uses_existing_writer_without_private_access_for_rea
             command.downgrade(config_for(db),"20261120_0013")
 
 
-@pytest.mark.parametrize("revision", ["20261124_0015", "20261124_0016"])
+@pytest.mark.parametrize("revision", ["20261124_0015", "20261124_0016", "20261124_0017"])
 def test_payment_verification_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
     """El escritor consulta e inserta pagos; no modifica evidencia ni puede asignar la fecha del servidor."""
     b = restricted_backend
@@ -399,11 +399,12 @@ def test_payment_verification_uses_append_only_writer_without_reader_or_worker_a
             command.downgrade(config_for(db), "20261120_0013")
 
 
-def test_loyalty_configuration_uses_writer_without_reader_or_worker_access(restricted_backend, compatible_database):
+@pytest.mark.parametrize("revision", ["20261124_0016", "20261124_0017"])
+def test_loyalty_configuration_uses_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
     """Admin configura con permisos por columna; no se concede DELETE ni acceso público o de workers."""
     b = restricted_backend
     with b.roles.owner.begin() as db:
-        command.upgrade(config_for(db), "20261124_0016")
+        command.upgrade(config_for(db), revision)
     execute_script(b.roles.owner, approved(DELTA))
     try:
         execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
@@ -426,12 +427,36 @@ def test_loyalty_configuration_uses_writer_without_reader_or_worker_access(restr
         for engine in (b.roles.reader, *compatible_database.workers.values()):
             with engine.connect() as db:
                 if engine is not b.roles.reader:
-                    assert validate_bridge_schema(db) == "20261124_0016"
+                    assert validate_bridge_schema(db) == revision
                 assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyGoals"',
                     'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyGoals"',
                     'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
             for statement in ('SELECT * FROM "LoyaltyGoals"', 'INSERT INTO "LoyaltyGoals" DEFAULT VALUES',
                               'UPDATE "LoyaltyGoals" SET is_active=true', 'DELETE FROM "LoyaltyGoals"'):
+                code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
+                denied(engine, statement, code=code)
+    finally:
+        with b.roles.owner.begin() as db:
+            command.downgrade(config_for(db), "20261120_0013")
+
+
+def test_loyalty_identification_storage_is_private_for_existing_profiles(restricted_backend, compatible_database):
+    """La fila de credenciales no recibe grants hasta implementar su flujo autenticado."""
+    b = restricted_backend
+    with b.roles.owner.begin() as db:
+        command.upgrade(config_for(db), "20261124_0017")
+    execute_script(b.roles.owner, approved(DELTA))
+    try:
+        for engine in (b.roles.writer, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert validate_bridge_schema(db) == "20261124_0017"
+        for engine in (b.roles.reader, b.roles.writer, *compatible_database.workers.values()):
+            with engine.connect() as db:
+                assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyIdentifications"',
+                    'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyIdentifications"',
+                    'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+            for statement in ('SELECT * FROM "LoyaltyIdentifications"', 'INSERT INTO "LoyaltyIdentifications" DEFAULT VALUES',
+                              'UPDATE "LoyaltyIdentifications" SET consumed_at=now()', 'DELETE FROM "LoyaltyIdentifications"'):
                 code = "25006" if engine is b.roles.reader and not statement.startswith("SELECT") else "42501"
                 denied(engine, statement, code=code)
     finally:

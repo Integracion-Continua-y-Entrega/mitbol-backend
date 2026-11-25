@@ -14,7 +14,9 @@ COMMERCIAL_DISCOUNTS_REVISION = "20261120_0013"
 ORDER_MANAGEMENT_REVISION = "20261121_0014"
 ORDER_PAYMENTS_REVISION = "20261124_0015"
 LOYALTY_REVISION = "20261124_0016"
-LATEST_REVISIONS = {COMMERCIAL_DISCOUNTS_REVISION, ORDER_MANAGEMENT_REVISION, ORDER_PAYMENTS_REVISION, LOYALTY_REVISION}
+LOYALTY_IDENTIFICATION_REVISION = "20261124_0017"
+LATEST_REVISIONS = {COMMERCIAL_DISCOUNTS_REVISION, ORDER_MANAGEMENT_REVISION, ORDER_PAYMENTS_REVISION, LOYALTY_REVISION,
+                    LOYALTY_IDENTIFICATION_REVISION}
 CATEGORY_REVISIONS = CATEGORY_REVISIONS | LATEST_REVISIONS
 BRIDGE_REVISIONS = frozenset({"20261114_0007", *CATEGORY_REVISIONS})
 
@@ -41,6 +43,7 @@ def validate_bridge_schema(connection):
     from app.models.order_status_history import OrderStateBase
     from app.models.order_payment import OrderPaymentBase
     from app.models.loyalty_goal import LoyaltyBase
+    from app.models.loyalty_identification import LoyaltyIdentificationBase
 
     tables = [table for metadata in (pre_categories_metadata, AuthBase.metadata, SyncBase.metadata)
               for table in metadata.tables.values()]
@@ -51,7 +54,7 @@ def validate_bridge_schema(connection):
         cursor.execute("SELECT version_num FROM public.alembic_version")
         heads = cursor.fetchall()
         if len(heads) != 1 or heads[0][0] not in BRIDGE_REVISIONS:
-            raise DatabaseTargetError("El backend requiere exactamente una revisión aprobada: 20261114_0007, 20261115_0008, 20261119_0009–0012, 20261120_0013, 20261121_0014 o 20261124_0015–0016.")
+            raise DatabaseTargetError("El backend requiere exactamente una revisión aprobada: 20261114_0007, 20261115_0008, 20261119_0009–0012, 20261120_0013, 20261121_0014 o 20261124_0015–0017.")
         revision = heads[0][0]
         if revision in RECENT_REVISIONS or revision in LATEST_REVISIONS:
             tables.extend(OrderBase.metadata.tables.values())
@@ -61,12 +64,14 @@ def validate_bridge_schema(connection):
             tables.extend(CouponBase.metadata.tables.values())
         if revision in LATEST_REVISIONS:
             tables.extend(CommercialDiscountBase.metadata.tables.values())
-        if revision in {ORDER_MANAGEMENT_REVISION, ORDER_PAYMENTS_REVISION, LOYALTY_REVISION}:
+        if revision in {ORDER_MANAGEMENT_REVISION, ORDER_PAYMENTS_REVISION, LOYALTY_REVISION, LOYALTY_IDENTIFICATION_REVISION}:
             tables.extend(OrderStateBase.metadata.tables.values())
-        if revision in {ORDER_PAYMENTS_REVISION, LOYALTY_REVISION}:
+        if revision in {ORDER_PAYMENTS_REVISION, LOYALTY_REVISION, LOYALTY_IDENTIFICATION_REVISION}:
             tables.extend(OrderPaymentBase.metadata.tables.values())
-        if revision == LOYALTY_REVISION:
+        if revision in {LOYALTY_REVISION, LOYALTY_IDENTIFICATION_REVISION}:
             tables.extend(LoyaltyBase.metadata.tables.values())
+        if revision == LOYALTY_IDENTIFICATION_REVISION:
+            tables.extend(LoyaltyIdentificationBase.metadata.tables.values())
         expected = {(table.name, col.name): (_type(str(col.type.compile(dialect=postgresql.dialect()))), not col.nullable)
                     for table in tables for col in table.columns}
         if revision == RECENT_REVISIONS[0]:

@@ -43,7 +43,7 @@ frontend ni el cierre completo de las historias.
 | HU-041 · Estados desde mi cuenta | Listado propio, detalle histórico y estado actual, incluido `Confirmado`; acceso restringido por propietario. | Sin pendiente identificado en este bloque de backend. |
 | HU-031 · Pago verificado | Backend implementado: confirmación manual protegida del total exacto, evidencia persistente y consulta independiente; duplicados y concurrencia controlados. | Sin pendiente identificado en este bloque de backend. Uso académico con datos sintéticos; ventas y conciliación en Loyverse quedan fuera. |
 
-Orden de continuidad del backend: continuar con HU-042, identificación QR/PIN,
+Orden de continuidad del backend: completar emisión y validación de HU-042,
 y después registrar visitas, generar recompensas y consultar progreso y billetera.
 
 La rama académica reutiliza los bloques de historial personal, preparación y
@@ -59,7 +59,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | Historia | Estado del backend |
 | --- | --- |
 | HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
-| HU-042 · Identificación QR/PIN | Pendiente. |
+| HU-042 · Identificación QR/PIN | Formato QR opaco y persistencia privada implementados en 0017. Pendientes endpoints de emisión, validación y control de reutilización. |
 | HU-043 · Registrar visita presencial | Pendiente. |
 | HU-045 · Acumular visitas y otorgar recompensas | Pendiente. |
 | HU-047 · Consultar progreso de lealtad | Pendiente. |
@@ -470,6 +470,39 @@ ni cambios de `goal_id` o `created_at`. Lectores públicos y workers siguen sin
 acceso. No se ejecutan estos scripts automáticamente ni se modifican pedidos,
 pagos o cupones al configurar metas. El registro de visitas y la generación y
 consulta de recompensas siguen pendientes en las historias siguientes.
+
+## HU-042: base de identificación personal QR
+
+La migración aditiva `20261124_0017` incorpora `LoyaltyIdentifications`, una fila
+temporal por cuenta. Guarda un hash único, cuenta y sesión emisoras, versión de
+autenticación, fechas de creación y expiración y campos de consumo ligados al
+responsable. No guarda el código en claro. Su estructura impide consumo sin
+responsable o fuera de la vigencia almacenada. La fila actual no sustituye al
+historial de visitas que corresponde a HU-043.
+
+Este bloque elige la variante QR de HU-042. El material se genera con 256 bits
+aleatorios y formato `mitbol:loyalty:v1:<valor opaco>`, separado de las cookies
+de sesión. No contiene nombre, teléfono, correo ni identificador de cuenta;
+tampoco es una URL, el QR público del menú ni un PIN numérico. El contrato
+prepara `qr_payload`, `issued_at`, `expires_at`, `identification_type: qr` y
+`purpose: visit_identification` para que el frontend represente el QR.
+
+El validador de formato comprueba la codificación canónica; por sí solo no
+acredita que el código se haya emitido ni identifica a una persona. El valor se
+oculta en repr y en los mensajes de validación del modelo. El hash usa el
+contenido con su prefijo para mantener un espacio distinto al de las sesiones.
+
+HU-042 todavía está en desarrollo. Faltan la emisión por sesión autenticada y
+la validación protegida, con comprobación de vigencia, sesión y cuenta activas,
+versión de autenticación, renovación y consumo único. Los endpoints deberán
+evitar exponer credenciales en errores o logs. No hay aún una identificación
+utilizable desde HTTP ni una acción que registre visitas.
+
+La migración no crea credenciales ni cambia cuentas, sesiones, pedidos, pagos
+o metas. Los perfiles SQL reconocen 0017 manteniendo los permisos previos;
+lectores públicos, workers y escritor web siguen sin acceso a la tabla nueva.
+Los permisos del flujo autenticado se incorporarán con los endpoints. Las
+pruebas usan exclusivamente cuentas y sesiones sintéticas en bases desechables.
 
 ## 🚀 Inicio rápido (Windows)
 

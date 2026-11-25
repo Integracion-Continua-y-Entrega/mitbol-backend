@@ -48,7 +48,7 @@ BEGIN
         RAISE EXCEPTION 'WRITER_NEON_IDENTITY';
     END IF;
     IF to_regclass('public."Categories"') IS NOT NULL THEN
-        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016')) THEN
+        IF NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017')) THEN
             RAISE EXCEPTION 'WRITER_CATEGORIES_SCHEMA';
         END IF;
     END IF;
@@ -86,11 +86,11 @@ BEGIN
             RAISE EXCEPTION 'WRITER_QUEUE_PERMISSIONS';
         END IF;
         IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
-           (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007','20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016')) THEN
+           (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261114_0007','20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017')) THEN
             RAISE EXCEPTION 'WRITER_QUEUE_SCHEMA';
         END IF;
         -- El puente no consulta la columna y admite el SELECT revisado del delta.
-        IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016'))
+        IF EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num IN ('20261115_0008', '20261119_0009', '20261119_0010', '20261119_0011', '20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017'))
            AND has_column_privilege(writer,'public."Products"','category_id','SELECT') THEN
             policy := jsonb_set(policy,'{Products,SELECT}',(policy->'Products'->'SELECT') || '["category_id"]'::jsonb);
         END IF;
@@ -98,7 +98,7 @@ BEGIN
     IF queue_installed THEN
         SELECT version_num INTO STRICT revision FROM public.alembic_version;
     END IF;
-    IF revision IN ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016') THEN
+    IF revision IN ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017') THEN
         policy := jsonb_set(policy,'{Persons}', '{"SELECT":["person_id","name","phone","created_at","updated_at"],"INSERT":["name","phone","updated_at"],"UPDATE":["name","phone","updated_at"]}'::jsonb);
         policy := jsonb_set(policy,'{PersonalAccounts,INSERT}', '["person_id","email","password_hash","is_active","email_verified_at","last_login_at","updated_at"]'::jsonb);
         policy := policy || '{
@@ -115,34 +115,34 @@ BEGIN
         permitted_sequences := permitted_sequences || ARRAY['Persons_person_id_seq','PersonalAccounts_account_id_seq',
             'OrderDetails_order_detail_id_seq','OrderDetailComplements_order_detail_complement_id_seq'];
     END IF;
-    IF revision IN ('20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016') THEN
+    IF revision IN ('20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017') THEN
         FOREACH operation IN ARRAY ARRAY['SELECT','INSERT','UPDATE'] LOOP
             policy := jsonb_set(policy,ARRAY['Orders',operation],(policy->'Orders'->operation) || '["guest_tracking_token"]'::jsonb);
         END LOOP;
     END IF;
-    IF revision IN ('20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016') THEN
+    IF revision IN ('20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017') THEN
         policy := policy || '{"PasswordResetTokens":{"SELECT":["account_id","token_hash","auth_version","created_at","expires_at"],"INSERT":["account_id","token_hash","auth_version","created_at","expires_at"],"UPDATE":["token_hash","auth_version","created_at","expires_at"],"DELETE":true}}'::jsonb;
     END IF;
-    IF revision IN ('20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016') THEN
+    IF revision IN ('20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017') THEN
         policy := policy || '{"CustomerCoupons":{"SELECT":["customer_coupon_id","account_id","name","description","discount_id","starts_at","expires_at","status","conditions","created_at"]}}'::jsonb;
     END IF;
-    IF revision IN ('20261120_0013','20261121_0014','20261124_0015','20261124_0016') THEN
+    IF revision IN ('20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017') THEN
         policy := policy || '{
           "CommercialDiscountAssignments":{"SELECT":["discount_id","product_id","conditions"]},
           "OrderDiscountSnapshots":{"SELECT":["order_id","calculation"],"INSERT":["order_id","calculation"]}
         }'::jsonb;
     END IF;
-    IF revision IN ('20261121_0014','20261124_0015','20261124_0016') THEN
+    IF revision IN ('20261121_0014','20261124_0015','20261124_0016','20261124_0017') THEN
         policy := policy || '{"OrderStatusHistories":{
           "SELECT":["status_history_id","order_id","previous_status","status","actor_account_id","reason","created_at"],
           "INSERT":["status_history_id","order_id","previous_status","status","actor_account_id","reason"]}}'::jsonb;
     END IF;
-    IF revision IN ('20261124_0015','20261124_0016') THEN
+    IF revision IN ('20261124_0015','20261124_0016','20261124_0017') THEN
         policy := policy || '{"OrderPayments":{
           "SELECT":["payment_id","order_id","amount","method","verified_at","verified_by_account_id"],
           "INSERT":["payment_id","order_id","amount","method","verified_by_account_id"]}}'::jsonb;
     END IF;
-    IF revision = '20261124_0016' THEN
+    IF revision IN ('20261124_0016','20261124_0017') THEN
         policy := policy || '{"LoyaltyGoals":{
           "SELECT":["goal_id","required_visits","level_name","reward_name","reward_description","discount_id","valid_days",
                     "conditions","is_active","version","created_at","updated_at","updated_by_account_id"],
