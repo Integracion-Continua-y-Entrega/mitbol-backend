@@ -492,14 +492,15 @@ def test_loyalty_identification_uses_writer_without_public_or_worker_access(rest
             command.downgrade(config_for(db), "20261120_0013")
 
 
-def test_visit_registration_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database):
+@pytest.mark.parametrize("revision", ["20261125_0018", "20261125_0019"])
+def test_visit_registration_uses_append_only_writer_without_reader_or_worker_access(restricted_backend, compatible_database, revision):
     """El escritor registra QR y visita en conjunto; no puede editar ni borrar la evidencia."""
     from datetime import datetime, timezone
     from app.services.visit_calendar_service import visit_day
 
     b = restricted_backend
     with b.roles.owner.begin() as db:
-        command.upgrade(config_for(db), "20261125_0018")
+        command.upgrade(config_for(db), revision)
     execute_script(b.roles.owner, approved(DELTA))
     try:
         execute_script(b.roles.writer, VERIFY.read_text(encoding="utf-8"))
@@ -528,7 +529,14 @@ def test_visit_registration_uses_append_only_writer_without_reader_or_worker_acc
             denied(b.roles.writer, statement)
         for engine in (b.roles.writer, *compatible_database.workers.values()):
             with engine.connect() as db:
-                assert validate_bridge_schema(db) == "20261125_0018"
+                assert validate_bridge_schema(db) == revision
+        if revision == "20261125_0019":
+            for engine in (b.roles.writer, b.roles.reader, *compatible_database.workers.values()):
+                with engine.connect() as db:
+                    assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyRewards"',
+                        'SELECT,INSERT,UPDATE,REFERENCES'), has_table_privilege(current_user, 'public."LoyaltyRewards"',
+                        'DELETE,TRUNCATE,TRIGGER')""").one() == (False, False)
+                denied(engine, 'SELECT * FROM "LoyaltyRewards"')
         for engine in (b.roles.reader, *compatible_database.workers.values()):
             with engine.connect() as db:
                 assert db.exec_driver_sql("""SELECT has_any_column_privilege(current_user, 'public."LoyaltyVisits"',

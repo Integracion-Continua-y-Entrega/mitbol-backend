@@ -26,7 +26,7 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM public.alembic_version) <> 1 OR NOT EXISTS
        (SELECT 1 FROM public.alembic_version WHERE version_num IN
-        ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018')) THEN
+        ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018','20261125_0019')) THEN
         RAISE EXCEPTION 'RECENT_WRONG_SCHEMA';
     END IF;
     SELECT oid INTO writer FROM pg_roles WHERE rolname='mitbol_admin_writer'
@@ -41,7 +41,7 @@ DO $recent$
 DECLARE
     revision text := (SELECT version_num FROM public.alembic_version);
 BEGIN
-    IF revision IN ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018') THEN
+    IF revision IN ('20261119_0009','20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018','20261125_0019') THEN
         GRANT SELECT (phone,created_at,updated_at), INSERT (name,phone,updated_at), UPDATE (name,phone,updated_at)
             ON public."Persons" TO mitbol_admin_writer;
         GRANT INSERT (person_id,email,password_hash,is_active,email_verified_at,last_login_at,updated_at)
@@ -74,37 +74,37 @@ BEGIN
               INSERT (order_detail_id,product_complement_id,product_modifier_id,position,name_snapshot,unit_price)
             ON public."OrderDetailComplements" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018') THEN
+    IF revision IN ('20261119_0010','20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018','20261125_0019') THEN
         GRANT SELECT (guest_tracking_token), INSERT (guest_tracking_token), UPDATE (guest_tracking_token)
             ON public."Orders" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018') THEN
+    IF revision IN ('20261119_0011','20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018','20261125_0019') THEN
         GRANT SELECT (account_id,token_hash,auth_version,created_at,expires_at),
               INSERT (account_id,token_hash,auth_version,created_at,expires_at),
               UPDATE (token_hash,auth_version,created_at,expires_at), DELETE
             ON public."PasswordResetTokens" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018') THEN
+    IF revision IN ('20261119_0012','20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018','20261125_0019') THEN
         GRANT SELECT (customer_coupon_id,account_id,name,description,discount_id,starts_at,expires_at,status,conditions,created_at)
             ON public."CustomerCoupons" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018') THEN
+    IF revision IN ('20261120_0013','20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018','20261125_0019') THEN
         GRANT SELECT (discount_id,product_id,conditions)
             ON public."CommercialDiscountAssignments" TO mitbol_admin_writer;
         GRANT SELECT (order_id,calculation), INSERT (order_id,calculation)
             ON public."OrderDiscountSnapshots" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018') THEN
+    IF revision IN ('20261121_0014','20261124_0015','20261124_0016','20261124_0017','20261125_0018','20261125_0019') THEN
         GRANT SELECT (status_history_id,order_id,previous_status,status,actor_account_id,reason,created_at),
               INSERT (status_history_id,order_id,previous_status,status,actor_account_id,reason)
             ON public."OrderStatusHistories" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261124_0015','20261124_0016','20261124_0017','20261125_0018') THEN
+    IF revision IN ('20261124_0015','20261124_0016','20261124_0017','20261125_0018','20261125_0019') THEN
         GRANT SELECT (payment_id,order_id,amount,method,verified_at,verified_by_account_id),
               INSERT (payment_id,order_id,amount,method,verified_by_account_id)
             ON public."OrderPayments" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261124_0016','20261124_0017','20261125_0018') THEN
+    IF revision IN ('20261124_0016','20261124_0017','20261125_0018','20261125_0019') THEN
         GRANT SELECT (goal_id,required_visits,level_name,reward_name,reward_description,discount_id,valid_days,
                       conditions,is_active,version,created_at,updated_at,updated_by_account_id),
               INSERT (goal_id,required_visits,level_name,reward_name,reward_description,discount_id,valid_days,
@@ -113,13 +113,13 @@ BEGIN
                       conditions,is_active,version,updated_at,updated_by_account_id)
             ON public."LoyaltyGoals" TO mitbol_admin_writer;
     END IF;
-    IF revision IN ('20261124_0017','20261125_0018') THEN
+    IF revision IN ('20261124_0017','20261125_0018','20261125_0019') THEN
         GRANT SELECT (account_id,token_hash,session_id,auth_version,created_at,expires_at,consumed_at,consumed_by_account_id),
               INSERT (account_id,token_hash,session_id,auth_version,created_at,expires_at),
               UPDATE (token_hash,session_id,auth_version,created_at,expires_at,consumed_at,consumed_by_account_id)
             ON public."LoyaltyIdentifications" TO mitbol_admin_writer;
     END IF;
-    IF revision = '20261125_0018' THEN
+    IF revision IN ('20261125_0018','20261125_0019') THEN
         GRANT SELECT (visit_id,account_id,visited_on,registered_at,restaurant_timezone,registered_by_account_id,identification_hash),
               INSERT (visit_id,account_id,visited_on,registered_at,restaurant_timezone,registered_by_account_id,identification_hash)
             ON public."LoyaltyVisits" TO mitbol_admin_writer;

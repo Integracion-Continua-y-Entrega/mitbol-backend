@@ -27,7 +27,7 @@ def test_history_revision_is_additive_offline_and_has_no_external_changes():
     config = config_for(output=output)
     command.upgrade(config,f"{PREVIOUS}:{REVISION}",sql=True)
     sql = output.getvalue()
-    assert ScriptDirectory.from_config(config).get_heads() == [REVISION]
+    assert ScriptDirectory.from_config(config).get_heads() == ["20261125_0019"]
     assert ScriptDirectory.from_config(config).get_revision(REVISION).down_revision == PREVIOUS
     assert sql.count("CREATE TABLE") == 1 and 'CREATE TABLE "OrderStatusHistories"' in sql
     assert not any(value in sql for value in ("ALTER TABLE","CREATE ROLE","GRANT ",'UPDATE "Orders"','INSERT INTO "Orders"'))

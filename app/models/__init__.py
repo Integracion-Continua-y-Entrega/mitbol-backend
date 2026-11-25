@@ -51,6 +51,7 @@ from app.models.order_payment import OrderPaymentBase, OrderPayment
 from app.models.loyalty_goal import LoyaltyBase, LoyaltyGoal
 from app.models.loyalty_identification import LoyaltyIdentificationBase, LoyaltyIdentification
 from app.models.loyalty_visit import LoyaltyVisitBase, LoyaltyVisit
+from app.models.loyalty_reward import LoyaltyRewardBase, LoyaltyReward
 
 __all__ = [
     "Base", "catalog_metadata", "runtime_catalog_metadata", "pre_categories_metadata",
@@ -69,4 +70,5 @@ __all__ = [
     "LoyaltyBase", "LoyaltyGoal",
     "LoyaltyIdentificationBase", "LoyaltyIdentification",
     "LoyaltyVisitBase", "LoyaltyVisit",
+    "LoyaltyRewardBase", "LoyaltyReward",
 ]

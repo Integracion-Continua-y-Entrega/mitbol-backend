@@ -62,7 +62,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | HU-046 · Configurar niveles y recompensas | Backend implementado: administración por Admin, referencias locales verificadas, control de versiones y desactivación; sin generación de recompensas. |
 | HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. Consumo único interno preparado para HU-043. |
 | HU-043 · Registrar visita presencial | Backend implementado: registro protegido por personal, consumo transaccional del QR y una visita por cuenta/día local. |
-| HU-045 · Acumular visitas y otorgar recompensas | En desarrollo: evaluación de metas alcanzadas implementada; pendientes persistencia de concesiones y emisión transaccional. |
+| HU-045 · Acumular visitas y otorgar recompensas | En desarrollo: evaluación y persistencia de concesiones implementadas; pendiente emisión transaccional junto con la visita. |
 | HU-047 · Consultar progreso de lealtad | Pendiente. |
 | HU-049 · Consultar billetera digital | Existe consulta de cupones; falta integrar las recompensas de fidelización y la presentación de estados de billetera. |
 
@@ -542,7 +542,7 @@ Lectores públicos y workers continúan sin acceso. La migración no crea códig
 ni se ejecutan esos scripts automáticamente. Las pruebas usan exclusivamente
 cuentas y sesiones sintéticas en bases desechables.
 
-## HU-045: evaluación de metas no recurrentes
+## HU-045: metas no recurrentes y evidencia de concesión
 
 El primer bloque incorpora `eligible_goals`, una evaluación sin escrituras ni
 endpoints adicionales. Recibe el total de visitas, las metas configuradas y las
@@ -554,9 +554,22 @@ Una meta activada después de alcanzar su umbral puede evaluarse en la siguiente
 visita válida. La evaluación no genera beneficios retroactivamente al editar
 configuración, ni admite dos versiones de la misma meta en una evaluación.
 
-Todavía no se crean cupones: el siguiente bloque incorporará evidencia durable
-de concesión, unicidad por cuenta y meta y comprobación de referencias comerciales
-vigentes. Esa escritura deberá compartir la transacción de registro de visita;
+La migración aditiva `20261125_0019` incorpora `LoyaltyRewards`: vincula cuenta,
+meta, visita y cupón y guarda la versión, el umbral, el total acumulado, el instante
+y una copia de la configuración al concederla. Una restricción impide repetir
+la combinación cuenta/meta; otra impide compartir un cupón entre concesiones.
+Las referencias no pueden borrarse mientras exista la evidencia. Editar la meta
+no modifica la copia guardada y su nueva versión no elimina la unicidad.
+
+Esta migración crea una tabla vacía: no concede recompensas retroactivamente ni
+modifica visitas o cupones existentes. Los perfiles SQL admiten la revisión 0019
+con sus permisos anteriores, sin acceso a la nueva tabla en este bloque. Las
+pruebas de migración y restricciones usan PostgreSQL temporal con datos sintéticos;
+no se aplicó la migración a una base real.
+
+Todavía no se crean cupones automáticamente: el siguiente bloque conectará la
+emisión y verificará las referencias comerciales vigentes. Esa escritura deberá
+compartir la transacción de registro de visita;
 la selección en memoria por sí sola no garantiza exclusión entre peticiones.
 No se implementan reservas ni canjes en esta historia.
 
