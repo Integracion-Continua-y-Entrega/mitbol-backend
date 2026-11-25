@@ -63,7 +63,7 @@ se implementarán después del flujo de pedidos, en este orden:
 | HU-042 · Identificación QR/PIN | Backend implementado para la variante QR: emisión propia, vigencia ligada a sesión, renovación y validación por personal. Consumo único interno preparado para HU-043. |
 | HU-043 · Registrar visita presencial | Backend implementado: registro protegido por personal, consumo transaccional del QR y una visita por cuenta/día local. |
 | HU-045 · Acumular visitas y otorgar recompensas | Backend implementado: total derivado de visitas, metas no recurrentes y emisión de cupones en la misma transacción que la visita. |
-| HU-047 · Consultar progreso de lealtad | Pendiente. |
+| HU-047 · Consultar progreso de lealtad | En desarrollo: servicio de consulta coherente por cuenta implementado; pendiente endpoint autenticado. |
 | HU-049 · Consultar billetera digital | Existe consulta de cupones; falta integrar las recompensas de fidelización y la presentación de estados de billetera. |
 
 Este bloque se limita a configuración, visitas, generación y consulta de
@@ -594,6 +594,36 @@ Las pruebas usan PostgreSQL temporal; no se aplicaron migraciones ni ACL a una
 base real. La consulta propia de cupones existente permite ver los emitidos;
 HU-047 y HU-049 completarán el progreso y la billetera. No se implementan reservas
 ni canjes en esta historia.
+
+## HU-047: cálculo de progreso personal
+
+El servicio `loyalty_progress_service.get_progress` recibe la identidad que el
+futuro endpoint obtendrá de la sesión. Consulta en una misma instantánea SQL
+el total de visitas de esa cuenta, las metas activas y sus concesiones. No
+mantiene un contador separado ni modifica visitas, metas o cupones al consultar.
+
+Su contrato contiene `total_visits`, `current_level`, `next_goal` y `pending_goals`.
+El nivel corresponde al umbral más alto alcanzado entre las metas activas de la
+configuración actual. Antes del primer umbral o sin metas activas es `null`; no
+se inventa un nivel inicial. Cambiar o desactivar metas puede cambiar el nivel
+mostrado, pero conserva las visitas y las concesiones históricas.
+
+`next_goal` es la primera meta activa aún no alcanzada ni concedida, con las
+visitas faltantes, nombre del beneficio, descripción, vigencia y condiciones.
+Vale `null` cuando no existe otra meta de ese tipo. Una meta concedida no vuelve
+a proponerse por editar su versión o aumentar su umbral.
+
+`pending_goals` distingue metas activas alcanzadas sin concesión, por ejemplo
+tras activar una meta con un umbral ya superado. Tienen cero visitas faltantes,
+pero todavía no representan cupones disponibles: HU-045 las evalúa al registrar
+la siguiente visita válida y vuelve a comprobar las referencias comerciales.
+La consulta no emite beneficios ni garantiza disponibilidad futura del descuento.
+
+Este bloque requiere 0019, sin añadir migraciones ni permisos SQL. Configuración
+almacenada inválida o tablas faltantes impiden calcular el progreso y producen
+un error de servicio 503. Las pruebas usan cuentas sintéticas en PostgreSQL
+temporal. La ruta autenticada y sus pruebas de acceso se incorporarán en el
+siguiente bloque; todavía no hay un nuevo endpoint público.
 
 ## HU-043: registro de visitas presenciales
 
